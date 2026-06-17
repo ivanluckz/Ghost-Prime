@@ -1,0 +1,32 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Ghost-Prime Bridge</title>
+    <style>
+      body { font: 14px system-ui, sans-serif; background: #0b0f1a; color: #e9eefc; padding: 24px; max-width: 420px; }
+      h1 { font-size: 16px; letter-spacing: 0.08em; }
+      label { display: block; margin: 14px 0 4px; color: #9fb0d6; }
+      input { width: 100%; padding: 8px 10px; border-radius: 8px; border: 1px solid #2a3550; background: #070b16; color: #e9eefc; }
+      button { margin-top: 18px; padding: 9px 16px; border-radius: 8px; border: 1px solid #00e6ff66; background: #00e6ff22; color: #e9eefc; cursor: pointer; }
+      .ok { color: #2ee6a6; margin-left: 10px; }
+      .hint { color: #61719a; font-size: 12px; margin-top: 16px; line-height: 1.5; }
+    </style>
+  </head>
+  <body>
+    <h1>GHOST-PRIME BRIDGE</h1>
+    <label for="host">Bridge host</label>
+    <input id="host" type="text" placeholder="127.0.0.1 (Crostini Chrome) or penguin.linux.test (host Chrome)" />
+    <label for="port">Bridge port</label>
+    <input id="port" type="number" />
+    <label for="token">Shared token</label>
+    <input id="token" type="text" />
+    <div><button id="save">Save</button><span id="status" class="ok"></span></div>
+    <p class="hint">
+      These must match <code>GHOST_BRIDGE_PORT</code> and <code>GHOST_BRIDGE_TOKEN</code> in the app's
+      <code>.env</code>. Defaults are 8731 / ghost-local. Open the Ghost-Prime app, then this Chrome will
+      connect automatically.
+    </p>
+  </body>
+  <script src="options.js"></script>
+</html>

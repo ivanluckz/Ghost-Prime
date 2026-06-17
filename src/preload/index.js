@@ -1,0 +1,90 @@
+import { contextBridge, ipcRenderer } from 'electron'
+
+let reqCounter = 0
+
+// The only bridge between renderer and main. No node, no remote — typed wrappers only.
+contextBridge.exposeInMainWorld('ghost', {
+  platform: {
+    isLinux: process.platform === 'linux',
+    nativeFrame: process.platform === 'linux' && process.env.GHOST_NATIVE_FRAME === '1'
+  },
+  sendMessage(messages, mode, settings) {
+    const requestId = `req_${Date.now()}_${reqCounter++}`
+    // Driven via events (chat:delta/done/error); ignore the invoke promise.
+    ipcRenderer.invoke('chat:send', { requestId, messages, mode, settings }).catch(() => {})
+    return requestId
+  },
+  abort(requestId) {
+    ipcRenderer.send('chat:abort', { requestId })
+  },
+  onDelta(cb) {
+    const listener = (_e, payload) => cb(payload)
+    ipcRenderer.on('chat:delta', listener)
+    return () => ipcRenderer.removeListener('chat:delta', listener)
+  },
+  onTool(cb) {
+    const listener = (_e, payload) => cb(payload)
+    ipcRenderer.on('chat:tool', listener)
+    return () => ipcRenderer.removeListener('chat:tool', listener)
+  },
+  onDone(cb) {
+    const listener = (_e, payload) => cb(payload)
+    ipcRenderer.on('chat:done', listener)
+    return () => ipcRenderer.removeListener('chat:done', listener)
+  },
+  onError(cb) {
+    const listener = (_e, payload) => cb(payload)
+    ipcRenderer.on('chat:error', listener)
+    return () => ipcRenderer.removeListener('chat:error', listener)
+  },
+  recentSessions() {
+    return ipcRenderer.invoke('db:recent-sessions')
+  },
+  sessionMessages(sessionId) {
+    return ipcRenderer.invoke('db:session-messages', sessionId)
+  },
+  newSession() {
+    return ipcRenderer.invoke('db:new-session')
+  },
+  setActiveSession(sessionId) {
+    return ipcRenderer.invoke('db:set-active-session', sessionId)
+  },
+  activeSession() {
+    return ipcRenderer.invoke('db:active-session')
+  },
+  deleteSession(sessionId) {
+    return ipcRenderer.invoke('db:delete-session', sessionId)
+  },
+  onFocusInput(cb) {
+    const listener = () => cb()
+    ipcRenderer.on('focus-input', listener)
+    return () => ipcRenderer.removeListener('focus-input', listener)
+  },
+  onExternalTask(cb) {
+    const listener = (_e, payload) => cb(payload)
+    ipcRenderer.on('external-task', listener)
+    return () => ipcRenderer.removeListener('external-task', listener)
+  },
+  windowControls: {
+    minimize: () => ipcRenderer.send('window:minimize'),
+    maximize: () => ipcRenderer.send('window:maximize'),
+    close: () => ipcRenderer.send('window:close')
+  },
+  voice: {
+    listenStart() {
+      ipcRenderer.send('voice:listen-start')
+    },
+    listenStop() {
+      return ipcRenderer.invoke('voice:listen-stop')
+    },
+    ttsAvailable() {
+      return ipcRenderer.invoke('voice:tts-available')
+    },
+    speak(text) {
+      ipcRenderer.send('voice:speak', { text })
+    },
+    stopSpeaking() {
+      ipcRenderer.send('voice:stop-speaking')
+    }
+  }
+})

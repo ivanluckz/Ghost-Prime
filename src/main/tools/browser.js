@@ -1,0 +1,439 @@
+import { homedir } from 'node:os'
+import { join } from 'node:path'
+import { existsSync } from 'node:fs'
+import { spawn, spawnSync } from 'node:child_process'
+import { chromium } from 'playwright'
+import * as bridge from './browser-bridge.js'
+
+// Backend selector. 'auto' (default) uses the Chrome extension whenever it's connected — that
+// drives your REAL Chrome via a local bridge, with no profile and no single-instance lock — and
+// otherwise falls back to Playwright. 'extension' / 'playwright' force one.
+const BROWSER_BACKEND = process.env.GHOST_BROWSER_BACKEND || 'auto'
+// When the extension backend is wanted but no Chrome is connected, open Chrome so the (already
+// installed) extension can attach. Set GHOST_BROWSER_AUTOLAUNCH=false to disable.
+const AUTOLAUNCH = process.env.GHOST_BROWSER_AUTOLAUNCH !== 'false'
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
+
+function commandExists(cmd) {
+  try {
+    return spawnSync('sh', ['-c', `command -v ${cmd}`], { stdio: ['ignore', 'pipe', 'ignore'] }).status === 0
+  } catch {
+    return false
+  }
+}
+
+function findChromeBinary() {
+  const candidates = [process.env.GHOST_CHROME_BIN, 'google-chrome', 'google-chrome-stable', 'chromium', 'chromium-browser'].filter(Boolean)
+  return candidates.find((c) => (c.startsWith('/') ? existsSync(c) : commandExists(c))) || null
+}
+
+let launching = null
+// Open the user's real Chrome (detached) so the extension loads and connects to the bridge.
+function launchRealChrome() {
+  if (launching) return launching
+  const bin = findChromeBinary()
+  if (!bin) return Promise.resolve(false)
+  launching = new Promise((resolve) => {
+    try {
+      const proc = spawn(bin, [], { detached: true, stdio: 'ignore' })
+      proc.on('error', () => resolve(false))
+      proc.unref()
+      setTimeout(() => resolve(true), 800)
+    } catch {
+      resolve(false)
+    }
+  })
+  launching.finally(() => setTimeout(() => (launching = null), 8000)) // allow a relaunch if closed again
+  return launching
+}
+
+// Decide the backend for this action. In extension/auto mode, if nothing's connected and
+// auto-launch is on, open Chrome and wait (~12s) for the extension to come online.
+async function ensureBrowserBackend() {
+  if (BROWSER_BACKEND === 'playwright') return 'playwright'
+  if (bridge.bridgeConnected()) return 'extension'
+  let launched = false
+  if (AUTOLAUNCH) {
+    launched = await launchRealChrome()
+    if (launched) {
+      for (let i = 0; i < 24 && !bridge.bridgeConnected(); i++) await sleep(500)
+      if (bridge.bridgeConnected()) return 'extension'
+    }
+  }
+  // Forced extension, or we opened Chrome but the extension didn't attach: don't silently fall to
+  // Playwright on the real profile (it would hit Chrome's single-instance lock) — guide instead.
+  if (BROWSER_BACKEND === 'extension' || launched) {
+    throw new Error(
+      (launched
+        ? 'Opened Chrome, but the Ghost-Prime extension isn’t connected, so I can’t drive it. '
+        : 'The Ghost-Prime browser extension isn’t connected. ') +
+        'Load it in Chrome (chrome://extensions → Load unpacked → the extension/ folder) and try again, ' +
+        'or set GHOST_BROWSER_BACKEND=playwright to use the built-in browser instead.'
+    )
+  }
+  return 'playwright' // Chrome appears closed and there's no extension — let Playwright launch its own
+}
+
+// Ghost-Prime drives your REAL Google Chrome — the Linux app at /usr/bin/google-chrome,
+// using your actual default profile (~/.config/google-chrome) — so it's already logged into
+// the sites you use. Headed by default so you can watch it click and type.
+//
+// This is the Chrome installed inside the Crostini Linux container (your Chrome OS host
+// browser lives outside the container and can't be driven from here).
+//
+// Chrome allows only ONE instance per profile, so close Chrome before letting Ghost-Prime
+// use it — otherwise the launch is refused (you'll get a clear message).
+//
+// Env overrides:
+//   GHOST_BROWSER_CHANNEL=chromium    use Playwright's bundled Chromium instead of real Chrome
+//   GHOST_BROWSER_PROFILE=isolated    use a separate Ghost-Prime profile (log in once; never
+//                                     conflicts with your open Chrome) — or pass a custom path
+//   GHOST_BROWSER_HEADLESS=true       no visible window (e.g. tests)
+//   GHOST_BROWSER_NO_SANDBOX=true     pass --no-sandbox (only if Chrome refuses to start; it
+//                                     makes Chrome show an "unsupported flag" warning bar)
+const CHANNEL = process.env.GHOST_BROWSER_CHANNEL ?? 'chrome' // '' falls back to bundled Chromium
+const HEADLESS = process.env.GHOST_BROWSER_HEADLESS === 'true'
+// Chrome on Crostini runs fine with its sandbox (your normal Chrome does). Passing
+// --no-sandbox triggers Chrome's yellow "security will suffer" banner, so leave it OFF.
+const NO_SANDBOX = process.env.GHOST_BROWSER_NO_SANDBOX === 'true'
+const DEFAULT_CHROME_PROFILE = join(homedir(), '.config', 'google-chrome')
+const ISOLATED_PROFILE = join(homedir(), '.config', 'ghost-prime', 'browser-profile')
+
+function resolveProfileDir() {
+  const p = process.env.GHOST_BROWSER_PROFILE
+  if (!p || p === 'default' || p === 'chrome') return DEFAULT_CHROME_PROFILE // your real Chrome profile
+  if (p === 'isolated' || p === 'ghost') return ISOLATED_PROFILE
+  return p // an explicit user-data-dir path
+}
+
+// Make launch failures actionable instead of a raw Playwright stack.
+function enrichLaunchError(err, userDataDir) {
+  const msg = err?.message || String(err)
+  if (/ProcessSingleton|SingletonLock|already (running|in use)|Browser closed unexpectedly|Target.*has been closed|Timed out.*(WS|endpoint)|profile.*in use|cannot create.*lock/i.test(msg)) {
+    return new Error(
+      `Couldn't open Chrome with your profile (${userDataDir}) — it looks like Chrome is already ` +
+        'running. Chrome allows only one instance per profile: close all Chrome windows and try ' +
+        'again, or set GHOST_BROWSER_PROFILE=isolated to use a separate Ghost-Prime profile.'
+    )
+  }
+  if (/No such file|executable doesn'?t exist|channel .* not found|Chromium distribution|spawn .* ENOENT/i.test(msg)) {
+    return new Error(
+      `Couldn't launch Google Chrome (channel="${CHANNEL}"). Is it installed at /usr/bin/google-chrome? ` +
+        'Set GHOST_BROWSER_CHANNEL=chromium to use the bundled browser instead.'
+    )
+  }
+  return err
+}
+
+let context = null
+let page = null
+
+async function ensurePage() {
+  if (!context) {
+    const userDataDir = resolveProfileDir()
+    const opts = {
+      headless: HEADLESS,
+      viewport: null, // use the real window size
+      args: NO_SANDBOX ? ['--no-sandbox', '--disable-setuid-sandbox'] : []
+    }
+    if (CHANNEL) opts.channel = CHANNEL // 'chrome' = real Google Chrome; '' = bundled Chromium
+    try {
+      context = await chromium.launchPersistentContext(userDataDir, opts)
+    } catch (err) {
+      throw enrichLaunchError(err, userDataDir)
+    }
+    page = context.pages()[0] || (await context.newPage())
+  }
+  if (!page || page.isClosed()) page = await context.newPage()
+  return page
+}
+
+export async function browserNavigate({ url }) {
+  if ((await ensureBrowserBackend()) === 'extension') return bridge.sendCommand('navigate', { url }, 35000)
+  const p = await ensurePage()
+  await p.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 })
+  return { url: p.url(), title: await p.title() }
+}
+
+export async function browserScreenshot() {
+  if ((await ensureBrowserBackend()) === 'extension') return bridge.sendCommand('screenshot', {})
+  const p = await ensurePage()
+  const buf = await p.screenshot({ type: 'png', fullPage: false })
+  return { base64: buf.toString('base64'), url: p.url() }
+}
+
+// Playwright's CSS engine parses STANDARD CSS only. jQuery-style pseudo-classes like
+// :contains() are invalid and throw. Callers should click by visible text (the `text`
+// option) — but if a stray :contains("X") slips through, repair it to Playwright's own
+// :has-text("X") so the click still works instead of erroring out.
+function normalizeSelector(selector) {
+  if (typeof selector !== 'string' || !selector.trim()) {
+    throw new Error(
+      'No selector provided. Pass a standard CSS selector, or use the "text" option to click an element by its visible text.'
+    )
+  }
+  return selector.replace(/:contains\(\s*(['"]?)([\s\S]*?)\1\s*\)/gi, ':has-text("$2")')
+}
+
+// A locator (on `root`, the page or a frame) restricted to elements Playwright counts as
+// visible — so we never commit to a hidden / zero-size duplicate that would just time out.
+function vis(root) {
+  return root.locator(':visible')
+}
+
+// Find the best clickable element for some visible text, searching the main page AND every
+// iframe (chat widgets, OAuth popups, embeds render in frames — page.locator never crosses
+// into them). Prefers a real accessible control, then any visible element with the text.
+// Returns a single-element locator, or null if nothing visible matches.
+async function findClickable(page, text) {
+  for (const frame of page.frames()) {
+    const candidates = [
+      frame.getByRole('button', { name: text }),
+      frame.getByRole('link', { name: text }),
+      frame.getByRole('menuitem', { name: text }),
+      frame.getByRole('tab', { name: text }),
+      frame.getByRole('option', { name: text }),
+      frame.getByRole('checkbox', { name: text }),
+      frame.getByText(text, { exact: false })
+    ]
+    for (const loc of candidates) {
+      const hit = loc.and(vis(frame)).first()
+      if (await hit.count().catch(() => 0)) return hit
+    }
+  }
+  return null
+}
+
+// List the page's visible clickable elements (across frames), so a failed click can tell the
+// agent exactly what IS clickable instead of dead-ending on a bare timeout.
+async function listClickables(page, limit = 25) {
+  const labels = new Set()
+  for (const frame of page.frames()) {
+    try {
+      const found = await frame.evaluate((max) => {
+        const out = []
+        const sel =
+          'button, a[href], [role="button"], [role="link"], [role="menuitem"], [role="tab"], [role="option"], input[type="submit"], input[type="button"], summary'
+        for (const el of document.querySelectorAll(sel)) {
+          const r = el.getBoundingClientRect()
+          if (r.width < 1 || r.height < 1) continue
+          const s = getComputedStyle(el)
+          if (s.visibility === 'hidden' || s.display === 'none') continue
+          const label = (el.getAttribute('aria-label') || el.innerText || el.value || el.title || '')
+            .trim()
+            .replace(/\s+/g, ' ')
+          if (label) out.push(label.slice(0, 60))
+          if (out.length >= max) break
+        }
+        return out
+      }, limit)
+      for (const l of found) labels.add(l)
+    } catch {
+      // cross-origin / detached frame — skip
+    }
+    if (labels.size >= limit) break
+  }
+  return [...labels].slice(0, limit)
+}
+
+// Robust "click by visible text". Scrolls into view, and if a transient overlay intercepts
+// the click, retries once with force. Throws (to be enriched with a clickable listing) when
+// the text matches nothing visible.
+async function clickByText(page, text, timeout) {
+  const loc = await findClickable(page, text)
+  if (!loc) {
+    const e = new Error(`no visible clickable element matched the text "${text}"`)
+    e.ghostNotFound = true
+    throw e
+  }
+  await loc.scrollIntoViewIfNeeded({ timeout: 4000 }).catch(() => {})
+  try {
+    await loc.click({ timeout })
+  } catch (err) {
+    if (/intercept|not stable|obscur/i.test(err?.message || '')) {
+      await loc.click({ timeout: 4000, force: true }) // overlay was in the way — push through
+    } else {
+      throw err
+    }
+  }
+}
+
+// Turn Playwright's cryptic selector/timeout errors into guidance the agent can act on,
+// including the page's currently-clickable elements so it can self-correct in one step.
+async function clarifyClickError(page, err, { selector, text }) {
+  const msg = err?.message || String(err)
+  if (/unknown engine|parsing css selector|unexpected token|not a valid selector|malformed/i.test(msg)) {
+    return new Error(
+      `Invalid selector ${JSON.stringify(selector)}. Do NOT use jQuery selectors (:contains, :visible, :eq, :first). ` +
+        'To click by visible text, call browser_click with { text: "Log In" }. ' +
+        'Otherwise use a standard CSS selector: #id, .class, or [attribute] such as [aria-label="Log In"] or [data-action="login"].'
+    )
+  }
+  if (err?.ghostNotFound || /timeout|not found|no element|not visible|intercept|waiting for/i.test(msg)) {
+    const what = text ? `text "${text}"` : `selector ${JSON.stringify(selector)}`
+    const clickables = await listClickables(page).catch(() => [])
+    const list = clickables.length
+      ? ` The visible, clickable elements right now are: ${clickables.map((c) => `"${c}"`).join(', ')}.`
+      : ''
+    return new Error(
+      `Couldn't click ${what} — it wasn't found or wasn't clickable in time.${list} ` +
+        'Retry browser_click with the EXACT visible text of the element you want (one from that list), ' +
+        'or call browser_get_text / browser_screenshot to inspect the page first.'
+    )
+  }
+  return err
+}
+
+export async function browserClick({ selector, text } = {}) {
+  if ((await ensureBrowserBackend()) === 'extension') return bridge.sendCommand('click', { selector, text })
+  const p = await ensurePage()
+  try {
+    if (text != null && String(text).trim() !== '') {
+      await clickByText(p, String(text), 12000)
+    } else {
+      const sel = normalizeSelector(selector)
+      // Prefer a visible match; fall back to any match so explicit selectors still work.
+      let loc = p.locator(sel).and(p.locator(':visible')).first()
+      if (!(await loc.count().catch(() => 0))) loc = p.locator(sel).first()
+      await loc.scrollIntoViewIfNeeded({ timeout: 4000 }).catch(() => {})
+      await loc.click({ timeout: 12000 })
+    }
+  } catch (err) {
+    throw await clarifyClickError(p, err, { selector, text })
+  }
+  return { ok: true, url: p.url() }
+}
+
+export async function browserFill({ selector, value, label } = {}) {
+  if ((await ensureBrowserBackend()) === 'extension') return bridge.sendCommand('fill', { selector, label, value })
+  const p = await ensurePage()
+  try {
+    let target
+    if (label != null && String(label).trim() !== '') {
+      target = p.getByLabel(String(label)).and(p.locator(':visible')).first()
+      if (!(await target.count().catch(() => 0))) {
+        // No matching <label> — fall back to placeholder / accessible textbox name.
+        target = p.getByPlaceholder(String(label)).or(p.getByRole('textbox', { name: String(label) })).first()
+      }
+    } else {
+      const sel = normalizeSelector(selector)
+      target = p.locator(sel).and(p.locator(':visible')).first()
+      if (!(await target.count().catch(() => 0))) target = p.locator(sel).first()
+    }
+    await target.scrollIntoViewIfNeeded({ timeout: 4000 }).catch(() => {})
+    await target.fill(value ?? '', { timeout: 12000 })
+  } catch (err) {
+    throw await clarifyClickError(p, err, { selector, text: label })
+  }
+  return { ok: true }
+}
+
+export async function browserGetText() {
+  if ((await ensureBrowserBackend()) === 'extension') return bridge.sendCommand('getText', {})
+  const p = await ensurePage()
+  const text = await p.evaluate(() => document.body?.innerText || '')
+  return { url: p.url(), title: await p.title(), text: text.slice(0, 20000) }
+}
+
+// Open several URLs at once and return each page's readable text — the fast path for multi-page
+// research. Pages load in parallel (separate tabs in your real Chrome, or separate Playwright
+// pages in the fallback), so N pages cost roughly one page's wait instead of N sequential trips.
+export async function browserReadPages({ urls, keepOpen } = {}) {
+  const list = (Array.isArray(urls) ? urls : []).map(String).filter(Boolean).slice(0, 8)
+  if (!list.length) throw new Error('browser_read_pages needs a non-empty "urls" array')
+
+  if ((await ensureBrowserBackend()) === 'extension') {
+    return bridge.sendCommand('readPages', { urls: list, keepOpen: keepOpen !== false }, 60000)
+  }
+
+  // Playwright fallback: open each page concurrently in the persistent context.
+  await ensurePage() // make sure context exists
+  const pages = await Promise.all(
+    list.map(async (url) => {
+      let pg = null
+      try {
+        pg = await context.newPage()
+        await pg.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 })
+        const text = await pg.evaluate(() => document.body?.innerText || '')
+        const out = { url: pg.url(), title: await pg.title(), text: text.slice(0, 12000) }
+        if (keepOpen === false && pg !== page) await pg.close().catch(() => {})
+        return out
+      } catch (e) {
+        if (pg && keepOpen === false && pg !== page) await pg.close().catch(() => {})
+        return { url, title: '', text: '', error: String(e?.message || e) }
+      }
+    })
+  )
+  return { pages }
+}
+
+// Click at a point located from a screenshot (vision-grounded). x,y are fractions of the viewport
+// (0..1, top-left origin) — or raw pixels if > 1. The fix for sites where text/selector fails.
+export async function browserClickAt({ x, y } = {}) {
+  if (x == null || y == null) throw new Error('browser_click_at needs x and y (fractions of the viewport, 0..1)')
+  if ((await ensureBrowserBackend()) === 'extension') return bridge.sendCommand('clickAt', { x: Number(x), y: Number(y) })
+  const p = await ensurePage()
+  const { w, h } = await p.evaluate(() => ({ w: window.innerWidth, h: window.innerHeight }))
+  const px = Number(x) <= 1 ? Number(x) * w : Number(x)
+  const py = Number(y) <= 1 ? Number(y) * h : Number(y)
+  await p.mouse.click(px, py)
+  return { ok: true, url: p.url() }
+}
+
+// Scroll the page (or a specific scrollable element) to reveal off-screen content / load more.
+export async function browserScroll({ direction = 'down', amount, selector } = {}) {
+  if ((await ensureBrowserBackend()) === 'extension') return bridge.sendCommand('scroll', { direction, amount, selector })
+  const p = await ensurePage()
+  const scrollY = await p.evaluate(
+    ({ direction, amount, selector }) => {
+      function largestScrollable() {
+        let best = null
+        let bestArea = 0
+        for (const e of document.querySelectorAll('*')) {
+          if (e.scrollHeight - e.clientHeight > 40) {
+            const r = e.getBoundingClientRect()
+            const area = r.width * r.height
+            if (area > bestArea) {
+              best = e
+              bestArea = area
+            }
+          }
+        }
+        return best
+      }
+      let el = null
+      if (selector) {
+        try {
+          el = document.querySelector(selector)
+        } catch {}
+      }
+      const root = document.scrollingElement || document.documentElement
+      if (!el && root.scrollHeight - root.clientHeight <= 40) el = largestScrollable()
+      const viewH = el ? el.clientHeight : window.innerHeight
+      const step = amount != null ? Number(amount) : Math.round((viewH || 800) * 0.85)
+      if (direction === 'top') {
+        if (el) el.scrollTop = 0
+        else window.scrollTo(0, 0)
+      } else if (direction === 'bottom') {
+        if (el) el.scrollTop = el.scrollHeight
+        else window.scrollTo(0, document.body.scrollHeight)
+      } else {
+        const dy = direction === 'up' ? -step : step
+        if (el) el.scrollBy(0, dy)
+        else window.scrollBy(0, dy)
+      }
+      return el ? el.scrollTop : window.scrollY
+    },
+    { direction, amount, selector }
+  )
+  return { ok: true, scrollY, url: p.url() }
+}
+
+export async function browserClose() {
+  if (context) {
+    await context.close().catch(() => {})
+    context = null
+    page = null
+  }
+  return { ok: true }
+}
