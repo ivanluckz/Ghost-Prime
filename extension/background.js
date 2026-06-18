@@ -93,7 +93,7 @@ async function addToGroup(tabId) {
 }
 
 // Ghost's working tab — created in its group if missing/closed. active=true brings it forward
-// (needed before a screenshot, which captures the visible tab; and for navigate so you can watch).
+// (only when GHOST_BROWSER_FOCUS is on, so you can watch); by default it stays in the background.
 async function ghostTab(active = false) {
   await loadGhostRefs() // the SW may have restarted since the last command
   if (!(await tabExists(ghostTabId))) {
@@ -119,13 +119,17 @@ async function activeTab() {
   return null
 }
 
-// Pick the tab a command runs against. target:'active' → your focused tab; otherwise Ghost's tab.
+// Pick the tab a command runs against. target:'active' → your focused tab; otherwise Ghost's own
+// tab. We DON'T bring the tab to the foreground — every action (navigate, type, click, scroll, even
+// screenshot) runs against the tab in the BACKGROUND, so the bot keeps working while you're on a
+// different tab or in another app. Set GHOST_BROWSER_FOCUS=1 (app side → args.focus) to bring
+// Ghost's tab forward so you can watch it work.
 async function resolveTab(cmd, args) {
   if (args && args.target === 'active') {
     const t = await activeTab()
     if (t) return t
   }
-  return ghostTab(cmd === 'navigate' || cmd === 'screenshot' || cmd === 'pressKey')
+  return ghostTab(!!(args && args.focus))
 }
 
 // ---- Per-site permissions ----
@@ -488,6 +492,25 @@ async function run(cmd, args) {
       return result
     }
     case 'screenshot': {
+      // If the tab is already visible, the cheap path captures it (no debugger banner).
+      if (tab.active) {
+        try {
+          const dataUrl = await chrome.tabs.captureVisibleTab(tab.windowId, { format: 'png' })
+          return { base64: String(dataUrl).split(',')[1] || '', url: tab.url }
+        } catch {}
+      }
+      // Background / occluded / not-focused tab: CDP screenshots it WITHOUT bringing it forward —
+      // this is what lets the bot "see" its tab while you're looking at something else.
+      try {
+        const shot = await withDebugger(tab.id, async (target) => {
+          await cdpSend(target, 'Page.enable').catch(() => {})
+          return cdpSend(target, 'Page.captureScreenshot', { format: 'png', captureBeyondViewport: false })
+        })
+        if (shot && shot.data) return { base64: shot.data, url: tab.url }
+      } catch {}
+      // Last resort (e.g. debugger blocked by policy): bring it forward and capture the visible tab.
+      await chrome.tabs.update(tab.id, { active: true }).catch(() => {})
+      await sleep(150)
       const dataUrl = await chrome.tabs.captureVisibleTab(tab.windowId, { format: 'png' })
       return { base64: String(dataUrl).split(',')[1] || '', url: tab.url }
     }

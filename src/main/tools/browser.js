@@ -18,10 +18,16 @@ export function getActiveTabMode() {
   return ACTIVE_TAB_MODE
 }
 
-// Metadata sent with every extension command: which tab to target + the live per-site policy
-// (checked inside the extension against the real page URL).
+// Metadata sent with every extension command: which tab to target, the live per-site policy
+// (checked inside the extension against the real page URL), and whether to bring Ghost's tab to the
+// foreground while acting. focus defaults OFF so the bot works in the background on an unfocused
+// tab; set GHOST_BROWSER_FOCUS=1 to watch it work.
 function meta() {
-  return { target: ACTIVE_TAB_MODE ? 'active' : 'group', policy: policySnapshot() }
+  return {
+    target: ACTIVE_TAB_MODE ? 'active' : 'group',
+    policy: policySnapshot(),
+    focus: process.env.GHOST_BROWSER_FOCUS === '1'
+  }
 }
 
 // Auto page-context: peek at the tab the user is currently looking at so the agent already "sees"
