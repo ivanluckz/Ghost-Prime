@@ -7,7 +7,10 @@ import {
   setActiveSession,
   getSessionId,
   saveMessage,
-  deleteSession
+  deleteSession,
+  deleteAllSessions,
+  clearAllMemory,
+  allMemories
 } from './memory/db.js'
 import * as voice from './voice/index.js'
 import { getActiveTabMode, setActiveTabMode } from './tools/browser.js'
@@ -67,6 +70,9 @@ export function registerIpc() {
   ipcMain.handle('db:set-active-session', (_event, sessionId) => setActiveSession(sessionId))
   ipcMain.handle('db:active-session', () => getSessionId())
   ipcMain.handle('db:delete-session', (_event, sessionId) => deleteSession(sessionId))
+  ipcMain.handle('db:delete-all-sessions', () => deleteAllSessions())
+  ipcMain.handle('db:memory-count', () => allMemories(100000).length)
+  ipcMain.handle('db:clear-memory', () => clearAllMemory())
 
   // --- Voice ---
   ipcMain.on('voice:listen-start', () => voice.startRecording())

@@ -55,6 +55,15 @@ contextBridge.exposeInMainWorld('ghost', {
   deleteSession(sessionId) {
     return ipcRenderer.invoke('db:delete-session', sessionId)
   },
+  deleteAllSessions() {
+    return ipcRenderer.invoke('db:delete-all-sessions')
+  },
+  memoryCount() {
+    return ipcRenderer.invoke('db:memory-count')
+  },
+  clearMemory() {
+    return ipcRenderer.invoke('db:clear-memory')
+  },
   onFocusInput(cb) {
     const listener = () => cb()
     ipcRenderer.on('focus-input', listener)

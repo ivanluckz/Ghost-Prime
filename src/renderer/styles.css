@@ -1814,6 +1814,42 @@ html.native-frame .sidebar-head {
 .set-warn {
   color: var(--error);
 }
+.set-danger {
+  border-top: 1px solid rgba(255, 90, 110, 0.18);
+  margin-top: 2px;
+}
+.set-danger .set-title {
+  color: #ff8a9a;
+}
+.set-danger-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 4px;
+}
+.set-danger-btn {
+  flex: 1;
+  min-width: 140px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 90, 110, 0.35);
+  background: rgba(255, 70, 90, 0.08);
+  color: #ff9aa7;
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 140ms var(--ease-out);
+}
+.set-danger-btn:hover {
+  background: rgba(255, 70, 90, 0.16);
+  color: #ffb3bd;
+}
+.set-danger-btn.armed {
+  background: var(--error, #ff5a6e);
+  border-color: var(--error, #ff5a6e);
+  color: #fff;
+  box-shadow: 0 0 0 1px rgba(255, 90, 110, 0.5), 0 4px 16px rgba(255, 70, 90, 0.3);
+}
 
 /* ---------- Accessibility ---------- */
 @media (prefers-reduced-motion: reduce) {

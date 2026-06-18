@@ -72,6 +72,18 @@ export function deleteSession(id) {
   return removed > 0
 }
 
+// Wipe ALL chats (every message + session) and start a fresh empty one. Memories are kept —
+// clearing those is a separate, explicit action. Returns the new active session id.
+export function deleteAllSessions() {
+  if (!db) return null
+  db.transaction(() => {
+    db.prepare('DELETE FROM messages').run()
+    db.prepare('DELETE FROM sessions').run()
+  })()
+  currentSessionId = null
+  return startSession()
+}
+
 // --- Messages ------------------------------------------------------------
 export function saveMessage(role, content) {
   if (!db || !currentSessionId || !content) return
@@ -133,4 +145,10 @@ export function allMemories(limit = 200) {
   return db
     .prepare('SELECT id, type, content, importance, created_at FROM memories ORDER BY created_at DESC LIMIT ?')
     .all(limit)
+}
+
+// Forget everything the agent has remembered across sessions. Returns how many facts were removed.
+export function clearAllMemory() {
+  if (!db) return 0
+  return db.prepare('DELETE FROM memories').run().changes
 }

@@ -635,10 +635,19 @@ chrome.runtime.onInstalled.addListener(() => {
   loadCfg().then(loop)
   enableSidePanel()
   try {
-    chrome.contextMenus.create({
-      id: 'ask-ghost',
-      title: 'Ask Ghost about this',
-      contexts: ['selection', 'page', 'link', 'image']
+    chrome.contextMenus.removeAll(() => {
+      chrome.contextMenus.create({
+        id: 'ask-ghost',
+        title: 'Ask Ghost about this',
+        contexts: ['selection', 'page', 'link', 'image']
+      })
+      // A reliable alternate way to open the chat panel (right-click the icon or the page) in case
+      // the toolbar-icon click is finicky.
+      chrome.contextMenus.create({
+        id: 'open-ghost-panel',
+        title: 'Open Ghost-Prime chat panel',
+        contexts: ['action', 'page']
+      })
     })
   } catch {}
 })
@@ -649,6 +658,12 @@ chrome.runtime.onStartup.addListener(() => {
 
 // Right-click → push a task up to the app (it summons the window and runs it).
 chrome.contextMenus?.onClicked.addListener(async (info, tab) => {
+  // The panel-open item is handled here (a menu click is a valid user gesture for sidePanel.open).
+  if (info.menuItemId === 'open-ghost-panel') {
+    const opts = tab && tab.windowId != null ? { windowId: tab.windowId } : { tabId: tab && tab.id }
+    chrome.sidePanel?.open(opts).catch(() => {})
+    return
+  }
   const where = tab && tab.url ? ` (on ${tab.url})` : ''
   let prompt
   if (info.selectionText) prompt = `On the page${where}, the user selected this text:\n\n"${info.selectionText}"\n\nHelp them with it.`

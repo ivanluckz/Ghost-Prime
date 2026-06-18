@@ -216,6 +216,15 @@ export default function Main() {
     setActiveId(id)
   }
 
+  async function clearAllChats() {
+    stopAll()
+    window.ghost.voice?.stopSpeaking()
+    const newId = await window.ghost.deleteAllSessions()
+    setActiveId(newId)
+    setMessages([])
+    refreshSessions()
+  }
+
   async function removeSession(id) {
     if (id === activeId) stopAll()
     setSessions((prev) => prev.filter((s) => s.id !== id)) // optimistic — the row vanishes instantly
@@ -454,7 +463,14 @@ export default function Main() {
             )}
           </div>
         </header>
-        {settingsOpen && <SettingsPanel onClose={() => setSettingsOpen(false)} mirror={mirror} onMirrorChange={changeMirror} />}
+        {settingsOpen && (
+          <SettingsPanel
+            onClose={() => setSettingsOpen(false)}
+            mirror={mirror}
+            onMirrorChange={changeMirror}
+            onChatsCleared={clearAllChats}
+          />
+        )}
         <MessageList messages={messages} onExample={send} runningIds={runningIds} trackColor={trackColor} />
         {busy && (
           <div className="tasks-bar" title="Running in parallel — each finishes on its own">

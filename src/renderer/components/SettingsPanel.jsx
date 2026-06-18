@@ -35,7 +35,7 @@ function prettyAccel(acc) {
 // clean — which tab Ghost drives, whether the chat mirrors into Chrome's side panel, and per-site
 // access. Tab target and site policy live in the main process; we load + save them here. The
 // mirror toggle is lifted to Main (it drives the push), so it comes in as a prop.
-export default function SettingsPanel({ onClose, mirror, onMirrorChange }) {
+export default function SettingsPanel({ onClose, mirror, onMirrorChange, onChatsCleared }) {
   const [target, setTarget] = useState('group')
   const [policy, setPolicy] = useState({ mode: 'open', allow: [], block: [] })
   const [allowInput, setAllowInput] = useState('')
@@ -45,11 +45,14 @@ export default function SettingsPanel({ onClose, mirror, onMirrorChange }) {
   const [recording, setRecording] = useState(false)
   const [pending, setPending] = useState('')
   const [hkError, setHkError] = useState('')
+  const [memCount, setMemCount] = useState(null)
+  const [confirm, setConfirm] = useState('') // '' | 'chats' | 'memory' — two-step danger confirm
   const ref = useRef(null)
 
   useEffect(() => {
     window.ghost.browserTarget?.get().then(setTarget).catch(() => {})
     window.ghost.sites?.get().then(setPolicy).catch(() => {})
+    window.ghost.memoryCount?.().then(setMemCount).catch(() => {})
     window.ghost.hotkey
       ?.get()
       .then((h) => {
@@ -111,6 +114,26 @@ export default function SettingsPanel({ onClose, mirror, onMirrorChange }) {
         setHkError('')
       })
       .catch(() => {})
+  }
+
+  // Two-step confirm for destructive actions: first click arms, second (within 3s) fires.
+  function danger(key, fn) {
+    if (confirm === key) {
+      setConfirm('')
+      fn()
+    } else {
+      setConfirm(key)
+      setTimeout(() => setConfirm((c) => (c === key ? '' : c)), 3000)
+    }
+  }
+
+  function doClearChats() {
+    onChatsCleared?.() // Main wipes the DB chats, resets the visible chat, refreshes the list
+    onClose()
+  }
+
+  function doClearMemory() {
+    window.ghost.clearMemory?.().then(() => setMemCount(0)).catch(() => {})
   }
 
   // Close on outside-click or Escape.
@@ -256,6 +279,29 @@ export default function SettingsPanel({ onClose, mirror, onMirrorChange }) {
         )}
         <div className="set-sub">Blocked sites</div>
         <DomainList list="block" value={blockInput} onValue={setBlockInput} />
+      </section>
+
+      <section className="set-section set-danger">
+        <div className="set-title">Reset</div>
+        <p className="set-note">Permanent — these can’t be undone.</p>
+        <div className="set-danger-row">
+          <button
+            className={`set-danger-btn${confirm === 'chats' ? ' armed' : ''}`}
+            onClick={() => danger('chats', doClearChats)}
+            title="Delete every saved chat and start fresh"
+          >
+            {confirm === 'chats' ? 'Click again to delete all chats' : 'Delete all chats'}
+          </button>
+          <button
+            className={`set-danger-btn${confirm === 'memory' ? ' armed' : ''}`}
+            onClick={() => danger('memory', doClearMemory)}
+            title="Erase everything Ghost has remembered across sessions"
+          >
+            {confirm === 'memory'
+              ? 'Click again to erase memory'
+              : `Delete all memory${memCount ? ` (${memCount})` : ''}`}
+          </button>
+        </div>
       </section>
     </div>
   )
