@@ -9,7 +9,7 @@ const EXAMPLES = [
   { icon: '✦', text: 'Remember that I prefer concise answers' }
 ]
 
-export default function MessageList({ messages, onExample, runningIds }) {
+export default function MessageList({ messages, onExample, runningIds, trackColor }) {
   const endRef = useRef(null)
 
   useEffect(() => {
@@ -50,26 +50,28 @@ export default function MessageList({ messages, onExample, runningIds }) {
           </div>
         </div>
       )}
-      {messages.map((m, i) =>
-        m.role === 'tool' ? (
-          <ToolCard
-            key={m.id || i}
-            name={m.name}
-            input={m.input}
-            output={m.output}
-            image={m.image}
-            status={m.status}
-            isError={m.isError}
-            durationMs={m.durationMs}
-          />
+      {messages.map((m, i) => {
+        const accent = trackColor?.(m.reqId)
+        return m.role === 'tool' ? (
+          <div key={m.id || i} className={accent ? 'track-wrap' : undefined} style={accent ? { borderLeftColor: accent } : undefined}>
+            <ToolCard
+              name={m.name}
+              input={m.input}
+              output={m.output}
+              image={m.image}
+              status={m.status}
+              isError={m.isError}
+              durationMs={m.durationMs}
+            />
+          </div>
         ) : m.role === 'system' ? (
           <div key={i} className="sys-note">
             {m.content}
           </div>
         ) : (
-          <Message key={i} role={m.role} content={m.content} error={m.error} streaming={isLive(m)} />
+          <Message key={i} role={m.role} content={m.content} error={m.error} streaming={isLive(m)} accent={accent} />
         )
-      )}
+      })}
       <div ref={endRef} />
     </div>
   )

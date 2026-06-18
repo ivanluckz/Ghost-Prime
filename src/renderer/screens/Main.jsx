@@ -2,6 +2,10 @@ import { useEffect, useRef, useState } from 'react'
 import MessageList from '../components/chat/MessageList.jsx'
 import ChatInput from '../components/chat/ChatInput.jsx'
 import SessionSidebar from '../components/SessionSidebar.jsx'
+import SettingsPanel from '../components/SettingsPanel.jsx'
+
+// Distinct accents for concurrently-running tasks, so parallel tracks are easy to tell apart.
+const TRACK_COLORS = ['#00d4ff', '#ff7ad9', '#7affb2', '#ffce5a', '#a78bff', '#ff9d6b']
 
 // Autonomy modes, cycled with Shift+Tab (like Claude Code).
 const MODES = [
@@ -20,6 +24,8 @@ export default function Main() {
   const [sessions, setSessions] = useState([])
   const [activeId, setActiveId] = useState(null)
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
+  const [settingsOpen, setSettingsOpen] = useState(false)
+  const [mirror, setMirror] = useState(false) // mirror chat into Chrome's side panel
   const voiceOutRef = useRef(false)
   const sendRef = useRef(null) // latest send(), so externally-pushed tasks avoid a stale closure
 
@@ -144,6 +150,31 @@ export default function Main() {
   // Right-click "Ask Ghost about this" in Chrome pushes a task up here — run it.
   useEffect(() => window.ghost.onExternalTask?.(({ prompt }) => prompt && sendRef.current?.(prompt)), [])
 
+  // Mirror the transcript into Chrome's side panel while mirroring is on. Throttled so a fast
+  // token stream doesn't flood the bridge — the panel just needs to keep up, not be frame-perfect.
+  useEffect(() => {
+    if (!mirror) return
+    const id = setTimeout(() => {
+      const snap = messages
+        .filter((m) => m.role === 'user' || m.role === 'assistant' || m.role === 'system')
+        .map(({ role, content }) => ({ role, content }))
+      window.ghost.mirrorChat?.(snap, true)
+    }, 200)
+    return () => clearTimeout(id)
+  }, [messages, mirror])
+
+  function changeMirror(on) {
+    setMirror(on)
+    if (on) {
+      const snap = messages
+        .filter((m) => m.role === 'user' || m.role === 'assistant' || m.role === 'system')
+        .map(({ role, content }) => ({ role, content }))
+      window.ghost.mirrorChat?.(snap, true)
+    } else {
+      window.ghost.mirrorChat?.([], false) // tell the panel the mirror is off
+    }
+  }
+
   function toggleVoiceOut() {
     setVoiceOut((on) => {
       const next = !on
@@ -246,6 +277,40 @@ export default function Main() {
           note(`✓ Spoken replies → ${arg}`)
         }
         return true
+      case 'tab':
+        if (!['own', 'current', 'active', 'group'].includes(arg)) note('Usage: /tab own | current')
+        else {
+          const t = arg === 'current' || arg === 'active' ? 'active' : 'group'
+          window.ghost.browserTarget?.set(t)
+          note(`✓ Browser acts on ${t === 'active' ? 'your current tab' : 'its own tab'}`)
+        }
+        return true
+      case 'mirror':
+        if (arg !== 'on' && arg !== 'off') note('Usage: /mirror on | off')
+        else { changeMirror(arg === 'on'); note(`✓ Chrome side-panel mirror → ${arg}`) }
+        return true
+      case 'site': {
+        const [sub, ...sr] = arg.split(/\s+/)
+        const val = sr.join(' ').trim()
+        window.ghost.sites?.get().then((pol) => {
+          if (sub === 'open' || sub === 'strict') window.ghost.sites.set({ ...pol, mode: sub }).then(() => note(`✓ Site access → ${sub}`))
+          else if (sub === 'allow' && val) window.ghost.sites.set({ ...pol, allow: [...pol.allow, val] }).then(() => note(`✓ Allowed ${val}`))
+          else if (sub === 'block' && val) window.ghost.sites.set({ ...pol, block: [...pol.block, val] }).then(() => note(`✓ Blocked ${val}`))
+          else if (sub === 'list') note(`Site access: ${pol.mode} · allow [${pol.allow.join(', ') || '—'}] · block [${pol.block.join(', ') || '—'}]`)
+          else note('Usage: /site open|strict · /site allow <domain> · /site block <domain> · /site list')
+        })
+        return true
+      }
+      case 'hotkey':
+      case 'shortcut':
+        window.ghost.hotkey?.get().then((h) => {
+          const show = (h?.accelerator || '').replace(/CommandOrControl/g, 'Ctrl').split('+').join(' + ') || '—'
+          note(`Wake-up shortcut is ${show}. Record a new one in Settings (⚙) → Wake-up shortcut.`)
+        })
+        return true
+      case 'settings':
+        setSettingsOpen(true)
+        return true
       case 'new':
         newChat()
         return true
@@ -253,7 +318,7 @@ export default function Main() {
         note(`model ${agent.model || 'sonnet'} · effort ${agent.effort || 'low'} · thinking ${agent.thinking || 'adaptive'} · mode ${mode}`)
         return true
       case 'help':
-        note('/model · /effort low…max · /thinking off|adaptive · /fast · /smart · /mode plan|auto|full · /voice on|off · /status · /new')
+        note('/model · /effort low…max · /thinking off|adaptive · /fast · /smart · /mode plan|auto|full · /voice on|off · /tab own|current · /mirror on|off · /site … · /hotkey · /settings · /status · /new')
         return true
       default:
         note(`Unknown command "/${c}". Try /help`)
@@ -282,6 +347,14 @@ export default function Main() {
 
   const modeInfo = MODES.find((m) => m.id === mode) || MODES[1]
   const runningIds = new Set(Object.keys(running))
+  // Order running tasks by start time and give each a stable accent — only when ≥2 run at once, so
+  // a single task stays clean. Used to color-code each track's messages and its chip.
+  const runningOrder = Object.entries(running)
+    .sort((a, b) => (a[1].startedAt || 0) - (b[1].startedAt || 0))
+    .map(([id]) => id)
+  const multiTrack = runningOrder.length > 1
+  const trackColor = (reqId) =>
+    multiTrack && reqId && running[reqId] ? TRACK_COLORS[runningOrder.indexOf(reqId) % TRACK_COLORS.length] : null
 
   return (
     <div className="main fade-in">
@@ -323,6 +396,24 @@ export default function Main() {
             >
               {voiceOut ? '🔊' : '🔇'}
             </button>
+            <button
+              type="button"
+              className={`voice-toggle ${mirror ? 'on' : ''}`}
+              onClick={() => changeMirror(!mirror)}
+              title={mirror ? 'Chat mirrors to Chrome side panel: ON' : 'Mirror chat to Chrome side panel'}
+              aria-label="Mirror chat to Chrome"
+            >
+              ⧉
+            </button>
+            <button
+              type="button"
+              className={`voice-toggle ${settingsOpen ? 'on' : ''}`}
+              onClick={() => setSettingsOpen((o) => !o)}
+              title="Settings — browser tab, mirror, site access"
+              aria-label="Settings"
+            >
+              ⚙
+            </button>
             <span className={`status ${busy ? 'status-busy' : ''}`}>
               {busy ? `working… ${Object.keys(running).length > 1 ? `(${Object.keys(running).length})` : ''}`.trim() : 'ready'}
             </span>
@@ -363,23 +454,28 @@ export default function Main() {
             )}
           </div>
         </header>
-        <MessageList messages={messages} onExample={send} runningIds={runningIds} />
+        {settingsOpen && <SettingsPanel onClose={() => setSettingsOpen(false)} mirror={mirror} onMirrorChange={changeMirror} />}
+        <MessageList messages={messages} onExample={send} runningIds={runningIds} trackColor={trackColor} />
         {busy && (
           <div className="tasks-bar" title="Running in parallel — each finishes on its own">
-            {Object.entries(running).map(([id, t]) => (
-              <div className="task-chip" key={id}>
-                <span className="tool-spinner" />
-                <span className="task-chip-text">{t.prompt}</span>
-                <button
-                  className="task-chip-stop"
-                  onClick={() => stopTask(id)}
-                  title="Stop this task"
-                  aria-label="Stop this task"
-                >
-                  ✕
-                </button>
-              </div>
-            ))}
+            {multiTrack && <span className="tasks-bar-label">{runningOrder.length} tasks running in parallel</span>}
+            {Object.entries(running).map(([id, t]) => {
+              const tc = trackColor(id)
+              return (
+                <div className="task-chip" key={id} style={tc ? { borderColor: tc, boxShadow: `0 0 0 1px ${tc}55` } : undefined}>
+                  <span className="tool-spinner" style={tc ? { borderTopColor: tc } : undefined} />
+                  <span className="task-chip-text">{t.prompt}</span>
+                  <button
+                    className="task-chip-stop"
+                    onClick={() => stopTask(id)}
+                    title="Stop this task"
+                    aria-label="Stop this task"
+                  >
+                    ✕
+                  </button>
+                </div>
+              )
+            })}
             {Object.keys(running).length > 1 && (
               <button className="task-stop-all" onClick={stopAll} title="Stop every running task">
                 Stop all

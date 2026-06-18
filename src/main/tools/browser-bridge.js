@@ -15,9 +15,28 @@ let waiter = null // a held /poll response waiting for the next command
 let lastPollAt = 0
 let taskHandler = null // called when the extension pushes a task (e.g. right-click "Ask Ghost")
 
+// Chat mirror: the app pushes its transcript here; the extension side panel long-polls /chat to
+// render it. seq is bumped on every change so /chat?since=N can hold until there's something new.
+let chatState = { seq: 0, messages: [], mirroring: false }
+let chatWaiters = [] // { res, timer } held GET /chat responses awaiting the next update
+
 // Register a handler for tasks the extension sends UP to the app (reverse direction).
 export function onBridgeTask(cb) {
   taskHandler = cb
+}
+
+// Push the current chat transcript to any connected side panel. `mirroring=false` tells the panel
+// the user has the mirror turned off (so it shows a hint instead of a stale conversation).
+export function setChatState(messages, mirroring = true) {
+  chatState = { seq: chatState.seq + 1, messages: Array.isArray(messages) ? messages : [], mirroring: !!mirroring }
+  const waiters = chatWaiters
+  chatWaiters = []
+  for (const w of waiters) {
+    clearTimeout(w.timer)
+    try {
+      sendJson(w.res, 200, chatState)
+    } catch {}
+  }
 }
 
 function sendJson(res, code, obj) {
@@ -158,6 +177,24 @@ export function startBridge() {
         } catch {
           sendJson(res, 400, { error: 'bad task' })
         }
+      })
+      return
+    }
+
+    // Side panel pulls the mirrored chat. Long-poll: respond now if there's something newer than
+    // ?since, otherwise hold the connection until setChatState() fires or it times out.
+    if (req.method === 'GET' && url.pathname === '/chat') {
+      const since = Number(url.searchParams.get('since') || -1)
+      if (chatState.seq > since) return sendJson(res, 200, chatState)
+      const timer = setTimeout(() => {
+        chatWaiters = chatWaiters.filter((w) => w.res !== res)
+        sendJson(res, 200, chatState)
+      }, 25000)
+      const entry = { res, timer }
+      chatWaiters.push(entry)
+      res.on('close', () => {
+        clearTimeout(timer)
+        chatWaiters = chatWaiters.filter((w) => w !== entry)
       })
       return
     }

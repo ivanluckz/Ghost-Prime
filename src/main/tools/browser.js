@@ -4,6 +4,45 @@ import { existsSync } from 'node:fs'
 import { spawn, spawnSync } from 'node:child_process'
 import { chromium } from 'playwright'
 import * as bridge from './browser-bridge.js'
+import { policySnapshot, checkUrl } from './site-policy.js'
+
+// Which tab the extension acts on. false (default) = Ghost's own tab in its group; true = the tab
+// you're actually looking at (Claude-for-Chrome style). Toggle live from the app (Settings) or
+// pin with GHOST_BROWSER_ACTIVE_TAB=1. Has no effect on the Playwright fallback (it owns its pages).
+let ACTIVE_TAB_MODE = process.env.GHOST_BROWSER_ACTIVE_TAB === '1'
+export function setActiveTabMode(on) {
+  ACTIVE_TAB_MODE = !!on
+}
+export function getActiveTabMode() {
+  return ACTIVE_TAB_MODE
+}
+
+// Metadata sent with every extension command: which tab to target + the live per-site policy
+// (checked inside the extension against the real page URL).
+function meta() {
+  return { target: ACTIVE_TAB_MODE ? 'active' : 'group', policy: policySnapshot() }
+}
+
+// Auto page-context: peek at the tab the user is currently looking at so the agent already "sees"
+// it (Claude-for-Chrome style) without first calling browser_get_text. Strictly best-effort:
+//   • only in active-tab mode (in own-tab mode "the tab I'm on" isn't a thing)
+//   • only when the extension is already connected — never auto-launches Chrome or adds wait
+//   • short timeout, swallows every error → null
+//   • respects per-site policy: a blocked page throws in the extension → null (we won't quietly
+//     read a site the user blocked)
+// Disable entirely with GHOST_PAGE_CONTEXT=off.
+export async function getActiveTabContext({ maxChars = 4000 } = {}) {
+  if (!ACTIVE_TAB_MODE) return null
+  if ((process.env.GHOST_PAGE_CONTEXT || '').toLowerCase() === 'off') return null
+  if (!bridge.bridgeConnected()) return null
+  try {
+    const r = await bridge.sendCommand('getText', { target: 'active', policy: policySnapshot() }, 4000)
+    if (!r || !r.url) return null
+    return { url: r.url, title: r.title || '', text: String(r.text || '').slice(0, maxChars) }
+  } catch {
+    return null
+  }
+}
 
 // Backend selector. 'auto' (default) uses the Chrome extension whenever it's connected — that
 // drives your REAL Chrome via a local bridge, with no profile and no single-instance lock — and
@@ -149,14 +188,16 @@ async function ensurePage() {
 }
 
 export async function browserNavigate({ url }) {
-  if ((await ensureBrowserBackend()) === 'extension') return bridge.sendCommand('navigate', { url }, 35000)
+  const gate = checkUrl(url)
+  if (!gate.ok) throw new Error(gate.reason)
+  if ((await ensureBrowserBackend()) === 'extension') return bridge.sendCommand('navigate', { url, ...meta() }, 35000)
   const p = await ensurePage()
   await p.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 })
   return { url: p.url(), title: await p.title() }
 }
 
 export async function browserScreenshot() {
-  if ((await ensureBrowserBackend()) === 'extension') return bridge.sendCommand('screenshot', {})
+  if ((await ensureBrowserBackend()) === 'extension') return bridge.sendCommand('screenshot', { ...meta() })
   const p = await ensurePage()
   const buf = await p.screenshot({ type: 'png', fullPage: false })
   return { base64: buf.toString('base64'), url: p.url() }
@@ -285,7 +326,7 @@ async function clarifyClickError(page, err, { selector, text }) {
 }
 
 export async function browserClick({ selector, text } = {}) {
-  if ((await ensureBrowserBackend()) === 'extension') return bridge.sendCommand('click', { selector, text })
+  if ((await ensureBrowserBackend()) === 'extension') return bridge.sendCommand('click', { selector, text, ...meta() })
   const p = await ensurePage()
   try {
     if (text != null && String(text).trim() !== '') {
@@ -305,7 +346,7 @@ export async function browserClick({ selector, text } = {}) {
 }
 
 export async function browserFill({ selector, value, label } = {}) {
-  if ((await ensureBrowserBackend()) === 'extension') return bridge.sendCommand('fill', { selector, label, value })
+  if ((await ensureBrowserBackend()) === 'extension') return bridge.sendCommand('fill', { selector, label, value, ...meta() })
   const p = await ensurePage()
   try {
     let target
@@ -329,7 +370,7 @@ export async function browserFill({ selector, value, label } = {}) {
 }
 
 export async function browserGetText() {
-  if ((await ensureBrowserBackend()) === 'extension') return bridge.sendCommand('getText', {})
+  if ((await ensureBrowserBackend()) === 'extension') return bridge.sendCommand('getText', { ...meta() })
   const p = await ensurePage()
   const text = await p.evaluate(() => document.body?.innerText || '')
   return { url: p.url(), title: await p.title(), text: text.slice(0, 20000) }
@@ -343,13 +384,15 @@ export async function browserReadPages({ urls, keepOpen } = {}) {
   if (!list.length) throw new Error('browser_read_pages needs a non-empty "urls" array')
 
   if ((await ensureBrowserBackend()) === 'extension') {
-    return bridge.sendCommand('readPages', { urls: list, keepOpen: keepOpen !== false }, 60000)
+    return bridge.sendCommand('readPages', { urls: list, keepOpen: keepOpen !== false, ...meta() }, 60000)
   }
 
   // Playwright fallback: open each page concurrently in the persistent context.
   await ensurePage() // make sure context exists
   const pages = await Promise.all(
     list.map(async (url) => {
+      const gate = checkUrl(url)
+      if (!gate.ok) return { url, title: '', text: '', error: gate.reason }
       let pg = null
       try {
         pg = await context.newPage()
@@ -371,7 +414,7 @@ export async function browserReadPages({ urls, keepOpen } = {}) {
 // (0..1, top-left origin) — or raw pixels if > 1. The fix for sites where text/selector fails.
 export async function browserClickAt({ x, y } = {}) {
   if (x == null || y == null) throw new Error('browser_click_at needs x and y (fractions of the viewport, 0..1)')
-  if ((await ensureBrowserBackend()) === 'extension') return bridge.sendCommand('clickAt', { x: Number(x), y: Number(y) })
+  if ((await ensureBrowserBackend()) === 'extension') return bridge.sendCommand('clickAt', { x: Number(x), y: Number(y), ...meta() })
   const p = await ensurePage()
   const { w, h } = await p.evaluate(() => ({ w: window.innerWidth, h: window.innerHeight }))
   const px = Number(x) <= 1 ? Number(x) * w : Number(x)
@@ -382,7 +425,7 @@ export async function browserClickAt({ x, y } = {}) {
 
 // Scroll the page (or a specific scrollable element) to reveal off-screen content / load more.
 export async function browserScroll({ direction = 'down', amount, selector } = {}) {
-  if ((await ensureBrowserBackend()) === 'extension') return bridge.sendCommand('scroll', { direction, amount, selector })
+  if ((await ensureBrowserBackend()) === 'extension') return bridge.sendCommand('scroll', { direction, amount, selector, ...meta() })
   const p = await ensurePage()
   const scrollY = await p.evaluate(
     ({ direction, amount, selector }) => {
@@ -427,6 +470,39 @@ export async function browserScroll({ direction = 'down', amount, selector } = {
     { direction, amount, selector }
   )
   return { ok: true, scrollY, url: p.url() }
+}
+
+// Normalize a key combo to Playwright's naming (Ctrl→Control, Cmd→Meta, esc→Escape, …).
+function normalizeCombo(combo) {
+  return String(combo)
+    .split('+')
+    .map((part) => {
+      const p = part.trim()
+      const lp = p.toLowerCase()
+      if (lp === 'ctrl' || lp === 'control') return 'Control'
+      if (lp === 'cmd' || lp === 'command' || lp === 'meta' || lp === 'super') return 'Meta'
+      if (lp === 'alt' || lp === 'option') return 'Alt'
+      if (lp === 'shift') return 'Shift'
+      if (lp === 'esc') return 'Escape'
+      if (lp === 'space') return ' '
+      return p
+    })
+    .join('+')
+}
+
+// Send real keystrokes to whatever has focus on the page. `text` types literal characters;
+// `keys` presses one combo or a list of them ("Enter", "Control+A", "Control+V", "ArrowDown").
+// This is what lets the agent type into Google Docs/Slides, Monaco, and other editors that have
+// no fillable form field for browser_fill to target.
+export async function browserPressKey({ keys, text } = {}) {
+  const hasText = text != null && String(text) !== ''
+  const keyList = keys == null ? [] : Array.isArray(keys) ? keys : [keys]
+  if (!hasText && !keyList.length) throw new Error('browser_press_key needs "text" to type and/or "keys" to press')
+  if ((await ensureBrowserBackend()) === 'extension') return bridge.sendCommand('pressKey', { keys, text, ...meta() }, 30000)
+  const p = await ensurePage()
+  if (hasText) await p.keyboard.type(String(text))
+  for (const combo of keyList) await p.keyboard.press(normalizeCombo(combo))
+  return { ok: true, url: p.url() }
 }
 
 export async function browserClose() {

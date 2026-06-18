@@ -19,9 +19,28 @@ async function loadCfg() {
 }
 
 // Ghost-Prime works in its OWN tab, inside a dedicated "Ghost-Prime" tab group — so it never
-// hijacks the tab you're looking at (no more loading Gmail over your YouTube tab).
+// hijacks the tab you're looking at (no more loading Gmail over your YouTube tab). When the app
+// turns on "current tab" mode it instead acts on the tab you're focused on (see resolveTab).
 let ghostTabId = null
 let ghostGroupId = null
+const GHOST_GROUP_TITLE = 'Ghost-Prime'
+
+// MV3 service workers are torn down when idle and restarted on demand, which wipes the two ids
+// above — so without this, every restart "forgot" its tab and created a brand-new one (that's the
+// pile-of-Ghost-tabs bug). Persist in session storage (survives SW restarts, clears when Chrome
+// fully closes — which is fine, since tab ids don't survive a browser restart anyway).
+async function loadGhostRefs() {
+  try {
+    const s = await chrome.storage.session.get(['ghostTabId', 'ghostGroupId'])
+    if (s.ghostTabId != null) ghostTabId = s.ghostTabId
+    if (s.ghostGroupId != null) ghostGroupId = s.ghostGroupId
+  } catch {}
+}
+async function saveGhostRefs() {
+  try {
+    await chrome.storage.session.set({ ghostTabId, ghostGroupId })
+  } catch {}
+}
 
 async function tabExists(id) {
   if (id == null) return false
@@ -43,13 +62,30 @@ async function groupExists(id) {
   }
 }
 
+// If we lost our ids but a "Ghost-Prime" group still exists on screen, adopt it (and one of its
+// tabs) instead of spawning yet another. The second line of defense against duplicate tabs/groups.
+async function recoverGhostTab() {
+  try {
+    const groups = await chrome.tabGroups.query({ title: GHOST_GROUP_TITLE })
+    if (groups.length) {
+      ghostGroupId = groups[0].id
+      const tabs = await chrome.tabs.query({ groupId: ghostGroupId })
+      if (tabs.length) {
+        ghostTabId = tabs[0].id
+        return true
+      }
+    }
+  } catch {}
+  return false
+}
+
 async function addToGroup(tabId) {
   try {
     if (await groupExists(ghostGroupId)) {
       await chrome.tabs.group({ tabIds: tabId, groupId: ghostGroupId })
     } else {
       ghostGroupId = await chrome.tabs.group({ tabIds: tabId })
-      await chrome.tabGroups.update(ghostGroupId, { title: 'Ghost-Prime', color: 'cyan' })
+      await chrome.tabGroups.update(ghostGroupId, { title: GHOST_GROUP_TITLE, color: 'cyan' })
     }
   } catch {
     // tab groups unsupported / failed — not fatal; the tab still works, just ungrouped
@@ -59,14 +95,72 @@ async function addToGroup(tabId) {
 // Ghost's working tab — created in its group if missing/closed. active=true brings it forward
 // (needed before a screenshot, which captures the visible tab; and for navigate so you can watch).
 async function ghostTab(active = false) {
+  await loadGhostRefs() // the SW may have restarted since the last command
   if (!(await tabExists(ghostTabId))) {
-    const tab = await chrome.tabs.create({ url: 'about:blank', active })
-    ghostTabId = tab.id
-    await addToGroup(tab.id)
-  } else if (active) {
-    await chrome.tabs.update(ghostTabId, { active: true })
+    if (!(await recoverGhostTab()) || !(await tabExists(ghostTabId))) {
+      const tab = await chrome.tabs.create({ url: 'about:blank', active })
+      ghostTabId = tab.id
+      await addToGroup(tab.id)
+    }
   }
+  if (active) await chrome.tabs.update(ghostTabId, { active: true }).catch(() => {})
+  await saveGhostRefs()
   return chrome.tabs.get(ghostTabId)
+}
+
+// The currently focused tab — what "act on the tab I'm looking at" targets. Falls back to Ghost's
+// own tab if there's no usable active tab (e.g. only the side panel is focused).
+async function activeTab() {
+  try {
+    let [t] = await chrome.tabs.query({ active: true, lastFocusedWindow: true })
+    if (!t) [t] = await chrome.tabs.query({ active: true, currentWindow: true })
+    if (t && t.id != null) return t
+  } catch {}
+  return null
+}
+
+// Pick the tab a command runs against. target:'active' → your focused tab; otherwise Ghost's tab.
+async function resolveTab(cmd, args) {
+  if (args && args.target === 'active') {
+    const t = await activeTab()
+    if (t) return t
+  }
+  return ghostTab(cmd === 'navigate' || cmd === 'screenshot' || cmd === 'pressKey')
+}
+
+// ---- Per-site permissions ----
+// The app sends the current policy with every tab-touching command (args.policy), so the check
+// happens where the real URL is known and needs no separate sync. Shape:
+//   { mode: 'open' | 'strict', allow: ['github.com', ...], block: ['*.bank.com', ...] }
+function hostMatches(host, pattern) {
+  if (!host || !pattern) return false
+  host = host.toLowerCase().replace(/^www\./, '')
+  let p = String(pattern).toLowerCase().trim().replace(/^www\./, '')
+  if (p.startsWith('*.')) p = p.slice(2)
+  if (!p) return false
+  return host === p || host.endsWith('.' + p)
+}
+function siteCheck(policy, url) {
+  if (!policy || !url) return { ok: true }
+  let host
+  try {
+    const u = new URL(url)
+    if (u.protocol !== 'http:' && u.protocol !== 'https:') return { ok: true } // about:/chrome:/file: — not gated here
+    host = u.hostname
+  } catch {
+    return { ok: true }
+  }
+  const block = policy.block || []
+  if (block.some((p) => hostMatches(host, p))) {
+    return { ok: false, reason: `${host} is on Ghost-Prime's blocked-sites list. Remove it in the app (Settings → Site access) to act here.` }
+  }
+  if (policy.mode === 'strict') {
+    const allow = policy.allow || []
+    if (!allow.some((p) => hostMatches(host, p))) {
+      return { ok: false, reason: `Site access is in strict mode and ${host} isn't on the allow-list. Add it in the app (Settings → Site access) to act here.` }
+    }
+  }
+  return { ok: true }
 }
 
 function waitComplete(tabId, timeout = 30000) {
@@ -87,6 +181,95 @@ function waitComplete(tabId, timeout = 30000) {
 // Run an injected function in every frame; return the array of per-frame results.
 function injectAllFrames(tabId, func, arg) {
   return chrome.scripting.executeScript({ target: { tabId, allFrames: true }, func, args: [arg] })
+}
+
+// ---- Keyboard via the Chrome DevTools Protocol (debugger) ----
+// chrome.scripting can set <input>.value, but it CANNOT type into editors that render their own
+// surface (Google Docs/Slides on a canvas, Monaco, Notion). Those need real keyboard events sent
+// to whatever element has focus. CDP's Input.insertText / Input.dispatchKeyEvent do exactly that.
+
+// CDP modifier bitmask.
+const CDP_MOD = { alt: 1, ctrl: 2, control: 2, meta: 4, cmd: 4, command: 4, super: 4, shift: 8 }
+// Non-printable / named keys → the fields CDP wants. (Printable single chars are derived below.)
+const CDP_KEYS = {
+  enter: { key: 'Enter', code: 'Enter', vk: 13, text: '\r' },
+  return: { key: 'Enter', code: 'Enter', vk: 13, text: '\r' },
+  tab: { key: 'Tab', code: 'Tab', vk: 9 },
+  escape: { key: 'Escape', code: 'Escape', vk: 27 },
+  esc: { key: 'Escape', code: 'Escape', vk: 27 },
+  backspace: { key: 'Backspace', code: 'Backspace', vk: 8 },
+  delete: { key: 'Delete', code: 'Delete', vk: 46 },
+  del: { key: 'Delete', code: 'Delete', vk: 46 },
+  space: { key: ' ', code: 'Space', vk: 32, text: ' ' },
+  arrowup: { key: 'ArrowUp', code: 'ArrowUp', vk: 38 },
+  up: { key: 'ArrowUp', code: 'ArrowUp', vk: 38 },
+  arrowdown: { key: 'ArrowDown', code: 'ArrowDown', vk: 40 },
+  down: { key: 'ArrowDown', code: 'ArrowDown', vk: 40 },
+  arrowleft: { key: 'ArrowLeft', code: 'ArrowLeft', vk: 37 },
+  left: { key: 'ArrowLeft', code: 'ArrowLeft', vk: 37 },
+  arrowright: { key: 'ArrowRight', code: 'ArrowRight', vk: 39 },
+  right: { key: 'ArrowRight', code: 'ArrowRight', vk: 39 },
+  home: { key: 'Home', code: 'Home', vk: 36 },
+  end: { key: 'End', code: 'End', vk: 35 },
+  pageup: { key: 'PageUp', code: 'PageUp', vk: 33 },
+  pagedown: { key: 'PageDown', code: 'PageDown', vk: 34 }
+}
+
+// Turn one combo string ("Control+V", "Enter", "Shift+ArrowRight", "a") into a CDP keyDown/keyUp pair.
+function cdpKeyEvents(combo) {
+  let modifiers = 0
+  let main = null
+  for (const raw of String(combo).split('+')) {
+    const p = raw.trim()
+    if (!p) continue
+    const lp = p.toLowerCase()
+    if (lp in CDP_MOD && p.length > 1) modifiers |= CDP_MOD[lp]
+    else main = p
+  }
+  if (!main) return null
+  let def = CDP_KEYS[main.toLowerCase()]
+  if (!def) {
+    // A single printable character: derive code/virtual-key from it.
+    const ch = main.length === 1 ? main : null
+    if (!ch) return null
+    const upper = ch.toUpperCase()
+    const code = /[a-zA-Z]/.test(ch) ? `Key${upper}` : /[0-9]/.test(ch) ? `Digit${ch}` : undefined
+    def = { key: ch, code, vk: upper.charCodeAt(0), text: ch }
+  }
+  const base = { modifiers, key: def.key, code: def.code, windowsVirtualKeyCode: def.vk, nativeVirtualKeyCode: def.vk }
+  // Send `text` only for a bare printable key (no modifiers) so it actually inserts a character;
+  // with Ctrl/Alt/Meta held it's a shortcut (paste, select-all…) and must carry no text.
+  const down = { type: def.text && !modifiers ? 'keyDown' : 'rawKeyDown', ...base }
+  if (def.text && !modifiers) down.text = def.text
+  return [down, { type: 'keyUp', ...base }]
+}
+
+function cdpSend(target, method, params) {
+  return new Promise((resolve, reject) => {
+    chrome.debugger.sendCommand(target, method, params || {}, (res) => {
+      const e = chrome.runtime.lastError
+      e ? reject(new Error(e.message)) : resolve(res)
+    })
+  })
+}
+
+// Attach the debugger to a tab, run fn(target), always detach. Surfaces the "started debugging"
+// banner briefly — unavoidable with the CDP keyboard, and the only way to type into canvas editors.
+async function withDebugger(tabId, fn) {
+  const target = { tabId }
+  await new Promise((resolve, reject) => {
+    chrome.debugger.attach(target, '1.3', () => {
+      const e = chrome.runtime.lastError
+      e ? reject(new Error(e.message + ' (close DevTools on this tab if it is open, then retry)')) : resolve()
+    })
+  })
+  try {
+    return await fn(target)
+  } finally {
+    try {
+      await new Promise((r) => chrome.debugger.detach(target, () => r()))
+    } catch {}
+  }
 }
 
 // ---- Injected page functions (must be fully self-contained) ----
@@ -258,9 +441,20 @@ async function run(cmd, args) {
   if (cmd === 'readPages') {
     const urls = (args.urls || []).slice(0, 8)
     const keepOpen = args.keepOpen !== false
-    return { pages: await Promise.all(urls.map((u) => readOnePage(u, keepOpen))) }
+    return {
+      pages: await Promise.all(
+        urls.map((u) => {
+          const g = siteCheck(args.policy, u)
+          return g.ok ? readOnePage(u, keepOpen) : Promise.resolve({ url: u, title: '', text: '', error: g.reason })
+        })
+      )
+    }
   }
-  const tab = await ghostTab(cmd === 'navigate' || cmd === 'screenshot')
+  const tab = await resolveTab(cmd, args)
+  // Per-site permission gate: navigate is judged by where it's GOING; every other action by the
+  // page it would act ON.
+  const gate = siteCheck(args.policy, cmd === 'navigate' ? args.url : tab.url)
+  if (!gate.ok) throw new Error(gate.reason)
   switch (cmd) {
     case 'navigate': {
       await chrome.tabs.update(tab.id, { url: args.url })
@@ -303,6 +497,24 @@ async function run(cmd, args) {
       const [{ result }] = await chrome.scripting.executeScript({ target: { tabId: tab.id }, func: scrollInPage, args: [args] })
       return result || { ok: true }
     }
+    case 'pressKey': {
+      // Real keyboard input to the focused element — the only way to type into Google Docs/Slides,
+      // Monaco, and other editors that have no fillable <input>. `text` is inserted verbatim;
+      // `keys` is one combo or an array of them ("Enter", "Control+A", "Control+V", "ArrowDown").
+      return await withDebugger(tab.id, async (target) => {
+        if (args.text != null && String(args.text) !== '') {
+          await cdpSend(target, 'Input.insertText', { text: String(args.text) })
+        }
+        const keys = args.keys == null ? [] : Array.isArray(args.keys) ? args.keys : [args.keys]
+        for (const combo of keys) {
+          const evs = cdpKeyEvents(combo)
+          if (!evs) continue
+          for (const ev of evs) await cdpSend(target, 'Input.dispatchKeyEvent', ev)
+          await sleep(15) // let the editor process each keystroke
+        }
+        return { ok: true, url: tab.url }
+      })
+    }
     default:
       throw new Error(`unknown command "${cmd}"`)
   }
@@ -344,8 +556,16 @@ async function loop() {
   }
 }
 
+// Clicking the toolbar icon opens the Ghost-Prime chat side panel (mirrors the app's chat).
+function enableSidePanel() {
+  try {
+    chrome.sidePanel?.setPanelBehavior({ openPanelOnActionClick: true }).catch(() => {})
+  } catch {}
+}
+
 chrome.runtime.onInstalled.addListener(() => {
   loadCfg().then(loop)
+  enableSidePanel()
   try {
     chrome.contextMenus.create({
       id: 'ask-ghost',
@@ -354,7 +574,10 @@ chrome.runtime.onInstalled.addListener(() => {
     })
   } catch {}
 })
-chrome.runtime.onStartup.addListener(() => loadCfg().then(loop))
+chrome.runtime.onStartup.addListener(() => {
+  loadCfg().then(loop)
+  enableSidePanel()
+})
 
 // Right-click → push a task up to the app (it summons the window and runs it).
 chrome.contextMenus?.onClicked.addListener(async (info, tab) => {
@@ -370,5 +593,10 @@ chrome.contextMenus?.onClicked.addListener(async (info, tab) => {
 })
 chrome.alarms.create('keepalive', { periodInMinutes: 1 }) // restart the loop if the SW was idled out
 chrome.alarms.onAlarm.addListener(() => loadCfg().then(loop))
-chrome.storage.onChanged.addListener(() => loadCfg())
+// Only the synced config matters here; ignore the high-frequency session writes (ghost tab/group
+// ids) that saveGhostRefs() makes on every command — reloading cfg for those is wasted work.
+chrome.storage.onChanged.addListener((_changes, areaName) => {
+  if (areaName === 'sync') loadCfg()
+})
+enableSidePanel()
 loadCfg().then(loop)

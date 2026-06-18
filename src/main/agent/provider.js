@@ -44,7 +44,8 @@ const BROWSER_TOOL_NAMES = [
   'browser_screenshot',
   'browser_read_pages',
   'browser_click_at',
-  'browser_scroll'
+  'browser_scroll',
+  'browser_press_key'
 ].map((n) => `mcp__${BROWSER_SERVER}__${n}`)
 
 // Our cross-session memory, exposed to the agent as an in-process SDK MCP server.
@@ -62,6 +63,38 @@ const SCREEN_TOOL_NAMES = ['screen_screenshot', 'screen_type', 'screen_key', 'sc
 // UI autonomy mode (cycled with Shift+Tab) → SDK permission mode.
 const MODE_TO_PERMISSION = { plan: 'plan', auto: 'auto', full: 'bypassPermissions' }
 
+// Does the message refer to the page the user is looking at? Gates auto page-context so we only pay
+// the extra tokens when it's plausibly relevant — and it's harmless to miss, since browser_get_text
+// can still fetch the page on demand. Active-tab mode is opt-in ("act on the tab I'm on"), so when
+// it's on we lean toward attaching: reading, editing the on-page editor, and clicking/scrolling all
+// count as "about this page".
+function refersToCurrentPage(text) {
+  const t = String(text || '')
+  // 1. Explicit mention of the current page / tab / on-screen thing.
+  if (
+    /\b(this|current) (page|site|tab|window|article|video|form|doc|document|post|thread|email|message|conversation|screen|image|photo|picture|chart|table|selection|paragraph|sentence|slide|cell|code|story|essay|draft)\b/i.test(t)
+  )
+    return true
+  if (/\b(on|in|from) (this|the) (page|site|tab|screen|doc|document|form|article|video)\b/i.test(t)) return true
+  if (/\b(on[- ]?screen|up here|down here|right here|over here|above|below)\b/i.test(t)) return true
+  // 2. Standalone asks that almost always mean "the thing in front of me".
+  if (/\b(summari[sz]e|tl;?dr|recap|proofread)\b/i.test(t)) return true
+  if (/\b(what|who|where|when|why|how)('?s| is| are| does| do| did| about)?\s+(this|that|it|these|those|they)\b/i.test(t))
+    return true
+  // 3. An action verb aimed at "this / it / that / here / the page" — covers reading, editing the
+  //    on-page editor (Docs/Slides/Notion), and acting on the live page (click/scroll/fill).
+  if (
+    /\b(read|re-?read|translate|explain|describe|rewrite|reword|rephrase|paraphrase|shorten|lengthen|expand|simplify|make|turn|improve|polish|edit|fix|correct|continue|finish|complete|fill|copy|cut|paste|highlight|select|answer|reply|respond|comment|sign|submit|send|post|share|bold|italic|underline|format|delete|remove|clear|check|uncheck|toggle|download|bookmark|rate|like|upvote)\b[^.?!\n]{0,24}\b(this|that|it|these|those|here|the (page|form|field|button|link|doc|document|text|selection|video|image|email|post|comment))\b/i.test(t)
+  )
+    return true
+  // 4. Clicking/tapping/scrolling is inherently about the page in front of you.
+  if (/\b(click|tap|double-?click|right-?click|scroll|hover over|press the)\b/i.test(t)) return true
+  // 5. Fixed page-action phrases.
+  if (/\b(select all|scroll (up|down|to (the )?(top|bottom))|fill (this|it|the form)( out| in)?|(log|sign) ?in here)\b/i.test(t))
+    return true
+  return false
+}
+
 const SYSTEM_PROMPT = `You are Ghost-Prime, an autonomous AI agent running on the user's own Chrome OS / Crostini Linux machine. You act on their behalf with real tools — you do the work, you don't just advise on how to do it.
 
 YOUR TOOLS — all already loaded and directly callable this turn. There is NO step to "load", "search for", "enable", or "initialize" a tool first; when a task needs one, just call it.
@@ -78,6 +111,9 @@ DRIVING THE BROWSER:
 - To research or compare across multiple pages, call browser_read_pages with ALL the URLs at once (one call opens and reads them in parallel) — far faster than visiting pages one by one.
 - When clicking by text or selector keeps failing, call browser_screenshot to SEE the page, then browser_click_at with the element's center as x,y fractions (0..1) of the image — you can see it, so aim for it.
 - If what you need is off-screen (long page, chat history, infinite scroll), browser_scroll (down/up/top/bottom), then look again with browser_screenshot or browser_get_text.
+- To TYPE into an editor that browser_fill can't fill — Google Docs/Slides, code editors, Notion, anything with no real input field — first click into it (browser_click / browser_click_at), then browser_press_key with { text } to type, and { keys } for shortcuts/special keys ("Enter", "Control+A", "ArrowDown"). browser_fill is only for real form fields; reach for browser_press_key the moment a fill has nowhere to land.
+- Per-site permissions may block a site: if a browser tool returns that a site is blocked or not on the allow-list, do NOT keep retrying — tell the user it's blocked and that they can change it in Settings → Site access.
+- If the conversation opens with a "[Current browser tab the user is viewing]" block, that's the page they're looking at right now — treat it as the meaning of "this page / here / this", and don't call browser_get_text on it again unless you need fuller or fresher content.
 
 MEMORY:
 - Recall what you already know (memory_recall) when prior context would help, especially at the start of a task.
@@ -261,6 +297,25 @@ async function getBrowserMcpServer() {
           await browser.browserScroll({ direction, amount, selector })
           return { content: [{ type: 'text', text: `Scrolled ${direction || 'down'}${selector ? ` in ${selector}` : ''}.` }] }
         }
+      ),
+      tool(
+        'browser_press_key',
+        'Send real keystrokes to whatever element has focus — the ONLY way to type into editors ' +
+          'that have no fillable form field: Google Docs/Slides, Monaco/code editors, Notion, etc. ' +
+          '(browser_fill only works on <input>/<textarea>.) First focus the editor (browser_click ' +
+          'or browser_click_at on it), then call this. Pass { text: "…" } to type literal text, ' +
+          'and/or { keys } to press special keys/shortcuts — one combo ("Enter") or an array ' +
+          '(["Control+A", "Delete"]). Combos use +: Control/Alt/Shift/Meta plus a key, e.g. ' +
+          '"Control+A" (select all), "Control+V" (paste), "Enter", "Tab", "ArrowDown", ' +
+          '"Shift+ArrowRight". Note: browser-internal pages (chrome://) cannot be driven.',
+        { text: z.string().optional(), keys: z.union([z.string(), z.array(z.string())]).optional() },
+        async ({ text, keys }) => {
+          await browser.browserPressKey({ text, keys })
+          const did = [text != null && text !== '' ? 'typed text' : null, keys ? `pressed ${Array.isArray(keys) ? keys.join(', ') : keys}` : null]
+            .filter(Boolean)
+            .join('; ')
+          return { content: [{ type: 'text', text: did || 'sent keystrokes' }] }
+        }
       )
     ]
   })
@@ -409,8 +464,26 @@ async function streamChatClaudeAgent({ messages, signal, onDelta, onEvent, model
       digest.map((m) => `- [${m.type}] ${m.content}`).join('\n')
     : ''
 
+  // Auto page-context: when "act on the tab I'm on" is enabled and the latest message refers to the
+  // page, attach the current tab so "summarize this / what's here" works without a fetch first.
+  let pageContext = ''
+  if (browser.getActiveTabMode()) {
+    const lastUser = [...messages].reverse().find((m) => m.role === 'user')?.content || ''
+    if (refersToCurrentPage(lastUser)) {
+      try {
+        const pc = await browser.getActiveTabContext()
+        if (pc) {
+          pageContext =
+            `[Current browser tab the user is viewing — auto-attached because "act on the tab I'm on" is on. ` +
+            `This is what they mean by "this page / here / this".]\n` +
+            `URL: ${pc.url}\nTitle: ${pc.title}\n\n${pc.text}\n[End of current tab]\n\n---\n\n`
+        }
+      } catch {}
+    }
+  }
+
   const response = query({
-    prompt: transcript,
+    prompt: pageContext + transcript,
     options: {
       model: useModel,
       ...(supportsEffort && !thinkingOff ? { effort: effortVal } : {}), // 'low' = snappy (effort guides thinking)

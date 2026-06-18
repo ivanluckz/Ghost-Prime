@@ -8,11 +8,15 @@ const COMMANDS = [
   ['/thinking', 'off | adaptive'],
   ['/mode', 'plan | auto | full'],
   ['/voice', 'on | off'],
+  ['/tab', 'own | current — which tab Ghost drives'],
+  ['/mirror', 'on | off — chat in Chrome side panel'],
+  ['/site', 'open|strict · allow|block <domain> · list'],
+  ['/settings', 'open the settings panel'],
   ['/status', 'show current settings'],
   ['/new', 'start a new chat'],
   ['/help', 'list commands']
 ]
-const NEEDS_ARG = ['/model', '/effort', '/thinking', '/mode', '/voice']
+const NEEDS_ARG = ['/model', '/effort', '/thinking', '/mode', '/voice', '/tab', '/mirror', '/site']
 
 export default function ChatInput({ onSend, busy }) {
   const [value, setValue] = useState('')

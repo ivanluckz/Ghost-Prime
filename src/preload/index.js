@@ -70,6 +70,38 @@ contextBridge.exposeInMainWorld('ghost', {
     maximize: () => ipcRenderer.send('window:maximize'),
     close: () => ipcRenderer.send('window:close')
   },
+  // Which tab the browser tools act on: 'group' (Ghost's own tab) or 'active' (your focused tab).
+  browserTarget: {
+    get() {
+      return ipcRenderer.invoke('browser:get-target')
+    },
+    set(target) {
+      return ipcRenderer.invoke('browser:set-target', target)
+    }
+  },
+  // Per-site permissions (allow/block lists + strict mode).
+  sites: {
+    get() {
+      return ipcRenderer.invoke('sites:get')
+    },
+    set(policy) {
+      return ipcRenderer.invoke('sites:set', policy)
+    }
+  },
+  // Push the current transcript to the Chrome side panel (mirroring=false tells it the mirror's off).
+  mirrorChat(messages, mirroring) {
+    ipcRenderer.send('chat:mirror', { messages, mirroring })
+  },
+  // Recordable global wake-up shortcut. get() -> { accelerator, default };
+  // set(accelerator) -> { ok, accelerator, default, error? } and re-registers it live.
+  hotkey: {
+    get() {
+      return ipcRenderer.invoke('hotkey:get')
+    },
+    set(accelerator) {
+      return ipcRenderer.invoke('hotkey:set', accelerator)
+    }
+  },
   voice: {
     listenStart() {
       ipcRenderer.send('voice:listen-start')

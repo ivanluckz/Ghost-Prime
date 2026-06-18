@@ -10,6 +10,10 @@ import {
   deleteSession
 } from './memory/db.js'
 import * as voice from './voice/index.js'
+import { getActiveTabMode, setActiveTabMode } from './tools/browser.js'
+import { getPolicy, setPolicy } from './tools/site-policy.js'
+import { setChatState } from './tools/browser-bridge.js'
+import { getHotkey, setHotkey } from './hotkey.js'
 
 // requestId -> AbortController, so the renderer can cancel an in-flight stream.
 const controllers = new Map()
@@ -76,4 +80,22 @@ export function registerIpc() {
   ipcMain.handle('voice:tts-available', () => voice.ttsAvailable())
   ipcMain.on('voice:speak', (_event, { text }) => voice.speak(text))
   ipcMain.on('voice:stop-speaking', () => voice.stopSpeaking())
+
+  // --- Browser: which tab to act on (own tab vs. the tab you're looking at) ---
+  ipcMain.handle('browser:get-target', () => (getActiveTabMode() ? 'active' : 'group'))
+  ipcMain.handle('browser:set-target', (_event, target) => {
+    setActiveTabMode(target === 'active')
+    return getActiveTabMode() ? 'active' : 'group'
+  })
+
+  // --- Per-site permissions ---
+  ipcMain.handle('sites:get', () => getPolicy())
+  ipcMain.handle('sites:set', (_event, policy) => setPolicy(policy || {}))
+
+  // --- Chat mirror to the Chrome side panel (only when the user turns it on) ---
+  ipcMain.on('chat:mirror', (_event, { messages, mirroring }) => setChatState(messages, mirroring))
+
+  // --- Wake-up shortcut (recordable global hotkey) ---
+  ipcMain.handle('hotkey:get', () => getHotkey())
+  ipcMain.handle('hotkey:set', (_event, accelerator) => setHotkey(accelerator))
 }

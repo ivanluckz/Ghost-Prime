@@ -5,12 +5,21 @@ import dotenv from 'dotenv'
 import { initDb, startSession } from './memory/db.js'
 import { registerIpc } from './ipc.js'
 import { startBridge, onBridgeTask, watchExtensionForReload } from './tools/browser-bridge.js'
+import { initHotkey } from './hotkey.js'
 
 // Load .env from the project root. Under electron-vite dev, getAppPath() === project root.
 dotenv.config({ path: join(app.getAppPath(), '.env') })
 
 // Crostini: keep rendering crisp regardless of host DPI scaling. Affects only our window.
 app.commandLine.appendSwitch('force-device-scale-factor', '1')
+
+// Keep working at full speed when the window isn't focused. Ghost spends most of its time in the
+// BACKGROUND while you watch Chrome do the work — but Chromium throttles unfocused/occluded
+// renderers (slows timers, pauses rAF), which made the chat feel stalled the moment you clicked
+// away. These switches (plus webPreferences.backgroundThrottling:false below) keep it live.
+app.commandLine.appendSwitch('disable-background-timer-throttling')
+app.commandLine.appendSwitch('disable-renderer-backgrounding')
+app.commandLine.appendSwitch('disable-backgrounding-occluded-windows')
 
 // GPU acceleration. Crostini's GPU is reachable once "GPU support" is on in chrome://flags, but
 // Chromium blocklists virtio-gpu and the Wayland/GBM path crash-loops (exit_code=8704). So we
@@ -59,7 +68,8 @@ function createWindow() {
       preload: join(__dirname, '../preload/index.js'),
       contextIsolation: true,
       nodeIntegration: false,
-      sandbox: false
+      sandbox: false,
+      backgroundThrottling: false // keep streaming/animations live while you're over in Chrome
     }
   })
 
@@ -151,20 +161,16 @@ app.whenReady().then(() => {
   })
   ipcMain.on('window:close', () => mainWindow?.close())
 
-  // Global hotkey — summon Ghost-Prime from anywhere and focus the input. Rebind with GHOST_HOTKEY
-  // (e.g. "Super+G"); default is Ctrl/Cmd+Shift+G.
-  const hotkey = process.env.GHOST_HOTKEY || 'CommandOrControl+Shift+G'
-  try {
-    globalShortcut.register(hotkey, () => {
-      if (!mainWindow) return
-      if (mainWindow.isMinimized()) mainWindow.restore()
-      mainWindow.show()
-      mainWindow.focus()
-      mainWindow.webContents.send('focus-input')
-    })
-  } catch (e) {
-    console.error('[ghost] could not register hotkey:', e?.message || e)
-  }
+  // Global wake-up shortcut — summon Ghost-Prime from anywhere and focus the input. The accelerator
+  // is recordable in Settings (persisted, re-registered live) and falls back to GHOST_HOTKEY or
+  // Ctrl/Cmd+Shift+G. See src/main/hotkey.js.
+  initHotkey(() => {
+    if (!mainWindow) return
+    if (mainWindow.isMinimized()) mainWindow.restore()
+    mainWindow.show()
+    mainWindow.focus()
+    mainWindow.webContents.send('focus-input')
+  })
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()

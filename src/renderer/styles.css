@@ -1563,6 +1563,258 @@ html.native-frame .sidebar-head {
   background: linear-gradient(var(--cyan), var(--magenta));
 }
 
+/* ---------- Parallel-task tracks ---------- */
+/* When ≥2 tasks run at once, each track's bubbles/tool cards get a colored left edge + dot so you
+   can see at a glance which conversation thread a message belongs to. */
+.msg-tracked .msg-content {
+  border-left-width: 3px;
+  border-left-style: solid;
+  /* border-left-color comes from the inline accent */
+}
+.track-dot {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  margin-right: 6px;
+  vertical-align: middle;
+  box-shadow: 0 0 8px currentColor;
+}
+.track-wrap {
+  border-left: 3px solid transparent; /* color set inline */
+  padding-left: 8px;
+  margin-left: -2px;
+}
+.tasks-bar-label {
+  width: 100%;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+}
+
+/* ---------- Settings popover ---------- */
+.settings-pop {
+  position: fixed;
+  top: 70px;
+  right: 26px;
+  z-index: 60;
+  width: 340px;
+  max-height: calc(100vh - 100px);
+  overflow-y: auto;
+  padding: 6px 16px 16px;
+  border-radius: var(--r-md);
+  border: 1px solid var(--glass-brd);
+  background: linear-gradient(160deg, rgba(16, 22, 40, 0.96), rgba(8, 12, 24, 0.97));
+  -webkit-backdrop-filter: var(--blur);
+  backdrop-filter: var(--blur);
+  box-shadow: var(--inset-hi), var(--shadow-lg);
+  animation: rise 240ms var(--ease-out) both;
+}
+.set-head {
+  position: sticky;
+  top: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 0 8px;
+  margin-bottom: 4px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  background: linear-gradient(180deg, rgba(16, 22, 40, 0.98), rgba(16, 22, 40, 0.7));
+}
+.set-close {
+  background: transparent;
+  border: none;
+  color: var(--ink-dim);
+  cursor: pointer;
+  font-size: 14px;
+  border-radius: 6px;
+  padding: 2px 6px;
+}
+.set-close:hover {
+  color: #fff;
+  background: rgba(255, 255, 255, 0.08);
+}
+.set-section {
+  padding: 12px 0;
+  border-top: 1px solid rgba(255, 255, 255, 0.07);
+}
+.set-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink);
+  margin-bottom: 8px;
+}
+.set-sub {
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+  margin: 12px 0 6px;
+}
+.set-note {
+  margin: 7px 0 0;
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--ink-dim);
+}
+.set-seg {
+  display: flex;
+  gap: 4px;
+  padding: 3px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--glass-brd);
+}
+.set-seg button {
+  flex: 1;
+  padding: 7px 8px;
+  border: none;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--ink-dim);
+  font-size: 12.5px;
+  cursor: pointer;
+  transition: all 140ms var(--ease-out);
+}
+.set-seg button.on {
+  background: linear-gradient(135deg, rgba(0, 230, 255, 0.22), rgba(124, 92, 255, 0.22));
+  color: var(--ink);
+  box-shadow: var(--inset-hi);
+}
+.set-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  cursor: pointer;
+}
+.set-row .set-title {
+  margin-bottom: 0;
+}
+.set-switch {
+  flex: 0 0 auto;
+  margin-top: 3px;
+  width: 18px;
+  height: 18px;
+  accent-color: var(--cyan);
+  cursor: pointer;
+}
+.set-domains {
+  margin-top: 4px;
+}
+.set-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+.set-empty {
+  font-size: 12px;
+  color: var(--ink-faint);
+  font-style: italic;
+}
+.set-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 6px 3px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid var(--glass-brd);
+}
+.set-chip button {
+  border: none;
+  background: transparent;
+  color: var(--ink-dim);
+  cursor: pointer;
+  font-size: 13px;
+  line-height: 1;
+  padding: 0 2px;
+}
+.set-chip button:hover {
+  color: var(--error);
+}
+.set-add {
+  display: flex;
+  gap: 6px;
+}
+.set-add input {
+  flex: 1;
+  min-width: 0;
+  padding: 7px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--glass-brd);
+  background: rgba(0, 0, 0, 0.25);
+  color: var(--ink);
+  font-size: 12.5px;
+}
+.set-add input:focus {
+  outline: none;
+  border-color: rgba(0, 230, 255, 0.5);
+}
+.set-add button {
+  flex: 0 0 auto;
+  padding: 0 12px;
+  border-radius: 8px;
+  border: 1px solid var(--glass-brd);
+  background: rgba(0, 230, 255, 0.16);
+  color: var(--ink);
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.set-add button:hover {
+  background: rgba(0, 230, 255, 0.28);
+}
+.set-hotkey {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 4px;
+}
+.hk-combo {
+  flex: 1;
+  min-width: 0;
+  padding: 7px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--glass-brd);
+  background: rgba(0, 0, 0, 0.25);
+  color: var(--ink);
+  font: 600 12.5px/1.2 var(--mono, ui-monospace, monospace);
+  letter-spacing: 0.3px;
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.set-hotkey button {
+  flex: 0 0 auto;
+  padding: 7px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--glass-brd);
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--ink-dim);
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 140ms var(--ease-out);
+}
+.set-hotkey button:hover {
+  color: var(--ink);
+  background: rgba(255, 255, 255, 0.09);
+}
+.set-hotkey button.on {
+  background: linear-gradient(135deg, rgba(0, 230, 255, 0.24), rgba(124, 92, 255, 0.24));
+  color: var(--ink);
+  box-shadow: var(--inset-hi);
+}
+.set-warn {
+  color: var(--error);
+}
+
 /* ---------- Accessibility ---------- */
 @media (prefers-reduced-motion: reduce) {
   *,
