@@ -1,17 +1,23 @@
-const DEFAULTS = { host: '127.0.0.1', port: 8731, token: 'ghost-local' }
+const DEFAULTS = { host: '127.0.0.1', port: 8731, token: 'ghost-local', glow: true, quietDebugger: false }
+const $ = (id) => document.getElementById(id)
 
-chrome.storage.sync.get(DEFAULTS).then(({ host, port, token }) => {
-  document.getElementById('host').value = host
-  document.getElementById('port').value = port
-  document.getElementById('token').value = token
+chrome.storage.sync.get(DEFAULTS).then((c) => {
+  $('host').value = c.host
+  $('port').value = c.port
+  $('token').value = c.token
+  $('glow').checked = c.glow !== false
+  $('quietDebugger').checked = !!c.quietDebugger
 })
 
-document.getElementById('save').addEventListener('click', async () => {
-  const host = document.getElementById('host').value.trim() || DEFAULTS.host
-  const port = Number(document.getElementById('port').value) || DEFAULTS.port
-  const token = document.getElementById('token').value.trim() || DEFAULTS.token
-  await chrome.storage.sync.set({ host, port, token })
-  const s = document.getElementById('status')
+$('save').addEventListener('click', async () => {
+  await chrome.storage.sync.set({
+    host: $('host').value.trim() || DEFAULTS.host,
+    port: Number($('port').value) || DEFAULTS.port,
+    token: $('token').value.trim() || DEFAULTS.token,
+    glow: $('glow').checked,
+    quietDebugger: $('quietDebugger').checked
+  })
+  const s = $('status')
   s.textContent = 'saved ✓'
   setTimeout(() => (s.textContent = ''), 1500)
 })

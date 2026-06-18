@@ -2,7 +2,9 @@
 // Long-polls the app's local bridge (127.0.0.1) for commands, runs them against the active tab,
 // and posts results back. The app side lives in src/main/tools/browser-bridge.js.
 
-const DEFAULTS = { host: '127.0.0.1', port: 8731, token: 'ghost-local' }
+// glow: highlight the page while Ghost acts on it. quietDebugger: avoid chrome.debugger entirely
+// (no "being debugged" banner) at the cost of canvas-editor typing + background screenshots.
+const DEFAULTS = { host: '127.0.0.1', port: 8731, token: 'ghost-local', glow: true, quietDebugger: false }
 let cfg = { ...DEFAULTS }
 let looping = false
 
@@ -522,6 +524,123 @@ function scrollInPage({ direction = 'down', amount, selector }) {
   return { ok: true, scrollY: el ? el.scrollTop : window.scrollY }
 }
 
+// Injected: a glowing border overlay that says "Ghost is acting here". Refreshes on each action and
+// fades after a short idle. Self-contained, pointer-events:none, top z-index — never blocks the page.
+function glowPage() {
+  const ID = '__ghost_glow__'
+  let el = document.getElementById(ID)
+  if (!el) {
+    el = document.createElement('div')
+    el.id = ID
+    el.setAttribute('aria-hidden', 'true')
+    el.style.cssText =
+      'position:fixed;inset:0;pointer-events:none;z-index:2147483647;opacity:0;transition:opacity .35s ease;' +
+      'box-shadow:inset 0 0 0 2px rgba(0,230,255,.95),inset 0 0 18px 4px rgba(0,230,255,.45),inset 0 0 70px 14px rgba(124,92,255,.22)'
+    ;(document.documentElement || document.body || document).appendChild(el)
+    requestAnimationFrame(() => {
+      el.style.opacity = '1'
+    })
+  } else {
+    el.style.opacity = '1'
+  }
+  clearTimeout(window.__ghostGlowTimer)
+  window.__ghostGlowTimer = setTimeout(() => {
+    const e = document.getElementById(ID)
+    if (!e) return
+    e.style.opacity = '0'
+    setTimeout(() => e.remove(), 400)
+  }, 1400)
+}
+
+// Injected: remove the glow immediately (so it never ends up inside a screenshot).
+function removeGlowInPage() {
+  clearTimeout(window.__ghostGlowTimer)
+  document.getElementById('__ghost_glow__')?.remove()
+}
+
+// Injected: keyboard input WITHOUT the debugger (quiet mode). Inserts text into the focused field and
+// dispatches synthetic key events; handles paste/copy/cut via the page selection. Works on normal
+// inputs/textareas/contenteditable — canvas editors (Docs/Slides/Monaco) need the real debugger.
+function typeInPage({ text, keys, clipboardText }) {
+  const NAMED = { enter: 'Enter', tab: 'Tab', escape: 'Escape', esc: 'Escape', backspace: 'Backspace', delete: 'Delete', del: 'Delete', space: ' ', arrowup: 'ArrowUp', up: 'ArrowUp', arrowdown: 'ArrowDown', down: 'ArrowDown', arrowleft: 'ArrowLeft', left: 'ArrowLeft', arrowright: 'ArrowRight', right: 'ArrowRight', home: 'Home', end: 'End', pageup: 'PageUp', pagedown: 'PageDown' }
+  const setValue = (el, next, caret) => {
+    const proto = el.tagName === 'TEXTAREA' ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype
+    const setter = Object.getOwnPropertyDescriptor(proto, 'value')?.set
+    setter ? setter.call(el, next) : (el.value = next)
+    try {
+      el.selectionStart = el.selectionEnd = caret
+    } catch {}
+    el.dispatchEvent(new Event('input', { bubbles: true }))
+  }
+  const insert = (s) => {
+    const el = document.activeElement
+    if (!el) return
+    if (el.isContentEditable) return void document.execCommand('insertText', false, s)
+    if ((el.tagName === 'INPUT' || el.tagName === 'TEXTAREA') && typeof el.selectionStart === 'number') {
+      const a = el.selectionStart
+      const b = el.selectionEnd
+      return void setValue(el, el.value.slice(0, a) + s + el.value.slice(b), a + s.length)
+    }
+    document.execCommand('insertText', false, s)
+  }
+  const readSel = () => {
+    const el = document.activeElement
+    if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA') && typeof el.selectionStart === 'number')
+      return el.value.slice(el.selectionStart, el.selectionEnd)
+    return String(window.getSelection() || '')
+  }
+  const del = () => {
+    const el = document.activeElement
+    if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA') && typeof el.selectionStart === 'number') {
+      const a = el.selectionStart
+      const b = el.selectionEnd
+      if (a !== b) setValue(el, el.value.slice(0, a) + el.value.slice(b), a)
+      else if (a > 0) setValue(el, el.value.slice(0, a - 1) + el.value.slice(a), a - 1)
+    } else document.execCommand('delete')
+  }
+  const fireKey = (combo) => {
+    const parts = String(combo).split('+').map((s) => s.trim()).filter(Boolean)
+    const main = parts[parts.length - 1] || ''
+    const mods = parts.slice(0, -1).map((m) => m.toLowerCase())
+    const key = NAMED[main.toLowerCase()] || main
+    const init = { key, bubbles: true, cancelable: true, ctrlKey: mods.includes('ctrl') || mods.includes('control'), shiftKey: mods.includes('shift'), altKey: mods.includes('alt'), metaKey: mods.includes('meta') || mods.includes('cmd') || mods.includes('command') }
+    const el = document.activeElement || document.body
+    el.dispatchEvent(new KeyboardEvent('keydown', init))
+    if ((key === 'Backspace' || key === 'Delete') && !init.ctrlKey && !init.metaKey) del()
+    el.dispatchEvent(new KeyboardEvent('keyup', init))
+  }
+  let copied = null
+  if (text != null && String(text) !== '') insert(String(text))
+  const list = keys == null ? [] : Array.isArray(keys) ? keys : [keys]
+  for (const combo of list) {
+    const lc = String(combo).toLowerCase()
+    const mod = /(ctrl|control|cmd|command|meta)\+/.test(lc)
+    if (mod && lc.endsWith('+v')) {
+      insert(String(clipboardText || ''))
+      continue
+    }
+    if (mod && lc.endsWith('+c')) {
+      copied = readSel()
+      continue
+    }
+    if (mod && lc.endsWith('+x')) {
+      copied = readSel()
+      del()
+      continue
+    }
+    fireKey(combo)
+  }
+  return { ok: true, copied }
+}
+
+// Fire the "acting here" glow on a tab (no-op when the toggle is off). Fire-and-forget.
+async function maybeGlow(tabId) {
+  if (cfg.glow === false) return
+  try {
+    await chrome.scripting.executeScript({ target: { tabId }, func: glowPage })
+  } catch {}
+}
+
 // ---- Command dispatch ----
 
 // Open one URL in a background tab, read its text, optionally close it again.
@@ -567,11 +686,15 @@ async function run(cmd, args) {
   // page it would act ON.
   const gate = siteCheck(args.policy, cmd === 'navigate' ? args.url : tab.url)
   if (!gate.ok) throw new Error(gate.reason)
+  // Visual "I'm acting here" glow (toggleable). Skip passive reads (getText/screenshot/waitFor) and
+  // navigate (page is about to change — it glows once it has loaded, below).
+  if (cmd === 'click' || cmd === 'fill' || cmd === 'clickAt' || cmd === 'scroll' || cmd === 'pressKey') maybeGlow(tab.id)
   switch (cmd) {
     case 'navigate': {
       await chrome.tabs.update(tab.id, { url: args.url })
       await waitComplete(tab.id)
       const t = await chrome.tabs.get(tab.id)
+      maybeGlow(tab.id)
       return { url: t.url, title: t.title }
     }
     case 'getText': {
@@ -579,6 +702,8 @@ async function run(cmd, args) {
       return result
     }
     case 'screenshot': {
+      // Clear the glow first so it never shows up inside the screenshot the agent looks at.
+      await chrome.scripting.executeScript({ target: { tabId: tab.id }, func: removeGlowInPage }).catch(() => {})
       // If the tab is already visible, the cheap path captures it (no debugger banner).
       if (tab.active) {
         try {
@@ -586,16 +711,18 @@ async function run(cmd, args) {
           return { base64: String(dataUrl).split(',')[1] || '', url: tab.url }
         } catch {}
       }
-      // Background / occluded / not-focused tab: CDP screenshots it WITHOUT bringing it forward —
-      // this is what lets the bot "see" its tab while you're looking at something else.
-      try {
-        const shot = await withDebugger(tab.id, async (target) => {
-          await cdpSend(target, 'Page.enable').catch(() => {})
-          return cdpSend(target, 'Page.captureScreenshot', { format: 'png', captureBeyondViewport: false })
-        })
-        if (shot && shot.data) return { base64: shot.data, url: tab.url }
-      } catch {}
-      // Last resort (e.g. debugger blocked by policy): bring it forward and capture the visible tab.
+      // Background / occluded tab: CDP screenshots it WITHOUT bringing it forward — but that needs
+      // the debugger, so quiet mode skips it and brings the tab to the front instead.
+      if (!cfg.quietDebugger) {
+        try {
+          const shot = await withDebugger(tab.id, async (target) => {
+            await cdpSend(target, 'Page.enable').catch(() => {})
+            return cdpSend(target, 'Page.captureScreenshot', { format: 'png', captureBeyondViewport: false })
+          })
+          if (shot && shot.data) return { base64: shot.data, url: tab.url }
+        } catch {}
+      }
+      // Quiet mode, or debugger blocked/failed: bring it forward and capture the visible tab.
       await chrome.tabs.update(tab.id, { active: true }).catch(() => {})
       await sleep(150)
       const dataUrl = await chrome.tabs.captureVisibleTab(tab.windowId, { format: 'png' })
@@ -652,6 +779,15 @@ async function run(cmd, args) {
       // `keys` is one combo or an array of them ("Enter", "Control+A", "Control+V", "ArrowDown").
       // Copy/paste/cut go through the real clipboard: paste inserts args.clipboardText; copy/cut
       // read the page selection back into `copied` (the app writes it to the system clipboard).
+      // Quiet mode: type without the debugger (no banner) via a content-script typer instead.
+      if (cfg.quietDebugger) {
+        const [{ result }] = await chrome.scripting.executeScript({
+          target: { tabId: tab.id },
+          func: typeInPage,
+          args: [{ text: args.text, keys: args.keys, clipboardText: args.clipboardText }]
+        })
+        return { ok: true, url: tab.url, copied: result?.copied ?? null }
+      }
       const keys = args.keys == null ? [] : Array.isArray(args.keys) ? args.keys : [args.keys]
       const ops = []
       if (args.text != null && String(args.text) !== '') ops.push({ kind: 'insert', text: String(args.text) })
