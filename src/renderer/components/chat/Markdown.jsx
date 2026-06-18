@@ -2,6 +2,33 @@
 // Supports: code fences, inline `code`, **bold**, *italic*, [links](url),
 // # headings, and -/* and 1. lists. Good enough for chat replies.
 
+import { useState } from 'react'
+
+// A fenced code block with a language label and a one-click Copy button.
+function CodeBlock({ code, lang }) {
+  const [copied, setCopied] = useState(false)
+  const copy = () => {
+    try {
+      navigator.clipboard?.writeText(code)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 1400)
+    } catch {}
+  }
+  return (
+    <div className="md-codeblock">
+      <div className="md-codebar">
+        <span className="md-lang">{lang || 'code'}</span>
+        <button type="button" className={`md-copy${copied ? ' copied' : ''}`} onClick={copy}>
+          {copied ? '✓ Copied' : 'Copy'}
+        </button>
+      </div>
+      <pre className="md-pre">
+        <code>{code}</code>
+      </pre>
+    </div>
+  )
+}
+
 function renderInline(text, kp) {
   const nodes = []
   const regex = /(`[^`]+`)|(\*\*[^*]+\*\*)|(\*[^*]+\*)|(\[[^\]]+\]\([^)]+\))/g
@@ -46,6 +73,7 @@ export default function Markdown({ text }) {
 
     // Code fence
     if (line.trim().startsWith('```')) {
+      const lang = line.trim().slice(3).trim() // language hint after the opening fence, if any
       const buf = []
       i++
       while (i < lines.length && !lines[i].trim().startsWith('```')) {
@@ -53,11 +81,7 @@ export default function Markdown({ text }) {
         i++
       }
       i++ // closing fence (may be absent while streaming)
-      blocks.push(
-        <pre key={key++} className="md-pre">
-          <code>{buf.join('\n')}</code>
-        </pre>
-      )
+      blocks.push(<CodeBlock key={key++} code={buf.join('\n')} lang={lang} />)
       continue
     }
 

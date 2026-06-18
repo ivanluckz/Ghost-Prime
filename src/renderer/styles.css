@@ -1212,6 +1212,78 @@ html.native-frame .sidebar-head {
   text-shadow: 0 0 10px rgba(0, 230, 255, 0.6);
 }
 
+/* Fenced code block: a slim header (language + copy) over the code. */
+.md-codeblock {
+  margin: 2px 0;
+  border: 1px solid var(--glass-brd);
+  border-radius: 12px;
+  overflow: hidden;
+  background: rgba(2, 5, 12, 0.66);
+  box-shadow: var(--inset-hi);
+}
+.md-codebar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 5px 8px 5px 12px;
+  border-bottom: 1px solid var(--glass-brd);
+  background: rgba(255, 255, 255, 0.035);
+}
+.md-lang {
+  font: 600 10px/1 var(--mono, ui-monospace, monospace);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+}
+.md-copy {
+  border: 1px solid var(--glass-brd);
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--ink-dim);
+  font-size: 11px;
+  font-weight: 600;
+  padding: 3px 10px;
+  border-radius: 7px;
+  cursor: pointer;
+  transition: all 140ms var(--ease-out);
+}
+.md-copy:hover {
+  color: var(--ink);
+  background: rgba(0, 230, 255, 0.14);
+  border-color: rgba(0, 230, 255, 0.4);
+}
+.md-copy.copied {
+  color: var(--mint);
+  border-color: rgba(46, 230, 166, 0.5);
+  background: rgba(46, 230, 166, 0.12);
+}
+/* The <pre> now lives inside the bordered wrapper, so strip its own chrome. */
+.md-codeblock .md-pre {
+  margin: 0;
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
+  background: transparent;
+}
+
+/* Assistant gets a small holographic mark next to its name — quiet brand identity in the thread. */
+.msg-assistant .msg-role::before {
+  content: '';
+  display: inline-block;
+  width: 11px;
+  height: 11px;
+  margin-right: 7px;
+  vertical-align: -1px;
+  border-radius: 4px;
+  background: conic-gradient(from 0deg, var(--cyan), var(--violet), var(--magenta), var(--cyan));
+  box-shadow: 0 0 8px rgba(0, 230, 255, 0.5), inset 0 0 4px rgba(255, 255, 255, 0.5);
+}
+
+/* Themed text selection (was default browser blue). */
+::selection {
+  background: rgba(0, 230, 255, 0.3);
+  color: #fff;
+}
+
 /* ---------- Tool feed ---------- */
 .toolcard {
   border: 1px solid var(--glass-brd);
