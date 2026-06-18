@@ -611,12 +611,25 @@ async function loop() {
   }
 }
 
-// Clicking the toolbar icon opens the Ghost-Prime chat side panel (mirrors the app's chat).
+// Clicking the toolbar icon opens the Ghost-Prime chat side panel (mirrors the app's chat). We open
+// it EXPLICITLY from action.onClicked (a real user gesture) instead of relying only on
+// openPanelOnActionClick — that auto-behavior silently no-ops after a cold service-worker start or
+// on some Chrome builds, which is the "panel won't open" symptom. Keep the panel globally enabled.
 function enableSidePanel() {
   try {
-    chrome.sidePanel?.setPanelBehavior({ openPanelOnActionClick: true }).catch(() => {})
+    chrome.sidePanel?.setPanelBehavior({ openPanelOnActionClick: false }).catch(() => {})
+    chrome.sidePanel?.setOptions({ path: 'sidepanel.html', enabled: true }).catch(() => {})
   } catch {}
 }
+
+// Open synchronously within the click gesture (sidePanel.open requires one). windowId is preferred;
+// fall back to tabId for builds that want it.
+chrome.action?.onClicked.addListener((tab) => {
+  const opts = tab && tab.windowId != null ? { windowId: tab.windowId } : { tabId: tab && tab.id }
+  chrome.sidePanel?.open(opts).catch(() => {
+    if (tab && tab.id != null) chrome.sidePanel?.open({ tabId: tab.id }).catch(() => {})
+  })
+})
 
 chrome.runtime.onInstalled.addListener(() => {
   loadCfg().then(loop)
