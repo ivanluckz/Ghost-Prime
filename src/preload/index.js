@@ -43,8 +43,8 @@ contextBridge.exposeInMainWorld('ghost', {
   sessionMessages(sessionId) {
     return ipcRenderer.invoke('db:session-messages', sessionId)
   },
-  newSession() {
-    return ipcRenderer.invoke('db:new-session')
+  newSession(parentId) {
+    return ipcRenderer.invoke('db:new-session', parentId || null)
   },
   setActiveSession(sessionId) {
     return ipcRenderer.invoke('db:set-active-session', sessionId)

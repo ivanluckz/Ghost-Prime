@@ -4,6 +4,11 @@ import ChatInput from '../components/chat/ChatInput.jsx'
 import SessionSidebar from '../components/SessionSidebar.jsx'
 import SettingsPanel from '../components/SettingsPanel.jsx'
 
+// Build identity, injected by electron.vite.config.js — shown in the topbar so it's obvious which
+// build is live (the stamp changes every rebuild). typeof guard keeps it safe if not defined.
+const GHOST_VERSION = typeof __GHOST_VERSION__ !== 'undefined' ? __GHOST_VERSION__ : '0.0.0'
+const GHOST_BUILD = typeof __GHOST_BUILD__ !== 'undefined' ? __GHOST_BUILD__ : ''
+
 // Distinct accents for concurrently-running tasks, so parallel tracks are easy to tell apart.
 const TRACK_COLORS = ['#00d4ff', '#ff7ad9', '#7affb2', '#ffce5a', '#a78bff', '#ff9d6b']
 
@@ -207,6 +212,16 @@ export default function Main() {
     refreshSessions()
   }
 
+  // Branch a sub-chat nested under an existing chat, and switch to it.
+  async function newSubChat(parentId) {
+    stopAll()
+    window.ghost.voice?.stopSpeaking()
+    const id = await window.ghost.newSession(parentId)
+    setActiveId(id)
+    setMessages([])
+    refreshSessions()
+  }
+
   async function selectSession(id) {
     stopAll() // stop in-flight tasks so their stream doesn't bleed into the other chat
     window.ghost.voice?.stopSpeaking()
@@ -372,6 +387,7 @@ export default function Main() {
         activeId={activeId}
         onSelect={selectSession}
         onNew={newChat}
+        onNewSub={newSubChat}
         onDelete={removeSession}
         collapsed={sidebarCollapsed}
         onToggle={() => setSidebarCollapsed((c) => !c)}
@@ -382,6 +398,10 @@ export default function Main() {
             <span className="brand">
               <span className="brand-mark" aria-hidden="true" />
               GHOST<span className="brand-accent">-PRIME</span>
+            </span>
+            <span className="brand-version" title={`Version ${GHOST_VERSION} · built ${GHOST_BUILD}`}>
+              v{GHOST_VERSION}
+              {GHOST_BUILD ? ` · ${GHOST_BUILD}` : ''}
             </span>
           </div>
           <div className="topbar-right">

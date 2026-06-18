@@ -453,6 +453,22 @@ html.native-frame .topbar {
   -webkit-text-fill-color: transparent;
 }
 
+/* Tiny build badge next to the wordmark — lets you confirm a reload picked up new code. */
+.brand-version {
+  margin-left: 10px;
+  align-self: center;
+  font: 500 10.5px/1 var(--mono, ui-monospace, monospace);
+  letter-spacing: 0.04em;
+  color: var(--ink-faint);
+  padding: 3px 7px;
+  border: 1px solid var(--glass-brd);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.04);
+  white-space: nowrap;
+  -webkit-app-region: no-drag;
+  cursor: default;
+}
+
 @keyframes holo {
   to {
     background-position: 300% 0;
@@ -774,6 +790,61 @@ html.native-frame .sidebar-head {
   color: #fff;
   background: rgba(255, 93, 122, 0.32);
   border-color: var(--error);
+}
+
+/* Nested sub-chats: a disclosure caret + a "＋" branch button per row. */
+.session-twisty,
+.session-twisty-spacer {
+  flex: 0 0 auto;
+  width: 16px;
+  display: grid;
+  place-items: center;
+  align-self: center;
+}
+.session-twisty {
+  height: 22px;
+  border: none;
+  background: transparent;
+  color: var(--ink-faint);
+  font-size: 10px;
+  cursor: pointer;
+  border-radius: 5px;
+  transition: color 140ms var(--ease-out);
+}
+.session-twisty:hover {
+  color: var(--ink);
+}
+/* Reserve room on the right for BOTH the sub (＋) and delete (×) buttons. */
+.session-row .session-item {
+  padding-right: 56px;
+}
+.session-sub {
+  position: absolute;
+  right: 32px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 22px;
+  height: 22px;
+  display: grid;
+  place-items: center;
+  border-radius: 7px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--ink-faint);
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+  opacity: 0;
+  transition: all 150ms var(--ease-out);
+}
+.session-row:hover .session-sub,
+.session-sub:focus-visible {
+  opacity: 1;
+}
+.session-sub:hover {
+  color: var(--cyan, #00d4ff);
+  background: rgba(0, 212, 255, 0.16);
+  border-color: rgba(0, 212, 255, 0.5);
 }
 
 /* ---------- Messages ---------- */

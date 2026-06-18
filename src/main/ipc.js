@@ -66,7 +66,7 @@ export function registerIpc() {
 
   ipcMain.handle('db:recent-sessions', () => recentSessions())
   ipcMain.handle('db:session-messages', (_event, sessionId) => sessionMessages(sessionId))
-  ipcMain.handle('db:new-session', () => newSession())
+  ipcMain.handle('db:new-session', (_event, parentId) => newSession(parentId || null))
   ipcMain.handle('db:set-active-session', (_event, sessionId) => setActiveSession(sessionId))
   ipcMain.handle('db:active-session', () => getSessionId())
   ipcMain.handle('db:delete-session', (_event, sessionId) => deleteSession(sessionId))
