@@ -278,22 +278,53 @@ function getSelectionInPage() {
   return s ? s.toString() : ''
 }
 
-// Attach the debugger to a tab, run fn(target), always detach. Surfaces the "started debugging"
-// banner briefly — unavoidable with the CDP keyboard, and the only way to type into canvas editors.
+// Reusable debugger session. The CDP keyboard / background screenshot need chrome.debugger, which
+// shows a "started debugging this browser" banner while attached. Re-attaching per command made the
+// banner FLICKER on every keystroke and screenshot — so instead we attach once, keep the session
+// warm for a short idle window (so a burst of CDP ops reuses it), then auto-detach so the banner
+// clears once the agent pauses. Commands run one at a time, so no locking is needed.
+const dbg = { tabId: null, timer: null }
+
+function detachDebugger() {
+  const id = dbg.tabId
+  if (dbg.timer) {
+    clearTimeout(dbg.timer)
+    dbg.timer = null
+  }
+  dbg.tabId = null
+  if (id == null) return Promise.resolve()
+  return new Promise((r) => chrome.debugger.detach({ tabId: id }, () => { void chrome.runtime.lastError; r() }))
+}
+
+// Chrome detached us (DevTools opened, or the tab navigated/closed) — drop our state so the next
+// command re-attaches cleanly instead of erroring on a stale session.
+chrome.debugger.onDetach?.addListener((source) => {
+  if (source && source.tabId === dbg.tabId) {
+    if (dbg.timer) clearTimeout(dbg.timer)
+    dbg.timer = null
+    dbg.tabId = null
+  }
+})
+
 async function withDebugger(tabId, fn) {
-  const target = { tabId }
-  await new Promise((resolve, reject) => {
-    chrome.debugger.attach(target, '1.3', () => {
-      const e = chrome.runtime.lastError
-      e ? reject(new Error(e.message + ' (close DevTools on this tab if it is open, then retry)')) : resolve()
+  if (dbg.timer) {
+    clearTimeout(dbg.timer) // cancel any pending idle-detach — we're about to reuse the session
+    dbg.timer = null
+  }
+  if (dbg.tabId !== tabId) {
+    if (dbg.tabId != null) await detachDebugger() // targeting a different tab now
+    await new Promise((resolve, reject) => {
+      chrome.debugger.attach({ tabId }, '1.3', () => {
+        const e = chrome.runtime.lastError
+        e ? reject(new Error(e.message + ' (close DevTools on this tab if it is open, then retry)')) : resolve()
+      })
     })
-  })
+    dbg.tabId = tabId
+  }
   try {
-    return await fn(target)
+    return await fn({ tabId })
   } finally {
-    try {
-      await new Promise((r) => chrome.debugger.detach(target, () => r()))
-    } catch {}
+    if (dbg.tabId === tabId) dbg.timer = setTimeout(detachDebugger, 1800) // keep warm, then auto-detach
   }
 }
 
@@ -316,12 +347,21 @@ function clickInPage({ selector, text }) {
     const sel = 'button, a, [role="button"], [role="link"], [role="menuitem"], [role="tab"], [role="option"], input[type="submit"], input[type="button"], summary'
     const controls = [...document.querySelectorAll(sel)].filter(visible)
     const label = (e) => (e.getAttribute('aria-label') || e.innerText || e.value || e.title || '').trim().toLowerCase()
-    let el =
-      controls.find((e) => label(e) === t) ||
-      controls.find((e) => label(e).includes(t)) ||
-      [...document.querySelectorAll('*')].find(
+    // If the only match is a plain text leaf (a <span> inside a button), climb to the nearest real
+    // clickable ancestor so the click lands on the control rather than the inner node.
+    const clickableAncestor = (node) => {
+      for (let e = node; e && e !== document.body; e = e.parentElement) {
+        if (e.matches?.(sel) || typeof e.onclick === 'function' || e.getAttribute?.('tabindex') === '0') return e
+      }
+      return node
+    }
+    let el = controls.find((e) => label(e) === t) || controls.find((e) => label(e).includes(t))
+    if (!el) {
+      const leaf = [...document.querySelectorAll('*')].find(
         (e) => visible(e) && e.childElementCount === 0 && (e.innerText || '').trim().toLowerCase().includes(t)
       )
+      if (leaf) el = clickableAncestor(leaf)
+    }
     if (el) return { ok: fire(el) }
     const clickables = controls
       .map((e) => (e.getAttribute('aria-label') || e.innerText || e.value || e.title || '').trim().replace(/\s+/g, ' '))
@@ -356,7 +396,7 @@ function fillInPage({ selector, label, value }) {
   }
   if (!el && label) {
     const l = String(label).trim().toLowerCase()
-    el = [...document.querySelectorAll('input, textarea, [contenteditable="true"]')].filter(visible).find((e) => {
+    el = [...document.querySelectorAll('input, textarea, select, [contenteditable="true"]')].filter(visible).find((e) => {
       const al = (e.getAttribute('aria-label') || e.placeholder || '').trim().toLowerCase()
       if (al.includes(l)) return true
       if (e.id) {
@@ -368,7 +408,16 @@ function fillInPage({ selector, label, value }) {
   }
   if (!el) return { ok: false }
   el.focus()
-  if (el.isContentEditable) {
+  if (el.tagName === 'SELECT') {
+    // Native dropdown: choose the option whose value or visible text matches (exact, then contains).
+    const want = String(value ?? '').trim().toLowerCase()
+    const opts = [...el.options]
+    const opt =
+      opts.find((o) => o.value.toLowerCase() === want || o.text.trim().toLowerCase() === want) ||
+      (want && opts.find((o) => o.text.trim().toLowerCase().includes(want)))
+    if (!opt) return { ok: false, options: opts.map((o) => o.text.trim()).filter(Boolean).slice(0, 30) }
+    el.value = opt.value
+  } else if (el.isContentEditable) {
     el.textContent = value ?? ''
   } else {
     const proto = el.tagName === 'TEXTAREA' ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype
@@ -392,6 +441,44 @@ function clickAtInPage({ x, y }) {
   if (el.scrollIntoView) el.scrollIntoView({ block: 'center' })
   el.click()
   return { ok: true }
+}
+
+// Injected (async): poll until a selector or visible text shows up, or the timeout elapses.
+// chrome.scripting awaits the returned promise, so the command resolves only once it's found.
+async function waitInPage({ selector, text, timeoutMs }) {
+  const visible = (el) => {
+    const r = el.getBoundingClientRect()
+    if (r.width < 1 || r.height < 1) return false
+    const s = getComputedStyle(el)
+    return s.visibility !== 'hidden' && s.display !== 'none' && s.opacity !== '0'
+  }
+  const hit = () => {
+    if (selector) {
+      let els
+      try {
+        els = document.querySelectorAll(selector)
+      } catch {
+        return 'invalid'
+      }
+      if ([...els].some(visible)) return true
+    }
+    if (text) {
+      const t = String(text).toLowerCase()
+      const ok = [...document.querySelectorAll('body *')].some(
+        (e) => e.childElementCount === 0 && visible(e) && (e.textContent || '').toLowerCase().includes(t)
+      )
+      if (ok) return true
+    }
+    return false
+  }
+  const deadline = Date.now() + (Number(timeoutMs) || 10000)
+  for (;;) {
+    const h = hit()
+    if (h === 'invalid') return { ok: false, invalid: true }
+    if (h === true) return { ok: true }
+    if (Date.now() >= deadline) return { ok: false, timeout: true }
+    await new Promise((r) => setTimeout(r, 200))
+  }
 }
 
 function scrollInPage({ direction = 'down', amount, selector }) {
@@ -530,6 +617,10 @@ async function run(cmd, args) {
     case 'fill': {
       const frames = await injectAllFrames(tab.id, fillInPage, args)
       if (frames.some((f) => f?.result?.ok)) return { ok: true }
+      const opts = [...new Set(frames.flatMap((f) => f?.result?.options || []))]
+      if (opts.length) {
+        throw new Error(`Couldn't match "${args.value}" to a dropdown option. Choose one of: ${opts.map((o) => `"${o}"`).join(', ')}.`)
+      }
       throw new Error(`Couldn't find a field for ${args.label ? `label "${args.label}"` : `selector ${JSON.stringify(args.selector)}`}.`)
     }
     case 'clickAt': {
@@ -540,6 +631,20 @@ async function run(cmd, args) {
     case 'scroll': {
       const [{ result }] = await chrome.scripting.executeScript({ target: { tabId: tab.id }, func: scrollInPage, args: [args] })
       return result || { ok: true }
+    }
+    case 'waitFor': {
+      const timeoutMs = Math.min(Number(args.timeoutMs) || 10000, 30000)
+      const [{ result }] = await chrome.scripting.executeScript({
+        target: { tabId: tab.id },
+        func: waitInPage,
+        args: [{ selector: args.selector, text: args.text, timeoutMs }]
+      })
+      if (result?.invalid) throw new Error(`Invalid CSS selector ${JSON.stringify(args.selector)}.`)
+      if (result?.ok) return { ok: true, url: tab.url }
+      throw new Error(
+        `Timed out after ${Math.round(timeoutMs / 1000)}s waiting for ` +
+          `${args.selector ? `selector ${JSON.stringify(args.selector)}` : `text "${args.text}"`} to appear.`
+      )
     }
     case 'pressKey': {
       // Real keyboard input to the focused element — the only way to type into Google Docs/Slides,
@@ -618,6 +723,24 @@ async function pollOnce() {
   })
 }
 
+// Toolbar badge as a connection light: no badge when connected to the Ghost-Prime app, a red "!"
+// when not — and the icon tooltip always spells out the state. Lets you tell at a glance whether
+// the bridge is live (the thing that was invisible before).
+let lastConnected = null
+function setConnected(on) {
+  if (on === lastConnected) return
+  lastConnected = on
+  try {
+    chrome.action?.setBadgeText?.({ text: on ? '' : '!' })
+    chrome.action?.setBadgeBackgroundColor?.({ color: on ? '#1f9d55' : '#c0392b' })
+    chrome.action?.setTitle?.({
+      title: on
+        ? 'Ghost-Prime — connected to the app · click for the chat panel'
+        : 'Ghost-Prime — app not connected (is Ghost-Prime running?)'
+    })
+  } catch {}
+}
+
 async function loop() {
   if (looping) return
   looping = true
@@ -625,7 +748,9 @@ async function loop() {
     for (;;) {
       try {
         await pollOnce()
+        setConnected(true)
       } catch {
+        setConnected(false)
         await sleep(2000) // app not up yet / lost connection — back off, then retry
       }
     }
@@ -705,4 +830,5 @@ chrome.storage.onChanged.addListener((_changes, areaName) => {
   if (areaName === 'sync') loadCfg()
 })
 enableSidePanel()
+setConnected(false) // show "not connected" until the first successful poll proves the bridge is up
 loadCfg().then(loop)

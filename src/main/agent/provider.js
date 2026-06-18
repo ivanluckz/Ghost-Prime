@@ -45,6 +45,7 @@ const BROWSER_TOOL_NAMES = [
   'browser_read_pages',
   'browser_click_at',
   'browser_scroll',
+  'browser_wait_for',
   'browser_press_key'
 ].map((n) => `mcp__${BROWSER_SERVER}__${n}`)
 
@@ -111,6 +112,7 @@ DRIVING THE BROWSER:
 - To research or compare across multiple pages, call browser_read_pages with ALL the URLs at once (one call opens and reads them in parallel) — far faster than visiting pages one by one.
 - When clicking by text or selector keeps failing, call browser_screenshot to SEE the page, then browser_click_at with the element's center as x,y fractions (0..1) of the image — you can see it, so aim for it.
 - If what you need is off-screen (long page, chat history, infinite scroll), browser_scroll (down/up/top/bottom), then look again with browser_screenshot or browser_get_text.
+- After navigating or clicking on a site that loads content dynamically (single-page apps, spinners, search results, post-login redirects), call browser_wait_for with the selector or visible text you expect BEFORE acting — it's far more reliable than guessing or hammering screenshots while the page is still loading.
 - To TYPE into an editor that browser_fill can't fill — Google Docs/Slides, code editors, Notion, anything with no real input field — first click into it (browser_click / browser_click_at), then browser_press_key with { text } to type, and { keys } for shortcuts/special keys ("Enter", "Control+A", "ArrowDown"). browser_fill is only for real form fields; reach for browser_press_key the moment a fill has nowhere to land.
 - Copy and paste work through the real system clipboard via browser_press_key: { keys: "Control+C" } (or "Control+X") copies the current selection out, and { keys: "Control+V" } pastes the clipboard in. So to move text between pages/apps: select it (e.g. Control+A), Control+C, click the destination, Control+V. To paste text YOU already have, just use { text } — no clipboard needed.
 - Per-site permissions may block a site: if a browser tool returns that a site is blocked or not on the allow-list, do NOT keep retrying — tell the user it's blocked and that they can change it in Settings → Site access.
@@ -238,9 +240,10 @@ async function getBrowserMcpServer() {
       ),
       tool(
         'browser_fill',
-        'Type a value into an input/textarea. Pass { label, value } to target the field by its ' +
-          'visible label/placeholder, or { selector, value } with a STANDARD CSS selector ' +
-          '(#id, .class, [name="email"]). Never use jQuery selectors like :contains().',
+        'Type a value into an input/textarea, OR choose an option in a native <select> dropdown ' +
+          '(matched by the option\'s value or visible text). Pass { label, value } to target the ' +
+          'field by its visible label/placeholder, or { selector, value } with a STANDARD CSS ' +
+          'selector (#id, .class, [name="email"]). Never use jQuery selectors like :contains().',
         { selector: z.string().optional(), label: z.string().optional(), value: z.string() },
         async ({ selector, label, value }) => {
           await browser.browserFill({ selector, label, value })
@@ -297,6 +300,20 @@ async function getBrowserMcpServer() {
         async ({ direction, amount, selector }) => {
           await browser.browserScroll({ direction, amount, selector })
           return { content: [{ type: 'text', text: `Scrolled ${direction || 'down'}${selector ? ` in ${selector}` : ''}.` }] }
+        }
+      ),
+      tool(
+        'browser_wait_for',
+        'Wait until something appears on the current page before you act — use this whenever a page ' +
+          'loads or changes content AFTER navigation: single-page apps, lazy/infinite lists, loading ' +
+          'spinners, search results, post-login redirects. Pass { selector } (standard CSS) or ' +
+          '{ text } (visible text to wait for); optional { timeoutMs } (default 10000, max 30000). ' +
+          'Resolves as soon as it shows up, or errors on timeout. Far more reliable than clicking ' +
+          'blind or taking repeated screenshots when you already know what you are waiting for.',
+        { selector: z.string().optional(), text: z.string().optional(), timeoutMs: z.number().optional() },
+        async ({ selector, text, timeoutMs }) => {
+          await browser.browserWaitFor({ selector, text, timeoutMs })
+          return { content: [{ type: 'text', text: `Found ${selector ? `selector ${selector}` : `"${text}"`}.` }] }
         }
       ),
       tool(

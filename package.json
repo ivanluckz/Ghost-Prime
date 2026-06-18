@@ -1,6 +1,6 @@
 {
   "name": "ghost-prime",
-  "version": "1.2.0",
+  "version": "1.3.0",
   "description": "Local AI agent for Chrome OS / Crostini — sees, controls, and remembers.",
   "main": "./out/main/index.js",
   "license": "MIT",

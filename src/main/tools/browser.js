@@ -547,6 +547,29 @@ export async function browserPressKey({ keys, text } = {}) {
   return { ok: true, url: p.url() }
 }
 
+// Wait until a selector or visible text appears — for pages that render content after load
+// (SPAs, spinners, lazy lists, post-login redirects). Resolves when found, throws on timeout.
+export async function browserWaitFor({ selector, text, timeoutMs } = {}) {
+  const hasText = text != null && String(text).trim() !== ''
+  if (!selector && !hasText) throw new Error('browser_wait_for needs a "selector" or "text" to wait for')
+  const ms = Math.min(Number(timeoutMs) || 10000, 30000)
+  if ((await ensureBrowserBackend()) === 'extension') {
+    // Give the bridge call headroom beyond the in-page wait so it never times out first.
+    return bridge.sendCommand('waitFor', { selector, text, timeoutMs: ms, ...meta() }, ms + 6000)
+  }
+  const p = await ensurePage()
+  if (selector) {
+    await p.waitForSelector(selector, { timeout: ms, state: 'visible' })
+  } else {
+    await p.waitForFunction(
+      (t) => !!document.body && document.body.innerText.toLowerCase().includes(String(t).toLowerCase()),
+      text,
+      { timeout: ms }
+    )
+  }
+  return { ok: true, url: p.url() }
+}
+
 export async function browserClose() {
   if (context) {
     await context.close().catch(() => {})
