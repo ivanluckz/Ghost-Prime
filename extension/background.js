@@ -253,6 +253,27 @@ function cdpSend(target, method, params) {
   })
 }
 
+// Ctrl/Cmd + C/V/X → 'copy' | 'paste' | 'cut' | null. These go through the real system clipboard
+// (the app passes clipboardText in for paste and reads `copied` back out) — a synthetic Ctrl+V
+// won't make Chrome paste, and a synthetic Ctrl+C won't write the clipboard.
+function clipboardIntent(combo) {
+  const parts = String(combo).toLowerCase().split('+').map((s) => s.trim()).filter(Boolean)
+  if (parts.length < 2) return null
+  const hasMod = parts.slice(0, -1).some((p) => ['ctrl', 'control', 'cmd', 'command', 'meta', 'super'].includes(p))
+  if (!hasMod) return null
+  return { c: 'copy', v: 'paste', x: 'cut' }[parts[parts.length - 1]] || null
+}
+
+// Injected: the current selection — handles <input>/<textarea> carets and normal page selections.
+function getSelectionInPage() {
+  const el = document.activeElement
+  if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA') && typeof el.selectionStart === 'number') {
+    return el.value.slice(el.selectionStart, el.selectionEnd)
+  }
+  const s = window.getSelection()
+  return s ? s.toString() : ''
+}
+
 // Attach the debugger to a tab, run fn(target), always detach. Surfaces the "started debugging"
 // banner briefly — unavoidable with the CDP keyboard, and the only way to type into canvas editors.
 async function withDebugger(tabId, fn) {
@@ -501,19 +522,53 @@ async function run(cmd, args) {
       // Real keyboard input to the focused element — the only way to type into Google Docs/Slides,
       // Monaco, and other editors that have no fillable <input>. `text` is inserted verbatim;
       // `keys` is one combo or an array of them ("Enter", "Control+A", "Control+V", "ArrowDown").
-      return await withDebugger(tab.id, async (target) => {
-        if (args.text != null && String(args.text) !== '') {
-          await cdpSend(target, 'Input.insertText', { text: String(args.text) })
+      // Copy/paste/cut go through the real clipboard: paste inserts args.clipboardText; copy/cut
+      // read the page selection back into `copied` (the app writes it to the system clipboard).
+      const keys = args.keys == null ? [] : Array.isArray(args.keys) ? args.keys : [args.keys]
+      const ops = []
+      if (args.text != null && String(args.text) !== '') ops.push({ kind: 'insert', text: String(args.text) })
+      for (const combo of keys) {
+        const intent = clipboardIntent(combo)
+        if (intent === 'paste') ops.push({ kind: 'insert', text: String(args.clipboardText || '') })
+        else if (intent === 'copy') ops.push({ kind: 'copy' })
+        else if (intent === 'cut') ops.push({ kind: 'cut' })
+        else ops.push({ kind: 'key', combo })
+      }
+
+      const readSelection = async () => {
+        try {
+          const [{ result }] = await chrome.scripting.executeScript({ target: { tabId: tab.id }, func: getSelectionInPage })
+          return result || ''
+        } catch {
+          return ''
         }
-        const keys = args.keys == null ? [] : Array.isArray(args.keys) ? args.keys : [args.keys]
-        for (const combo of keys) {
-          const evs = cdpKeyEvents(combo)
-          if (!evs) continue
-          for (const ev of evs) await cdpSend(target, 'Input.dispatchKeyEvent', ev)
-          await sleep(15) // let the editor process each keystroke
+      }
+
+      let copied = null
+      // Copy-only needs no debugger (so no "started debugging" banner). Anything that types does.
+      const needsDebugger = ops.some((o) => o.kind === 'insert' || o.kind === 'key' || o.kind === 'cut')
+      const runOps = async (target) => {
+        for (const op of ops) {
+          if (op.kind === 'insert') {
+            if (op.text) await cdpSend(target, 'Input.insertText', { text: op.text })
+          } else if (op.kind === 'key') {
+            const evs = cdpKeyEvents(op.combo)
+            if (!evs) continue
+            for (const ev of evs) await cdpSend(target, 'Input.dispatchKeyEvent', ev)
+            await sleep(15) // let the editor process each keystroke
+          } else if (op.kind === 'copy') {
+            copied = await readSelection()
+          } else if (op.kind === 'cut') {
+            copied = await readSelection()
+            const evs = cdpKeyEvents('Backspace') // remove the cut selection
+            for (const ev of evs) await cdpSend(target, 'Input.dispatchKeyEvent', ev)
+          }
         }
-        return { ok: true, url: tab.url }
-      })
+      }
+
+      if (needsDebugger) await withDebugger(tab.id, runOps)
+      else await runOps(null)
+      return { ok: true, url: tab.url, copied }
     }
     default:
       throw new Error(`unknown command "${cmd}"`)

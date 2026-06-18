@@ -2,6 +2,7 @@ import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { existsSync } from 'node:fs'
 import { spawn, spawnSync } from 'node:child_process'
+import { clipboard } from 'electron'
 import { chromium } from 'playwright'
 import * as bridge from './browser-bridge.js'
 import { policySnapshot, checkUrl } from './site-policy.js'
@@ -490,18 +491,53 @@ function normalizeCombo(combo) {
     .join('+')
 }
 
+// Is this combo a clipboard shortcut (Ctrl/Cmd + C/V/X)? Those can't be done with a synthetic
+// keystroke — Chrome won't read/write the real clipboard for a scripted key event — so we route
+// them through Electron's native clipboard instead. Returns 'copy' | 'paste' | 'cut' | null.
+function clipboardIntent(combo) {
+  const parts = String(combo).toLowerCase().split('+').map((s) => s.trim()).filter(Boolean)
+  if (parts.length < 2) return null
+  const hasMod = parts.slice(0, -1).some((p) => ['ctrl', 'control', 'cmd', 'command', 'meta', 'super'].includes(p))
+  if (!hasMod) return null
+  return { c: 'copy', v: 'paste', x: 'cut' }[parts[parts.length - 1]] || null
+}
+
 // Send real keystrokes to whatever has focus on the page. `text` types literal characters;
 // `keys` presses one combo or a list of them ("Enter", "Control+A", "Control+V", "ArrowDown").
 // This is what lets the agent type into Google Docs/Slides, Monaco, and other editors that have
-// no fillable form field for browser_fill to target.
+// no fillable form field for browser_fill to target. Copy/paste/cut (Ctrl/Cmd+C/V/X) are handled
+// via the real system clipboard: paste inserts the clipboard text; copy/cut read the page
+// selection back into the clipboard so it can be pasted elsewhere.
 export async function browserPressKey({ keys, text } = {}) {
   const hasText = text != null && String(text) !== ''
   const keyList = keys == null ? [] : Array.isArray(keys) ? keys : [keys]
   if (!hasText && !keyList.length) throw new Error('browser_press_key needs "text" to type and/or "keys" to press')
-  if ((await ensureBrowserBackend()) === 'extension') return bridge.sendCommand('pressKey', { keys, text, ...meta() }, 30000)
+  if ((await ensureBrowserBackend()) === 'extension') {
+    // Hand the extension the current clipboard text (for paste) and take back any copied selection.
+    const r = await bridge.sendCommand('pressKey', { keys, text, clipboardText: clipboard.readText(), ...meta() }, 30000)
+    if (r && typeof r.copied === 'string' && r.copied) {
+      try {
+        clipboard.writeText(r.copied)
+      } catch {}
+    }
+    return r
+  }
   const p = await ensurePage()
   if (hasText) await p.keyboard.type(String(text))
-  for (const combo of keyList) await p.keyboard.press(normalizeCombo(combo))
+  for (const combo of keyList) {
+    const intent = clipboardIntent(combo)
+    if (intent === 'paste') await p.keyboard.insertText(clipboard.readText())
+    else if (intent === 'copy' || intent === 'cut') {
+      const sel = await p.evaluate(() => {
+        const el = document.activeElement
+        if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA') && typeof el.selectionStart === 'number')
+          return el.value.slice(el.selectionStart, el.selectionEnd)
+        return String(window.getSelection() || '')
+      })
+      if (sel) clipboard.writeText(sel)
+      if (intent === 'cut') await p.keyboard.press('Backspace')
+    } else await p.keyboard.press(normalizeCombo(combo))
+  }
   return { ok: true, url: p.url() }
 }
 
