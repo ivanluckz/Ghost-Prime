@@ -26,8 +26,7 @@ export default function ChatInput({ onSend, busy }) {
   // Global hotkey (Ctrl/Cmd+Shift+G) summons the window and lands the cursor right here.
   useEffect(() => window.ghost.onFocusInput?.(() => taRef.current?.focus()), [])
 
-  // Send is never blocked by a running task — that's what makes multitasking work. You can fire
-  // off another job (or queue several) while earlier ones are still streaming.
+  // Send is never blocked: a message sent while a task is running is queued and runs next.
   function submit(e) {
     e.preventDefault()
     if (!value.trim()) return
@@ -60,7 +59,7 @@ export default function ChatInput({ onSend, busy }) {
       : voiceState === 'transcribing'
         ? 'Transcribing…'
         : busy
-          ? 'Add another task — it runs alongside the others (Enter to send)'
+          ? 'Busy — your message will queue and run next (Enter to send)'
           : 'Message Ghost-Prime…   (Enter to send, Shift+Enter for newline, / for commands)'
 
   const v = value.trim()

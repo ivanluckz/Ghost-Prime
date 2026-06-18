@@ -9,9 +9,6 @@ import SettingsPanel from '../components/SettingsPanel.jsx'
 const GHOST_VERSION = typeof __GHOST_VERSION__ !== 'undefined' ? __GHOST_VERSION__ : '0.0.0'
 const GHOST_BUILD = typeof __GHOST_BUILD__ !== 'undefined' ? __GHOST_BUILD__ : ''
 
-// Distinct accents for concurrently-running tasks, so parallel tracks are easy to tell apart.
-const TRACK_COLORS = ['#00d4ff', '#ff7ad9', '#7affb2', '#ffce5a', '#a78bff', '#ff9d6b']
-
 // Autonomy modes, cycled with Shift+Tab (like Claude Code).
 const MODES = [
   { id: 'plan', label: 'PLAN', hint: 'read-only — plans, runs nothing' },
@@ -21,7 +18,8 @@ const MODES = [
 
 export default function Main() {
   const [messages, setMessages] = useState([]) // { role:'user'|'assistant'|'tool', reqId, ... }
-  const [running, setRunning] = useState({}) // reqId -> { prompt, startedAt } — live parallel tasks
+  const [running, setRunning] = useState({}) // reqId -> { prompt, startedAt } — the single in-flight task
+  const [queue, setQueue] = useState([]) // prompts waiting their turn (FIFO) — one task runs at a time
   const [mode, setMode] = useState('auto')
   const [agent, setAgent] = useState({}) // { model, effort, thinking } — runtime overrides via / commands
   const [voiceOut, setVoiceOut] = useState(false) // speak replies aloud
@@ -201,6 +199,11 @@ export default function Main() {
   function stopAll() {
     Object.keys(running).forEach((id) => window.ghost.abort(id))
     setRunning({})
+    setQueue([]) // also drop anything waiting in the queue
+  }
+
+  function removeFromQueue(idx) {
+    setQueue((q) => q.filter((_, i) => i !== idx))
   }
 
   async function newChat() {
@@ -350,35 +353,39 @@ export default function Main() {
     }
   }
 
-  // Fire a task. Deliberately NOT blocked while others run — that's the point of multitasking.
-  // Each task gets the already-completed conversation as context (running tasks left out so
-  // parallel jobs stay independent), then streams back on its own request id.
-  function send(text) {
-    const t = text.trim()
-    if (!t) return
-    if (runCommand(t)) return // a "/" command — handled locally, nothing goes to the agent
+  // Send a prompt to the agent NOW. History is the conversation so far (each task runs sequentially,
+  // so by the time we dispatch, prior replies are already in `messages` as context).
+  function dispatch(t) {
     window.ghost.voice?.stopSpeaking()
-    const runningIds = new Set(Object.keys(running))
     const history = messages
-      .filter((m) => !runningIds.has(m.reqId) && (m.role === 'user' || m.role === 'assistant'))
+      .filter((m) => m.role === 'user' || m.role === 'assistant')
       .map(({ role, content }) => ({ role, content }))
     history.push({ role: 'user', content: t })
     const reqId = window.ghost.sendMessage(history, mode, agent)
     setMessages((prev) => [...prev, { role: 'user', content: t, reqId }])
-    setRunning((prev) => ({ ...prev, [reqId]: { prompt: t, startedAt: Date.now() } }))
+    setRunning({ [reqId]: { prompt: t, startedAt: Date.now() } }) // exactly one task at a time
+  }
+
+  // One task runs at a time. If something's already running (or queued), this message waits its turn.
+  function send(text) {
+    const t = text.trim()
+    if (!t) return
+    if (runCommand(t)) return // a "/" command — handled locally, nothing goes to the agent
+    if (Object.keys(running).length > 0 || queue.length > 0) setQueue((q) => [...q, t])
+    else dispatch(t)
   }
   sendRef.current = send
 
+  // Drain the queue: whenever nothing is running and prompts are waiting, fire the next one.
+  useEffect(() => {
+    if (Object.keys(running).length > 0 || queue.length === 0) return
+    const next = queue[0]
+    setQueue((q) => q.slice(1))
+    dispatch(next)
+  }, [running, queue])
+
   const modeInfo = MODES.find((m) => m.id === mode) || MODES[1]
   const runningIds = new Set(Object.keys(running))
-  // Order running tasks by start time and give each a stable accent — only when ≥2 run at once, so
-  // a single task stays clean. Used to color-code each track's messages and its chip.
-  const runningOrder = Object.entries(running)
-    .sort((a, b) => (a[1].startedAt || 0) - (b[1].startedAt || 0))
-    .map(([id]) => id)
-  const multiTrack = runningOrder.length > 1
-  const trackColor = (reqId) =>
-    multiTrack && reqId && running[reqId] ? TRACK_COLORS[runningOrder.indexOf(reqId) % TRACK_COLORS.length] : null
 
   return (
     <div className="main fade-in">
@@ -444,7 +451,7 @@ export default function Main() {
               ⚙
             </button>
             <span className={`status ${busy ? 'status-busy' : ''}`}>
-              {busy ? `working… ${Object.keys(running).length > 1 ? `(${Object.keys(running).length})` : ''}`.trim() : 'ready'}
+              {busy ? `working…${queue.length ? ` +${queue.length} queued` : ''}` : queue.length ? `${queue.length} queued` : 'ready'}
             </span>
             {!window.ghost.platform?.nativeFrame && (
               <div className="win-controls">
@@ -491,30 +498,40 @@ export default function Main() {
             onChatsCleared={clearAllChats}
           />
         )}
-        <MessageList messages={messages} onExample={send} runningIds={runningIds} trackColor={trackColor} />
-        {busy && (
-          <div className="tasks-bar" title="Running in parallel — each finishes on its own">
-            {multiTrack && <span className="tasks-bar-label">{runningOrder.length} tasks running in parallel</span>}
-            {Object.entries(running).map(([id, t]) => {
-              const tc = trackColor(id)
-              return (
-                <div className="task-chip" key={id} style={tc ? { borderColor: tc, boxShadow: `0 0 0 1px ${tc}55` } : undefined}>
-                  <span className="tool-spinner" style={tc ? { borderTopColor: tc } : undefined} />
-                  <span className="task-chip-text">{t.prompt}</span>
-                  <button
-                    className="task-chip-stop"
-                    onClick={() => stopTask(id)}
-                    title="Stop this task"
-                    aria-label="Stop this task"
-                  >
-                    ✕
-                  </button>
-                </div>
-              )
-            })}
-            {Object.keys(running).length > 1 && (
-              <button className="task-stop-all" onClick={stopAll} title="Stop every running task">
-                Stop all
+        <MessageList messages={messages} onExample={send} runningIds={runningIds} />
+        {(busy || queue.length > 0) && (
+          <div className="tasks-bar" title="One task runs at a time — the rest wait in the queue">
+            {Object.entries(running).map(([id, t]) => (
+              <div className="task-chip" key={id}>
+                <span className="tool-spinner" />
+                <span className="task-chip-text">{t.prompt}</span>
+                <button
+                  className="task-chip-stop"
+                  onClick={() => stopTask(id)}
+                  title="Stop this task"
+                  aria-label="Stop this task"
+                >
+                  ✕
+                </button>
+              </div>
+            ))}
+            {queue.map((q, i) => (
+              <div className="task-chip task-chip-queued" key={`q${i}`}>
+                <span className="task-queue-pos">{i + 1}</span>
+                <span className="task-chip-text">{q}</span>
+                <button
+                  className="task-chip-stop"
+                  onClick={() => removeFromQueue(i)}
+                  title="Remove from queue"
+                  aria-label="Remove from queue"
+                >
+                  ✕
+                </button>
+              </div>
+            ))}
+            {queue.length > 0 && (
+              <button className="task-stop-all" onClick={stopAll} title="Stop the current task and clear the queue">
+                Clear queue
               </button>
             )}
           </div>

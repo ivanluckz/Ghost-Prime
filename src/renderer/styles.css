@@ -1371,6 +1371,27 @@ html.native-frame .sidebar-head {
   text-overflow: ellipsis;
 }
 
+/* Queued (not-yet-running) messages — dimmer than the active task, with a position badge. */
+.task-chip-queued {
+  border-color: var(--glass-brd);
+  background: rgba(255, 255, 255, 0.05);
+  box-shadow: none;
+  color: var(--ink-dim);
+}
+.task-queue-pos {
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid var(--glass-brd);
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--ink-dim);
+}
+
 .task-chip-stop {
   flex: 0 0 auto;
   width: 18px;
