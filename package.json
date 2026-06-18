@@ -7,6 +7,7 @@
   "scripts": {
     "dev": "ELECTRON_OZONE_PLATFORM_HINT=x11 electron-vite dev",
     "build": "electron-vite build",
+    "postbuild": "node scripts/push-after-build.mjs",
     "start": "electron-vite preview",
     "rebuild": "electron-rebuild -f -o better-sqlite3",
     "postinstall": "electron-rebuild -f -o better-sqlite3",
