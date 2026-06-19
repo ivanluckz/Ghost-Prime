@@ -11,7 +11,8 @@
     "start": "electron-vite preview",
     "rebuild": "electron-rebuild -f -o better-sqlite3",
     "postinstall": "electron-rebuild -f -o better-sqlite3",
-    "ext:deploy": "node scripts/deploy-extension.mjs"
+    "ext:deploy": "node scripts/deploy-extension.mjs",
+    "bridge:smoke": "node scripts/bridge-smoke.mjs"
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.3.177",
