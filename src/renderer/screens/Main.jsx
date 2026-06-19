@@ -3,6 +3,7 @@ import MessageList from '../components/chat/MessageList.jsx'
 import ChatInput from '../components/chat/ChatInput.jsx'
 import SessionSidebar from '../components/SessionSidebar.jsx'
 import SettingsPanel from '../components/SettingsPanel.jsx'
+import ActivityPanel from '../components/ActivityPanel.jsx'
 
 // Build identity, injected by electron.vite.config.js — shown in the topbar so it's obvious which
 // build is live (the stamp changes every rebuild). typeof guard keeps it safe if not defined.
@@ -29,6 +30,8 @@ export default function Main() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [mirror, setMirror] = useState(false) // mirror chat into Chrome's side panel
+  const [activityOpen, setActivityOpen] = useState(true) // right-hand Mission Control activity panel
+  const [browserTarget, setBrowserTarget] = useState('group') // which tab browser tools act on
   const voiceOutRef = useRef(false)
   const sendRef = useRef(null) // latest send(), so externally-pushed tasks avoid a stale closure
 
@@ -40,6 +43,7 @@ export default function Main() {
     window.ghost.voice?.ttsAvailable().then(setTtsOk).catch(() => setTtsOk(false))
     refreshSessions()
     window.ghost.activeSession?.().then(setActiveId).catch(() => {})
+    window.ghost.browserTarget?.get().then(setBrowserTarget).catch(() => {})
   }, [])
 
   // Keyboard: Shift+Tab cycles autonomy mode; Ctrl/Cmd+N starts a new chat.
@@ -309,6 +313,7 @@ export default function Main() {
         else {
           const t = arg === 'current' || arg === 'active' ? 'active' : 'group'
           window.ghost.browserTarget?.set(t)
+          setBrowserTarget(t)
           note(`✓ Browser acts on ${t === 'active' ? 'your current tab' : 'its own tab'}`)
         }
         return true
@@ -386,6 +391,7 @@ export default function Main() {
 
   const modeInfo = MODES.find((m) => m.id === mode) || MODES[1]
   const runningIds = new Set(Object.keys(running))
+  const tools = messages.filter((m) => m.role === 'tool') // fed to the Mission Control activity panel
 
   return (
     <div className="main fade-in">
@@ -450,6 +456,15 @@ export default function Main() {
             >
               ⚙
             </button>
+            <button
+              type="button"
+              className={`voice-toggle ${activityOpen ? 'on' : ''}`}
+              onClick={() => setActivityOpen((o) => !o)}
+              title={activityOpen ? 'Hide activity panel' : 'Show activity panel'}
+              aria-label="Toggle activity panel"
+            >
+              ◨
+            </button>
             <span className={`status ${busy ? 'status-busy' : ''}`}>
               {busy ? `working…${queue.length ? ` +${queue.length} queued` : ''}` : queue.length ? `${queue.length} queued` : 'ready'}
             </span>
@@ -499,45 +514,22 @@ export default function Main() {
           />
         )}
         <MessageList messages={messages} onExample={send} runningIds={runningIds} />
-        {(busy || queue.length > 0) && (
-          <div className="tasks-bar" title="One task runs at a time — the rest wait in the queue">
-            {Object.entries(running).map(([id, t]) => (
-              <div className="task-chip" key={id}>
-                <span className="tool-spinner" />
-                <span className="task-chip-text">{t.prompt}</span>
-                <button
-                  className="task-chip-stop"
-                  onClick={() => stopTask(id)}
-                  title="Stop this task"
-                  aria-label="Stop this task"
-                >
-                  ✕
-                </button>
-              </div>
-            ))}
-            {queue.map((q, i) => (
-              <div className="task-chip task-chip-queued" key={`q${i}`}>
-                <span className="task-queue-pos">{i + 1}</span>
-                <span className="task-chip-text">{q}</span>
-                <button
-                  className="task-chip-stop"
-                  onClick={() => removeFromQueue(i)}
-                  title="Remove from queue"
-                  aria-label="Remove from queue"
-                >
-                  ✕
-                </button>
-              </div>
-            ))}
-            {queue.length > 0 && (
-              <button className="task-stop-all" onClick={stopAll} title="Stop the current task and clear the queue">
-                Clear queue
-              </button>
-            )}
-          </div>
-        )}
         <ChatInput onSend={send} busy={busy} />
       </div>
+      {activityOpen && (
+        <ActivityPanel
+          running={running}
+          queue={queue}
+          tools={tools}
+          mode={mode}
+          agent={agent}
+          browserTarget={browserTarget}
+          onStopTask={stopTask}
+          onRemoveQueued={removeFromQueue}
+          onStopAll={stopAll}
+          onClose={() => setActivityOpen(false)}
+        />
+      )}
     </div>
   )
 }

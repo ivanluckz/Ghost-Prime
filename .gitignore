@@ -22,3 +22,6 @@ assets/intro.mp4
 .claude/
 .cursor/
 .agents/
+
+# Scratch field for the next commit message (push-after-build reads + clears it)
+COMMIT_MSG.txt
