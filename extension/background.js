@@ -528,6 +528,13 @@ function scrollInPage({ direction = 'down', amount, selector }) {
 // fades after a short idle. Self-contained, pointer-events:none, top z-index — never blocks the page.
 function glowPage() {
   const ID = '__ghost_glow__'
+  // Inject the keyframes once: a slow hue drift makes the cyan→violet border shimmer "alive".
+  if (!document.getElementById('__ghost_glow_style__')) {
+    const st = document.createElement('style')
+    st.id = '__ghost_glow_style__'
+    st.textContent = '@keyframes __ghostGlowHue{0%,100%{filter:hue-rotate(0deg)}50%{filter:hue-rotate(38deg)}}'
+    ;(document.head || document.documentElement).appendChild(st)
+  }
   let el = document.getElementById(ID)
   if (!el) {
     el = document.createElement('div')
@@ -535,7 +542,8 @@ function glowPage() {
     el.setAttribute('aria-hidden', 'true')
     el.style.cssText =
       'position:fixed;inset:0;pointer-events:none;z-index:2147483647;opacity:0;transition:opacity .35s ease;' +
-      'box-shadow:inset 0 0 0 2px rgba(0,230,255,.95),inset 0 0 18px 4px rgba(0,230,255,.45),inset 0 0 70px 14px rgba(124,92,255,.22)'
+      'animation:__ghostGlowHue 4s ease-in-out infinite;' +
+      'box-shadow:inset 0 0 0 2px rgba(0,230,255,.95),inset 0 0 22px 4px rgba(0,230,255,.45),inset 0 0 78px 16px rgba(124,92,255,.24)'
     ;(document.documentElement || document.body || document).appendChild(el)
     requestAnimationFrame(() => {
       el.style.opacity = '1'
