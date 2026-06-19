@@ -166,9 +166,10 @@ body::after {
   z-index: 0;
   pointer-events: none;
   background-image:
+    repeating-linear-gradient(0deg, rgba(0, 230, 255, 0.028) 0 1px, transparent 1px 4px),
     linear-gradient(rgba(255, 255, 255, 0.03) 1px, transparent 1px),
     linear-gradient(90deg, rgba(255, 255, 255, 0.03) 1px, transparent 1px);
-  background-size: 48px 48px;
+  background-size: 100% 4px, 48px 48px, 48px 48px;
   -webkit-mask-image: radial-gradient(circle at 50% 36%, #000, transparent 86%);
   mask-image: radial-gradient(circle at 50% 36%, #000, transparent 86%);
 }
@@ -2024,4 +2025,76 @@ html.native-frame .sidebar-head {
     animation-iteration-count: 1 !important;
     transition-duration: 0.001ms !important;
   }
+}
+
+/* ============================================================
+   HOLOGRAPHIC HUD v2 — futuristic console accents
+   Cheap on Crostini's software renderer: transform / opacity /
+   background-position / static gradients only. No animated blur
+   or mix-blend. All animations fall back via prefers-reduced-motion.
+   ============================================================ */
+
+/* Hue-shifting beam tracking along the command bar's lower edge. */
+.topbar { position: relative; }
+.topbar::before {
+  content: '';
+  position: absolute;
+  left: 0; right: 0; bottom: 0;
+  height: 1.5px;
+  pointer-events: none;
+  z-index: 2;
+  background: linear-gradient(90deg, transparent, var(--cyan), var(--violet), var(--magenta), var(--cyan), transparent);
+  background-size: 240% 100%;
+  opacity: 0.72;
+  filter: drop-shadow(0 0 5px rgba(0, 230, 255, 0.5));
+  animation: hue-rail 11s linear infinite;
+}
+@keyframes hue-rail { to { background-position: 240% 0; } }
+
+/* Glowing rail where the sidebar meets the console. */
+.sidebar { position: relative; }
+.sidebar::after {
+  content: '';
+  position: absolute;
+  top: 7%; bottom: 7%; right: 0;
+  width: 1px;
+  pointer-events: none;
+  background: linear-gradient(180deg, transparent, rgba(0, 230, 255, 0.55), rgba(124, 92, 255, 0.5), transparent);
+  box-shadow: 0 0 10px rgba(0, 230, 255, 0.45);
+}
+
+/* Assistant replies carry an iridescent left rail. */
+.msg-assistant .msg-content { position: relative; }
+.msg-assistant .msg-content::before {
+  content: '';
+  position: absolute;
+  left: 0; top: 9px; bottom: 9px;
+  width: 2px;
+  border-radius: 2px;
+  background: linear-gradient(180deg, var(--cyan), var(--violet), var(--magenta));
+  box-shadow: 0 0 9px rgba(0, 230, 255, 0.5);
+}
+
+/* Example chips: holographic left accent + a light beam that sweeps on hover. */
+.example-chip { box-shadow: var(--inset-hi), inset 2px 0 0 0 rgba(0, 230, 255, 0.45); }
+.example-chip::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: linear-gradient(115deg, transparent 38%, rgba(0, 230, 255, 0.16) 50%, transparent 62%);
+  transform: translateX(-120%);
+  transition: transform 720ms var(--ease-out);
+}
+.example-chip:hover::after { transform: translateX(120%); }
+
+/* Brighter holographic focus ring on the console input. */
+.chat-input textarea:focus {
+  border-color: rgba(0, 230, 255, 0.7);
+  box-shadow:
+    var(--inset-hi),
+    0 0 0 1px rgba(0, 230, 255, 0.45),
+    0 0 26px rgba(0, 230, 255, 0.3),
+    inset 0 0 20px rgba(0, 230, 255, 0.06),
+    var(--shadow);
 }
