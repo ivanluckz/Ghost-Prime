@@ -25,3 +25,10 @@ assets/intro.mp4
 
 # Scratch field for the next commit message (push-after-build reads + clears it)
 COMMIT_MSG.txt
+
+# Android connector — build outputs + machine-specific SDK path (regenerable)
+android-connector/.gradle/
+android-connector/build/
+android-connector/app/build/
+android-connector/local.properties
+android-connector/.kotlin/
