@@ -22,6 +22,8 @@ sessions** — wrapped in a Higgsfield-generated cinematic intro.
   `WebSearch`, plus a **persistent, visible browser** (navigate / read / click / fill / screenshot).
 - **Live tool feed** — each tool call shows a typed glyph, args, elapsed time, collapsible output,
   and **inline screenshots** from the browser.
+- **Mission Control layout** — a right-hand **Activity** panel shows live browser status, the running
+  task with a timer, the queue, and a streaming tool feed; toggle it from the top bar (**◨**).
 - **Voice** — push-to-talk speech input (local **Whisper**) and spoken replies (**espeak-ng**, or
   **Piper** neural voice if installed). Fully offline, no keys, no cost.
 - **Memory** — the agent calls `memory_save` / `memory_recall` to remember facts and preferences
@@ -76,12 +78,26 @@ GEMINI_MODEL=gemini-2.5-flash
 | Command | What it does |
 |---|---|
 | `npm run dev` | Launch in dev (Vite HMR + Electron). |
-| `npm run build` | Build to `out/`. |
+| `npm run build` | Build to `out/`, then **auto-commit + push** the current branch (see below). |
 | `npm run rebuild` | Rebuild `better-sqlite3` against Electron's ABI (also on `postinstall`). |
 | `electron scripts/smoke-db.cjs` | Integration test for persistence + memory (temp DB, no LLM, no cost). |
 | `node scripts/smoke-claude-agent.mjs` | Headless check that the Claude brain streams. |
 | `node scripts/smoke-claude-agent-tools.mjs` | Exercise the agent's tools (honours `GHOST_TEST_PERMISSION`). |
 | `node scripts/smoke-claude-agent-browser.mjs` | Drive the Playwright browser through the agent. |
+
+### Pushing & commit messages
+
+Every `npm run build` runs a `postbuild` hook (`scripts/push-after-build.mjs`) that commits any
+pending changes and pushes the current branch — so the latest build is always backed up on GitHub.
+The commit message is **"what you changed"**, resolved in this order:
+
+1. **`GHOST_PUSH_MSG`** env var — one-off: `GHOST_PUSH_MSG="reworked the sidebar" npm run build`
+2. **`COMMIT_MSG.txt`** (repo root) — type a summary into this file, then `npm run build`. The first
+   line becomes the commit title; the file is **cleared after each push**. It's gitignored, so it
+   never lands in the repo.
+3. Otherwise a default `build: v<version> · <stamp>` stamp.
+
+The hook never fails the build — if there's nothing to commit or no remote, it just prints a note.
 
 ## Architecture
 
@@ -97,8 +113,8 @@ src/
 │   └── memory/db.js         # better-sqlite3: sessions, messages, memories
 ├── preload/index.js         # contextBridge -> window.ghost (typed IPC only)
 └── renderer/                # React UI
-    ├── screens/             # Intro.jsx (video), Main.jsx (chat + sidebar)
-    └── components/          # chat/ (ChatInput, MessageList, Message, Markdown), tools/, SessionSidebar
+    ├── screens/             # Intro.jsx (video), Main.jsx (3-column Mission Control: sidebar · chat · activity)
+    └── components/          # chat/ (ChatInput, MessageList, Message, Markdown), tools/, SessionSidebar, ActivityPanel
 scripts/voice-transcribe.mjs # Whisper STT (Transformers.js), spawned per utterance
 migrations/                  # 001_init.sql (sessions/memories/preferences), 002_messages.sql
 ```
