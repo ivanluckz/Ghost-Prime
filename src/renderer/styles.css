@@ -454,6 +454,29 @@ html.native-frame .topbar {
   -webkit-text-fill-color: transparent;
 }
 
+/* ── Ghost-Prime Core (three.js holographic gem) ─────────────────────── */
+.ghost-core {
+  width: 100%;
+  display: grid;
+  place-items: center;
+  pointer-events: none;
+}
+.ghost-core canvas {
+  display: block;
+  filter: drop-shadow(0 0 16px rgba(0, 230, 255, 0.28));
+}
+.act-core {
+  padding: 6px 0 4px;
+}
+.act-core-cap {
+  margin-top: 2px;
+  text-align: center;
+  font-size: 10px;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+}
+
 /* Tiny build badge next to the wordmark — lets you confirm a reload picked up new code. */
 .brand-version {
   margin-left: 10px;

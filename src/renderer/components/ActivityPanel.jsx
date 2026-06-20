@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import GhostCore from './GhostCore'
 
 // Glyph + kind per tool — kind drives the left-rail accent color (mirrors ToolCard.jsx).
 const TOOL_META = {
@@ -92,6 +93,11 @@ export default function ActivityPanel({
       </div>
 
       <div className="activity-body">
+        <div className="act-core">
+          <GhostCore active={busy} height={132} />
+          <div className="act-core-cap">{busy ? 'thinking…' : 'standby'}</div>
+        </div>
+
         <section className="act-section">
           <div className="act-label">Browser</div>
           <div className={`act-browser ${browserActive ? 'active' : ''}`}>
