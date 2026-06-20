@@ -32,6 +32,9 @@
   --inset-hi: inset 0 1px 0 0 var(--glass-hi);
   --inset-lo: inset 0 -1px 0 0 rgba(0, 0, 0, 0.22);
   --glow-cyan: 0 0 22px rgba(0, 230, 255, 0.4);
+  --glow-violet: 0 0 22px rgba(124, 92, 255, 0.4);
+  --glow-magenta: 0 0 22px rgba(255, 69, 192, 0.36);
+  --hairline: rgba(255, 255, 255, 0.08);
 
   /* Motion */
   --ease-out: cubic-bezier(0.2, 0.8, 0.2, 1);
@@ -60,33 +63,45 @@ body,
 .window-shell {
   position: relative;
   height: 100%;
-  border-radius: var(--r-lg);
+  border-radius: 26px;
   overflow: hidden;
-  border: 1px solid rgba(255, 255, 255, 0.12);
+  border: 1px solid rgba(255, 255, 255, 0.16);
   box-shadow:
-    inset 0 1px 0 0 rgba(255, 255, 255, 0.08),
-    0 0 0 1px rgba(0, 230, 255, 0.07),
-    0 30px 80px rgba(0, 0, 0, 0.6);
+    inset 0 1px 0 0 rgba(255, 255, 255, 0.14), /* lit top specular edge */
+    inset 0 0 26px -8px rgba(0, 230, 255, 0.12), /* faint inner cyan wash */
+    inset 0 -52px 80px -56px rgba(0, 0, 0, 0.55), /* bottom depth vignette */
+    0 0 0 1px rgba(0, 230, 255, 0.1), /* crisp cyan ring */
+    0 0 0 2px rgba(124, 92, 255, 0.06), /* soft violet ring */
+    0 34px 90px rgba(0, 0, 0, 0.62), /* ambient drop */
+    0 0 64px -12px rgba(0, 230, 255, 0.07); /* colored halo — makes it float */
 }
 
 /* HUD corner brackets — four L-shaped marks framing the console. */
 .window-shell::before {
   content: '';
   position: absolute;
-  inset: 11px;
+  inset: 13px;
   z-index: 3;
   pointer-events: none;
   background:
-    linear-gradient(var(--cyan), var(--cyan)) left top / 20px 2px no-repeat,
-    linear-gradient(var(--cyan), var(--cyan)) left top / 2px 20px no-repeat,
-    linear-gradient(var(--cyan), var(--cyan)) right top / 20px 2px no-repeat,
-    linear-gradient(var(--cyan), var(--cyan)) right top / 2px 20px no-repeat,
-    linear-gradient(var(--cyan), var(--cyan)) left bottom / 20px 2px no-repeat,
-    linear-gradient(var(--cyan), var(--cyan)) left bottom / 2px 20px no-repeat,
-    linear-gradient(var(--cyan), var(--cyan)) right bottom / 20px 2px no-repeat,
-    linear-gradient(var(--cyan), var(--cyan)) right bottom / 2px 20px no-repeat;
-  opacity: 0.45;
-  filter: drop-shadow(0 0 4px rgba(0, 230, 255, 0.6));
+    linear-gradient(var(--cyan), var(--cyan)) left top / 26px 2px no-repeat,
+    linear-gradient(var(--cyan), var(--cyan)) left top / 2px 26px no-repeat,
+    linear-gradient(var(--cyan), var(--cyan)) right top / 26px 2px no-repeat,
+    linear-gradient(var(--cyan), var(--cyan)) right top / 2px 26px no-repeat,
+    linear-gradient(var(--violet), var(--violet)) left bottom / 26px 2px no-repeat,
+    linear-gradient(var(--violet), var(--violet)) left bottom / 2px 26px no-repeat,
+    linear-gradient(var(--violet), var(--violet)) right bottom / 26px 2px no-repeat,
+    linear-gradient(var(--violet), var(--violet)) right bottom / 2px 26px no-repeat;
+  opacity: 0.55;
+  filter: drop-shadow(0 0 5px rgba(0, 230, 255, 0.5));
+  animation: bracketpulse 5s ease-in-out infinite;
+}
+
+/* Cheap opacity-only breathing so the HUD frame feels alive (no layout/paint cost). */
+@keyframes bracketpulse {
+  50% {
+    opacity: 0.3;
+  }
 }
 
 /* Slow scanline sweeping top → bottom, like a console refresh. */
@@ -318,7 +333,8 @@ input {
   background: var(--glass);
   -webkit-backdrop-filter: var(--blur);
   backdrop-filter: var(--blur);
-  box-shadow: var(--inset-hi), var(--inset-lo), var(--shadow);
+  box-shadow: var(--inset-hi), inset 0 0 0 1px var(--hairline), var(--inset-lo), var(--shadow),
+    0 0 28px -16px rgba(0, 230, 255, 0.5);
   -webkit-app-region: drag; /* whole top bar moves the window; controls below opt out */
   overflow: hidden;
 }
@@ -929,11 +945,12 @@ html.native-frame .sidebar-head {
 
 .empty-title {
   margin: 0 0 8px;
-  font-size: 27px;
-  font-weight: 700;
-  letter-spacing: -0.01em;
-  line-height: 1.2;
+  font-size: 30px;
+  font-weight: 800;
+  letter-spacing: -0.022em;
+  line-height: 1.14;
   color: #fff;
+  text-shadow: 0 0 34px rgba(124, 92, 255, 0.22);
 }
 
 .empty-title-accent {
@@ -1605,9 +1622,10 @@ html.native-frame .sidebar-head {
 
 .btn-send {
   border-color: rgba(0, 230, 255, 0.5);
-  background: linear-gradient(135deg, var(--cyan), var(--violet) 92%);
+  background: linear-gradient(120deg, var(--cyan), var(--violet) 56%, var(--magenta));
   color: #04121a;
   text-shadow: 0 1px 0 rgba(255, 255, 255, 0.25);
+  box-shadow: var(--inset-hi), 0 6px 20px -8px rgba(0, 230, 255, 0.55);
 }
 
 .btn-send:not(:disabled):hover {
