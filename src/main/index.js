@@ -6,6 +6,7 @@ import { initDb, startSession } from './memory/db.js'
 import { registerIpc } from './ipc.js'
 import { startBridge, onBridgeTask, watchExtensionForReload } from './tools/browser-bridge.js'
 import { initHotkey } from './hotkey.js'
+import { killAll as killAllShells } from './tools/shell-sessions.js'
 
 // Load .env from the project root. Under electron-vite dev, getAppPath() === project root.
 dotenv.config({ path: join(app.getAppPath(), '.env') })
@@ -178,7 +179,10 @@ app.whenReady().then(() => {
   })
 })
 
-app.on('will-quit', () => globalShortcut.unregisterAll())
+app.on('will-quit', () => {
+  globalShortcut.unregisterAll()
+  killAllShells() // terminate any live PTY shells so they don't orphan
+})
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit()

@@ -17,6 +17,7 @@ import { getActiveTabMode, setActiveTabMode } from './tools/browser.js'
 import { getPolicy, setPolicy } from './tools/site-policy.js'
 import { setChatState } from './tools/browser-bridge.js'
 import { getHotkey, setHotkey } from './hotkey.js'
+import * as shell from './tools/shell-sessions.js'
 
 // requestId -> AbortController, so the renderer can cancel an in-flight stream.
 const controllers = new Map()
@@ -104,4 +105,12 @@ export function registerIpc() {
   // --- Wake-up shortcut (recordable global hotkey) ---
   ipcMain.handle('hotkey:get', () => getHotkey())
   ipcMain.handle('hotkey:set', (_event, accelerator) => setHotkey(accelerator))
+
+  // --- Live terminals (node-pty); data/sessions are pushed to the renderer as events ---
+  ipcMain.handle('shell:list', () => shell.listSessions())
+  ipcMain.handle('shell:open', (_event, opts) => shell.createSession(opts || {}))
+  ipcMain.handle('shell:kill', (_event, id) => shell.killSession(id))
+  ipcMain.handle('shell:scrollback', (_event, id) => shell.getScrollback(id))
+  ipcMain.on('shell:write', (_event, { id, data }) => shell.writeToSession(id, data))
+  ipcMain.on('shell:resize', (_event, { id, cols, rows }) => shell.resizeSession(id, cols, rows))
 }

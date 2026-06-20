@@ -4,6 +4,7 @@ import ChatInput from '../components/chat/ChatInput.jsx'
 import SessionSidebar from '../components/SessionSidebar.jsx'
 import SettingsPanel from '../components/SettingsPanel.jsx'
 import ActivityPanel from '../components/ActivityPanel.jsx'
+import TerminalPanel from '../components/TerminalPanel.jsx'
 import { playActivate, isMuted, toggleMuted, onMuteChange } from '../audio.js'
 
 // Build identity, injected by electron.vite.config.js — shown in the topbar so it's obvious which
@@ -34,6 +35,9 @@ export default function Main() {
   const [activityOpen, setActivityOpen] = useState(true) // right-hand Mission Control activity panel
   const [browserTarget, setBrowserTarget] = useState('group') // which tab browser tools act on
   const [muted, setMutedState] = useState(isMuted()) // master sound mute (intro sting + sfx)
+  const [shellSessions, setShellSessions] = useState([]) // live terminals (shared with the agent)
+  const [termOpen, setTermOpen] = useState(false) // terminal dock visible
+  const prevShellCount = useRef(0)
   const voiceOutRef = useRef(false)
   const sendRef = useRef(null) // latest send(), so externally-pushed tasks avoid a stale closure
 
@@ -158,6 +162,22 @@ export default function Main() {
 
   // Keep the mute button in sync if the setting is toggled elsewhere.
   useEffect(() => onMuteChange(setMutedState), [])
+
+  // Live terminals: track the session list for the dock + toolbar badge.
+  useEffect(() => {
+    window.ghost.shell
+      ?.list()
+      .then((l) => setShellSessions(l || []))
+      .catch(() => {})
+    return window.ghost.shell?.onSessions((l) => setShellSessions(l || []))
+  }, [])
+
+  // Pop the terminal open the first time Ghost (or you) spins one up, so you can watch it work.
+  useEffect(() => {
+    const n = shellSessions.length
+    if (prevShellCount.current === 0 && n > 0) setTermOpen(true)
+    prevShellCount.current = n
+  }, [shellSessions])
 
   // Right-click "Ask Ghost about this" in Chrome pushes a task up here — run it.
   useEffect(() => window.ghost.onExternalTask?.(({ prompt }) => prompt && sendRef.current?.(prompt)), [])
@@ -473,6 +493,16 @@ export default function Main() {
             </button>
             <button
               type="button"
+              className={`voice-toggle term-toggle ${termOpen ? 'on' : ''}`}
+              onClick={() => setTermOpen((o) => !o)}
+              title={termOpen ? 'Hide terminal' : 'Show terminal'}
+              aria-label="Toggle terminal"
+            >
+              {'>_'}
+              {shellSessions.some((s) => s.alive) && <span className="term-badge" />}
+            </button>
+            <button
+              type="button"
               className={`voice-toggle ${activityOpen ? 'on' : ''}`}
               onClick={() => setActivityOpen((o) => !o)}
               title={activityOpen ? 'Hide activity panel' : 'Show activity panel'}
@@ -529,6 +559,7 @@ export default function Main() {
           />
         )}
         <MessageList messages={messages} onExample={send} runningIds={runningIds} />
+        {termOpen && <TerminalPanel sessions={shellSessions} onClose={() => setTermOpen(false)} />}
         <ChatInput onSend={send} busy={busy} />
       </div>
       {activityOpen && (

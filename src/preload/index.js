@@ -111,6 +111,37 @@ contextBridge.exposeInMainWorld('ghost', {
       return ipcRenderer.invoke('hotkey:set', accelerator)
     }
   },
+  // Live multi-session terminals (node-pty), shared with the agent. data/sessions arrive as events.
+  shell: {
+    list() {
+      return ipcRenderer.invoke('shell:list')
+    },
+    open(opts) {
+      return ipcRenderer.invoke('shell:open', opts || {})
+    },
+    kill(id) {
+      return ipcRenderer.invoke('shell:kill', id)
+    },
+    scrollback(id) {
+      return ipcRenderer.invoke('shell:scrollback', id)
+    },
+    write(id, data) {
+      ipcRenderer.send('shell:write', { id, data })
+    },
+    resize(id, cols, rows) {
+      ipcRenderer.send('shell:resize', { id, cols, rows })
+    },
+    onData(cb) {
+      const listener = (_e, payload) => cb(payload)
+      ipcRenderer.on('shell:data', listener)
+      return () => ipcRenderer.removeListener('shell:data', listener)
+    },
+    onSessions(cb) {
+      const listener = (_e, payload) => cb(payload)
+      ipcRenderer.on('shell:sessions', listener)
+      return () => ipcRenderer.removeListener('shell:sessions', listener)
+    }
+  },
   voice: {
     listenStart() {
       ipcRenderer.send('voice:listen-start')

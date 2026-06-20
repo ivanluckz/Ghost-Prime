@@ -2,6 +2,7 @@ import { homedir } from 'node:os'
 import OpenAI from 'openai'
 import * as browser from '../tools/browser.js'
 import * as screen from '../tools/screen.js'
+import * as shell from '../tools/shell-sessions.js'
 import { saveMemory, recallMemories, memoryDigest } from '../memory/db.js'
 
 // Pluggable brain providers. Select with GHOST_PROVIDER in .env:
@@ -30,8 +31,16 @@ const OPENAI_PROVIDERS = {
 const PROVIDER = process.env.GHOST_PROVIDER || 'claude-agent'
 const FALLBACK_PROVIDER = process.env.GHOST_FALLBACK_PROVIDER || 'openrouter'
 
-// Built-in SDK tools the claude-agent brain may use.
-const AGENT_TOOLS = ['Bash', 'Read', 'Write', 'Edit', 'Glob', 'Grep', 'WebFetch', 'WebSearch']
+// Built-in SDK tools the claude-agent brain may use. (Bash is intentionally omitted — shell work
+// goes through our ghost-shell server below so it runs in the LIVE, persistent terminals the user
+// can see and the agent can keep several of.)
+const AGENT_TOOLS = ['Read', 'Write', 'Edit', 'Glob', 'Grep', 'WebFetch', 'WebSearch']
+
+// Our live multi-session terminals (node-pty), exposed to the agent as an in-process SDK MCP server.
+const SHELL_SERVER = 'ghost-shell'
+const SHELL_TOOL_NAMES = ['shell_run', 'shell_open', 'shell_read', 'shell_list', 'shell_kill'].map(
+  (n) => `mcp__${SHELL_SERVER}__${n}`
+)
 
 // Our Playwright browser, exposed to the agent as an in-process SDK MCP server.
 // MCP tool names are namespaced: mcp__<serverName>__<toolName>.
@@ -99,7 +108,7 @@ function refersToCurrentPage(text) {
 const SYSTEM_PROMPT = `You are Ghost-Prime, an autonomous AI agent running on the user's own Chrome OS / Crostini Linux machine. You act on their behalf with real tools — you do the work, you don't just advise on how to do it.
 
 YOUR TOOLS — all already loaded and directly callable this turn. There is NO step to "load", "search for", "enable", or "initialize" a tool first; when a task needs one, just call it.
-- Bash — run shell commands on the local machine.
+- shell_run — run a command in a LIVE terminal the user can see and type into; it keeps its working directory, env vars, and background jobs between calls. shell_open / shell_list / shell_read / shell_kill — open extra terminals, list them, read a terminal's latest output, or close one.
 - Read / Write / Edit / Glob / Grep — read and change local files.
 - WebFetch / WebSearch — fetch a URL or search the web for current information.
 - browser_navigate / browser_get_text / browser_click / browser_fill / browser_screenshot — drive the user's REAL Google Chrome, already signed in to their sites. To open a page, call browser_navigate immediately.
@@ -121,6 +130,12 @@ DRIVING THE BROWSER:
 MEMORY:
 - Recall what you already know (memory_recall) when prior context would help, especially at the start of a task.
 - Save durable facts and preferences the user shares (memory_save) — their name, how they like things done, ongoing projects — not transient chatter.
+
+TERMINALS (your shell):
+- Run commands with shell_run. It runs in a real terminal the user is watching, and waits for the command to finish before returning its output + exit code. Terminals are PERSISTENT: a cd, an exported variable, or an activated venv carries over to your next shell_run in that terminal.
+- You can keep SEVERAL terminals and decide which stay alive and which to close — that's expected. Open a dedicated one with shell_open (e.g. one terminal for a dev server, another for commands). Target a specific terminal by passing { terminal: "<id>" } (ids come from shell_list); omit it to use or auto-create your main one.
+- For anything long-running or that never exits — dev servers, watchers, tail -f — call shell_run with { background: true } so it starts and returns immediately instead of hanging. Check on it later with shell_read, and shell_kill it when done.
+- Tidy up after yourself: close terminals and stop processes you started once a task is finished, but LEAVE running anything the user still needs (like a server they asked you to start).
 
 HOW TO WORK:
 - Act directly and autonomously. The user often isn't watching in real time and can't answer mid-task, so for reversible actions that follow from the request, proceed without asking. Ask first only before destructive or irreversible actions — deleting data, overwriting files, sending messages, force-pushing, anything hard to undo.
@@ -439,6 +454,99 @@ async function getScreenMcpServer() {
 }
 
 // ---------------------------------------------------------------------------
+// Shell MCP server — live, persistent, multi-session terminals (node-pty) the
+// user can watch and type into. Replaces the built-in Bash tool.
+// ---------------------------------------------------------------------------
+let shellMcpServer = null
+async function getShellMcpServer() {
+  if (shellMcpServer) return shellMcpServer
+  const { createSdkMcpServer, tool } = await import('@anthropic-ai/claude-agent-sdk')
+  const { z } = await import('zod')
+
+  shellMcpServer = createSdkMcpServer({
+    name: SHELL_SERVER,
+    version: '1.0.0',
+    tools: [
+      tool(
+        'shell_run',
+        'Run a command in a LIVE terminal the user can see (and type into). The terminal is ' +
+          'PERSISTENT: working directory, environment variables, and background jobs survive between ' +
+          'calls. By default it runs in your main terminal and waits for the command to finish, ' +
+          'returning its output and exit code. Pass { terminal } (an id from shell_list) to target a ' +
+          'specific terminal, or { background: true } for long-running/never-exiting processes (dev ' +
+          'servers, watchers, tail -f) so it starts and returns immediately instead of blocking — then ' +
+          'check its output later with shell_read. Prefer one focused command per call over giant ' +
+          'chained one-liners so the live output stays readable.',
+        { command: z.string(), terminal: z.string().optional(), background: z.boolean().optional() },
+        async ({ command, terminal, background }) => {
+          const r = await shell.runForAgent({ id: terminal, command, background: !!background })
+          const head = r.background
+            ? `[${r.name} · ${r.sessionId}] background — started`
+            : `[${r.name} · ${r.sessionId}] exit ${r.exitCode ?? '?'}${r.timedOut ? ' (timed out)' : ''}`
+          return { content: [{ type: 'text', text: `${head}\n${r.output || '(no output)'}` }] }
+        }
+      ),
+      tool(
+        'shell_open',
+        'Open a NEW terminal and return its id. Use when you want a separate shell — e.g. one ' +
+          'terminal dedicated to a running server and another for everyday commands. Optional ' +
+          '{ name } to label it and { cwd } to start in a directory.',
+        { name: z.string().optional(), cwd: z.string().optional() },
+        async ({ name, cwd }) => {
+          const r = await shell.createSession({ name, cwd, agent: true })
+          return { content: [{ type: 'text', text: `Opened ${r.name} (${r.id}) in ${r.cwd}` }] }
+        }
+      ),
+      tool(
+        'shell_read',
+        "Read a terminal's most recent output — use this to check on a background process (a dev " +
+          "server's logs, a long build) WITHOUT running a new command. Pass { terminal } (its id).",
+        { terminal: z.string(), maxBytes: z.number().optional() },
+        async ({ terminal, maxBytes }) => {
+          const r = shell.readSession({ id: terminal, maxBytes })
+          if (r.error) return { content: [{ type: 'text', text: r.error }] }
+          return {
+            content: [
+              { type: 'text', text: `[${r.name} · ${terminal}]${r.alive ? '' : ' (exited)'}\n${r.output || '(no output yet)'}` }
+            ]
+          }
+        }
+      ),
+      tool(
+        'shell_list',
+        'List all open terminals with their ids, names, and whether each is idle, running a command, ' +
+          'or exited. Use it to see what you have running and pick one to target or close.',
+        {},
+        async () => {
+          const rows = shell.listSessions()
+          const text = rows.length
+            ? rows
+                .map(
+                  (s) =>
+                    `- ${s.id} "${s.name}" — ${s.alive ? (s.busy ? 'running a command' : 'idle') : 'exited'} · ${s.cwd}`
+                )
+                .join('\n')
+            : 'No terminals open yet — shell_run will open one automatically.'
+          return { content: [{ type: 'text', text }] }
+        }
+      ),
+      tool(
+        'shell_kill',
+        'Close a terminal and stop whatever is running in it. Pass { terminal } (its id). Clean up ' +
+          'terminals you no longer need once a task is done — but leave ones the user still wants ' +
+          'running (e.g. a server they asked you to start).',
+        { terminal: z.string() },
+        async ({ terminal }) => {
+          const ok = shell.killSession(terminal)
+          return { content: [{ type: 'text', text: ok ? `Closed terminal ${terminal}.` : `No terminal ${terminal}.` }] }
+        }
+      )
+    ]
+  })
+  return shellMcpServer
+}
+
+// ---------------------------------------------------------------------------
 // Claude Agent provider — Claude Agent SDK on the user's Claude Code login.
 // Autonomy mode (Shift+Tab) → permissionMode. onEvent surfaces tool activity.
 // SDK is ESM-only → dynamic import().
@@ -473,6 +581,7 @@ async function streamChatClaudeAgent({ messages, signal, onDelta, onEvent, model
 
   const browserServer = await getBrowserMcpServer()
   const memoryServer = await getMemoryMcpServer()
+  const shellServer = await getShellMcpServer()
   const screenServer = SCREEN_ENABLED ? await getScreenMcpServer() : null
 
   // Auto-inject the highest-signal memories so Claude "remembers" without being asked.
@@ -508,10 +617,19 @@ async function streamChatClaudeAgent({ messages, signal, onDelta, onEvent, model
       ...(thinkingOff ? { thinking: { type: 'disabled' } } : {}),
       systemPrompt: SYSTEM_PROMPT + memoryContext,
       includePartialMessages: true,
-      allowedTools: [...AGENT_TOOLS, ...BROWSER_TOOL_NAMES, ...MEMORY_TOOL_NAMES, ...(screenServer ? SCREEN_TOOL_NAMES : [])],
-      mcpServers: screenServer
-        ? { [BROWSER_SERVER]: browserServer, [MEMORY_SERVER]: memoryServer, [SCREEN_SERVER]: screenServer }
-        : { [BROWSER_SERVER]: browserServer, [MEMORY_SERVER]: memoryServer },
+      allowedTools: [
+        ...AGENT_TOOLS,
+        ...SHELL_TOOL_NAMES,
+        ...BROWSER_TOOL_NAMES,
+        ...MEMORY_TOOL_NAMES,
+        ...(screenServer ? SCREEN_TOOL_NAMES : [])
+      ],
+      mcpServers: {
+        [BROWSER_SERVER]: browserServer,
+        [MEMORY_SERVER]: memoryServer,
+        [SHELL_SERVER]: shellServer,
+        ...(screenServer ? { [SCREEN_SERVER]: screenServer } : {})
+      },
       permissionMode, // plan | auto | bypassPermissions — from the UI mode (Shift+Tab)
       allowDangerouslySkipPermissions: permissionMode === 'bypassPermissions',
       settingSources: [], // isolation: no user/project MCP (higgsfield), CLAUDE.md, skills
