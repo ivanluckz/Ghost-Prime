@@ -1,0 +1,250 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Crystalline AI Core</title>
+<style>
+  :root { --bg:#d9dadc; }
+  * { box-sizing:border-box; }
+  html,body { margin:0; height:100%; background:var(--bg); overflow:hidden;
+              font:13px/1.4 ui-sans-serif,system-ui,Segoe UI,Roboto,Helvetica,Arial; color:#222; }
+  #app { position:fixed; inset:0; }
+  canvas { display:block; }
+  /* UI overlay — lives outside the canvas, hidden for clean screenshots */
+  #ui { position:fixed; left:14px; bottom:14px; display:flex; gap:8px; align-items:center;
+        background:rgba(255,255,255,.66); backdrop-filter:blur(8px);
+        border:1px solid rgba(0,0,0,.08); border-radius:11px; padding:8px 10px;
+        box-shadow:0 6px 20px rgba(0,0,0,.10); user-select:none; }
+  #ui.hide { opacity:0; pointer-events:none; }
+  #ui button { font:inherit; cursor:pointer; border:1px solid rgba(0,0,0,.12);
+        background:#fff; color:#222; border-radius:8px; padding:6px 11px; transition:.15s; }
+  #ui button:hover { background:#f1f1f3; }
+  #ui button.on { background:#1a1d24; color:#fff; border-color:#1a1d24; }
+  #hint { position:fixed; right:14px; bottom:14px; color:#888; font-size:11px;
+          background:rgba(255,255,255,.5); padding:4px 8px; border-radius:8px; }
+  #hint.hide { opacity:0; }
+</style>
+</head>
+<body>
+<div id="app"></div>
+<div id="ui">
+  <button id="spin" class="on">Auto-rotate</button>
+  <button id="save">Save PNG</button>
+  <button id="reset">Reset view</button>
+</div>
+<div id="hint">drag to orbit · scroll to zoom · press H to hide UI</div>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "./vendor/three.module.js",
+    "three/addons/": "./vendor/addons/"
+  }
+}
+</script>
+
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
+
+const BG = 0xd9dadc;
+
+// ---------- renderer ----------
+const renderer = new THREE.WebGLRenderer({ antialias:true, preserveDrawingBuffer:true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setSize(innerWidth, innerHeight);
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.05;
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+document.getElementById('app').appendChild(renderer.domElement);
+
+// ---------- scene + studio environment (reflections only, no visible lights) ----------
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(BG);
+const pmrem = new THREE.PMREMGenerator(renderer);
+scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+
+// ---------- camera ----------
+const FOV = 34;
+const camera = new THREE.PerspectiveCamera(FOV, innerWidth/innerHeight, 0.1, 100);
+
+// ---------- neutral studio lighting ----------
+scene.add(new THREE.HemisphereLight(0xffffff, 0xb8b8bc, 0.55));
+const key = new THREE.DirectionalLight(0xffffff, 1.15);
+key.position.set(3.2, 5.0, 4.0);
+key.castShadow = true;
+key.shadow.mapSize.set(2048, 2048);
+key.shadow.radius = 7;
+key.shadow.bias = -0.0004;
+const sc = key.shadow.camera; sc.near = 1; sc.far = 20; sc.left = sc.bottom = -4; sc.right = sc.top = 4;
+scene.add(key);
+const fill = new THREE.DirectionalLight(0xffffff, 0.38); fill.position.set(-4, 1.5, 2); scene.add(fill);
+const rim  = new THREE.DirectionalLight(0xffffff, 0.30); rim.position.set(-1, 2, -4.5); scene.add(rim);
+
+// ================= geometry of the core =================
+const V = THREE.Vector3;
+const Htop = 1.45, Hbot = 1.70, R = 0.82;          // elongated octahedron (vertical > width)
+const top    = new V(0,  Htop, 0);
+const bottom = new V(0, -Hbot, 0);
+const e0 = new V( R, 0, 0), e1 = new V(0, 0,  R), e2 = new V(-R, 0, 0), e3 = new V(0, 0, -R);
+
+const faces = [
+  [top,e0,e1],[top,e1,e2],[top,e2,e3],[top,e3,e0],
+  [bottom,e1,e0],[bottom,e2,e1],[bottom,e3,e2],[bottom,e0,e3]
+];
+const edges = [
+  [top,e0],[top,e1],[top,e2],[top,e3],
+  [bottom,e0],[bottom,e1],[bottom,e2],[bottom,e3],
+  [e0,e1],[e1,e2],[e2,e3],[e3,e0]
+];
+const verts = [top,bottom,e0,e1,e2,e3];
+
+// --- smoked-glass gem (flat-shaded for crisp facets) ---
+const pos = [];
+for (const [a,b,c] of faces) pos.push(a.x,a.y,a.z, b.x,b.y,b.z, c.x,c.y,c.z);
+const gemGeo = new THREE.BufferGeometry();
+gemGeo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+gemGeo.computeVertexNormals();
+const gemMat = new THREE.MeshPhysicalMaterial({
+  color: 0x1c1f25, metalness: 0, roughness: 0.06,
+  transmission: 0.82, ior: 1.6, thickness: 2.2,
+  attenuationColor: new THREE.Color(0x090b10), attenuationDistance: 1.05,
+  clearcoat: 1, clearcoatRoughness: 0.08,
+  envMapIntensity: 1.25, flatShading: true
+});
+const gem = new THREE.Mesh(gemGeo, gemMat);
+gem.castShadow = true;
+
+// --- helpers to build edge bezels + engraved circuit traces ---
+function tube(p1, p2, r, seg=12){
+  const dir = new V().subVectors(p2, p1), len = dir.length();
+  const g = new THREE.CylinderGeometry(r, r, len, seg, 1, false);
+  g.translate(0, len/2, 0);
+  const q = new THREE.Quaternion().setFromUnitVectors(new V(0,1,0), dir.clone().normalize());
+  const m = new THREE.Matrix4().makeRotationFromQuaternion(q); m.setPosition(p1);
+  g.applyMatrix4(m); return g;
+}
+function ball(p, r){ const g = new THREE.SphereGeometry(r, 16, 12); g.translate(p.x,p.y,p.z); return g; }
+
+// bezels: a metal rim along every facet seam, capped at each vertex
+const bezelGeos = [];
+for (const [a,b] of edges) bezelGeos.push(tube(a,b,0.026));
+for (const v of verts)     bezelGeos.push(ball(v,0.046));
+const bezel = new THREE.Mesh(
+  mergeGeometries(bezelGeos),
+  new THREE.MeshPhysicalMaterial({ color:0x43474f, metalness:1, roughness:0.42, envMapIntensity:1, clearcoat:0.3 })
+);
+bezel.castShadow = true;
+
+// circuit traces: an inset triangle on every face + branches running to a centre node
+const traceGeos = [];
+for (const [A,B,C] of faces){
+  const ctr = new V().add(A).add(B).add(C).multiplyScalar(1/3);
+  let n = new V().subVectors(B,A).cross(new V().subVectors(C,A)).normalize();
+  if (n.dot(ctr) < 0) n.negate();
+  const off = n.clone().multiplyScalar(0.007);
+  const ctrO = ctr.clone().add(off);
+  const inset = [A,B,C].map(p => p.clone().lerp(ctr, 0.17).add(off));
+  for (let i=0;i<3;i++){
+    traceGeos.push(tube(inset[i], inset[(i+1)%3], 0.0085));   // seam-following lines
+    const mid = inset[i].clone().lerp(ctrO, 0.55);
+    traceGeos.push(tube(inset[i], mid, 0.0065));               // branch toward core
+    traceGeos.push(ball(mid, 0.016));                          // node
+  }
+  traceGeos.push(ball(ctrO, 0.022));                           // centre node
+}
+const traces = new THREE.Mesh(
+  mergeGeometries(traceGeos),
+  new THREE.MeshPhysicalMaterial({ color:0x9aa0a8, metalness:1, roughness:0.3, envMapIntensity:1.1 })
+);
+
+// --- solid faceted nucleus at the heart (opaque, reflective — NO emission, you add that) ---
+const nucleus = new THREE.Mesh(
+  new THREE.OctahedronGeometry(0.34, 0),
+  new THREE.MeshPhysicalMaterial({ color:0xc9cdd4, metalness:1, roughness:0.16, flatShading:true, envMapIntensity:1.3 })
+);
+nucleus.scale.set(1, 1.25, 1);
+
+// group everything
+const core = new THREE.Group();
+core.add(gem, bezel, traces, nucleus);
+scene.add(core);
+
+// ---------- soft contact shadow on an invisible floor (keeps bg seamless) ----------
+const box0 = new THREE.Box3().setFromObject(core);
+const floor = new THREE.Mesh(
+  new THREE.PlaneGeometry(60, 60),
+  new THREE.ShadowMaterial({ opacity: 0.22 })
+);
+floor.rotation.x = -Math.PI/2;
+floor.position.y = box0.min.y - 0.18;
+floor.receiveShadow = true;
+scene.add(floor);
+
+// ---------- frame the object (three-quarter, full in frame) ----------
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true;
+controls.enablePan = false;
+controls.autoRotate = true;
+controls.autoRotateSpeed = 0.8;
+
+const center = box0.getCenter(new V());
+const size = box0.getSize(new V());
+const maxDim = Math.max(size.x, size.y, size.z);
+const fitDist = (maxDim / (2*Math.tan(FOV*Math.PI/360))) * 1.55;
+const dir = new V(0.55, 0.40, 0.95).normalize();
+const homePos = center.clone().add(dir.multiplyScalar(fitDist));
+function applyHome(){
+  camera.position.copy(homePos);
+  controls.target.copy(center);
+  controls.minDistance = fitDist*0.6;
+  controls.maxDistance = fitDist*2.2;
+  controls.update();
+}
+applyHome();
+
+// ---------- UI ----------
+const ui = document.getElementById('ui'), hint = document.getElementById('hint');
+const spinBtn = document.getElementById('spin');
+spinBtn.onclick = () => { controls.autoRotate = !controls.autoRotate; spinBtn.classList.toggle('on', controls.autoRotate); };
+document.getElementById('reset').onclick = applyHome;
+document.getElementById('save').onclick = () => {
+  ui.classList.add('hide'); hint.classList.add('hide');
+  renderer.render(scene, camera);
+  renderer.domElement.toBlob(b => {
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(b); a.download = 'ai-core.png'; a.click();
+    URL.revokeObjectURL(a.href);
+    ui.classList.remove('hide'); hint.classList.remove('hide');
+  }, 'image/png');
+};
+addEventListener('keydown', e => {
+  if (e.key.toLowerCase() === 'h'){ ui.classList.toggle('hide'); hint.classList.toggle('hide'); }
+});
+
+// ---------- loop ----------
+const clock = new THREE.Clock();
+const baseY = core.position.y;
+function animate(){
+  requestAnimationFrame(animate);
+  const t = clock.getElapsedTime();
+  core.position.y = baseY + Math.sin(t*0.8)*0.04;     // gentle float
+  nucleus.rotation.y = -t*0.25;                        // inner life
+  nucleus.rotation.x =  t*0.12;
+  controls.update();
+  renderer.render(scene, camera);
+}
+animate();
+
+addEventListener('resize', () => {
+  camera.aspect = innerWidth/innerHeight; camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+});
+</script>
+</body>
+</html>

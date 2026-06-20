@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react'
 import * as THREE from 'three'
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js'
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js'
 import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js'
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js'
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js'
@@ -31,12 +32,13 @@ function resolveTier() {
   return _tier
 }
 
-// The Ghost-Prime Core — a procedural holographic gem in three.js. `active` (wire it to the Activity
-// panel's busy flag) smoothly energises it: spins up, the etch + nucleus flare brighter, the bloom
-// swells, exposure lifts, and the accents shift cyan → magenta — so the Core visibly "thinks".
+// The Ghost-Prime Core — a procedural holographic gem in three.js. The high tier's geometry (faceted
+// smoked-glass body, metal edge bezels + vertex balls, engraved circuit traces, faceted nucleus) was
+// hand-built in ai-core/index.html; here it's wired for the app: transparent, container-sized, with
+// the glow/emission/bloom + `active` reactivity added on top (cyan standby → charged magenta).
 //
 //   quality="auto" (default) — probe the GPU: glass on real hardware, fresnel on software GL.
-//   quality="high"           — force real glass: MeshPhysical transmission + env + UnrealBloom.
+//   quality="high"           — force the full crystal: transmission + traces + env + UnrealBloom.
 //   quality="lite"           — force the fresnel shell (no transmission/bloom).
 //
 // Renders on a transparent canvas sized to its container, caps to `fps`, pauses while the window is
@@ -65,19 +67,21 @@ export default function GhostCore({ active = false, height = 150, quality = 'aut
     }
     renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, isHigh ? 1.25 : 1.5))
     renderer.setSize(width, h)
+    renderer.outputColorSpace = THREE.SRGBColorSpace
     renderer.toneMapping = THREE.ACESFilmicToneMapping
-    renderer.toneMappingExposure = 1.15
+    renderer.toneMappingExposure = 1.1
     renderer.domElement.style.display = 'block'
     mount.appendChild(renderer.domElement)
 
+    const FOV = isHigh ? 34 : 45
     const scene = new THREE.Scene() // transparent — no scene.background
-    const camera = new THREE.PerspectiveCamera(45, width / h, 0.1, 100)
+    const camera = new THREE.PerspectiveCamera(FOV, width / h, 0.1, 100)
     camera.position.set(2.6, 1.5, 5.2)
     camera.lookAt(0, 0, 0)
 
-    const core = new THREE.Group()
+    const core = new THREE.Group() // the spinner (rotation + float)
     scene.add(core)
-    const nucleus = new THREE.Group()
+    const nucleus = new THREE.Group() // tumbles independently inside the gem
     core.add(nucleus)
 
     // Disposables we tear down on unmount.
@@ -88,83 +92,150 @@ export default function GhostCore({ active = false, height = 150, quality = 'aut
     let pmrem = null
     let envTex = null
 
-    // Shared faceted-diamond body: an octahedron stretched on Y into a brilliant-cut silhouette.
-    const gemGeo = new THREE.OctahedronGeometry(1.2, 0)
-    gemGeo.scale(1, 1.45, 1)
-    gemGeo.computeVertexNormals()
-    geos.push(gemGeo)
-
     // Per-frame reactive refs (set by whichever tier builds).
-    let etchMat = null
+    let glowMat = null // lite
+    let tracesMat = null // high — the glowing circuitry
     let nucMat = null
-    let glowMat = null
     let rimLight = null
     let accentLight = null
 
     if (isHigh) {
-      // Studio-grade reflections/refractions from a tiny baked room.
       pmrem = new THREE.PMREMGenerator(renderer)
       envTex = pmrem.fromScene(new RoomEnvironment(), 0.04).texture
       scene.environment = envTex
 
-      scene.add(new THREE.AmbientLight(0xffffff, 0.35))
-      const key = new THREE.DirectionalLight(0xbfe9ff, 1.8)
-      key.position.set(5, 8, 6)
-      const fill = new THREE.DirectionalLight(VIOLET.clone(), 1.0)
-      fill.position.set(-5, 2, 4)
-      rimLight = new THREE.DirectionalLight(CYAN.clone(), 1.6)
-      rimLight.position.set(0, 2, -5)
+      scene.add(new THREE.HemisphereLight(0xffffff, 0x2a3550, 0.5))
+      const key = new THREE.DirectionalLight(0xbfe9ff, 1.4)
+      key.position.set(3.2, 5, 4)
+      const fill = new THREE.DirectionalLight(VIOLET.clone(), 0.5)
+      fill.position.set(-4, 1.5, 2)
+      rimLight = new THREE.DirectionalLight(CYAN.clone(), 1.2)
+      rimLight.position.set(-1, 2, -4.5)
       scene.add(key, fill, rimLight)
 
+      // ── geometry of the core (ported from ai-core/index.html) ──
+      const V = THREE.Vector3
+      const Htop = 1.45, Hbot = 1.7, R = 0.82 // elongated octahedron (vertical > width)
+      const top = new V(0, Htop, 0), bottom = new V(0, -Hbot, 0)
+      const e0 = new V(R, 0, 0), e1 = new V(0, 0, R), e2 = new V(-R, 0, 0), e3 = new V(0, 0, -R)
+      const facesArr = [
+        [top, e0, e1], [top, e1, e2], [top, e2, e3], [top, e3, e0],
+        [bottom, e1, e0], [bottom, e2, e1], [bottom, e3, e2], [bottom, e0, e3]
+      ]
+      const edgesArr = [
+        [top, e0], [top, e1], [top, e2], [top, e3],
+        [bottom, e0], [bottom, e1], [bottom, e2], [bottom, e3],
+        [e0, e1], [e1, e2], [e2, e3], [e3, e0]
+      ]
+      const vertsArr = [top, bottom, e0, e1, e2, e3]
+
+      const tube = (p1, p2, r, seg = 10) => {
+        const dir = new V().subVectors(p2, p1), len = dir.length()
+        const g = new THREE.CylinderGeometry(r, r, len, seg, 1, false)
+        g.translate(0, len / 2, 0)
+        const q = new THREE.Quaternion().setFromUnitVectors(new V(0, 1, 0), dir.clone().normalize())
+        const m = new THREE.Matrix4().makeRotationFromQuaternion(q)
+        m.setPosition(p1)
+        g.applyMatrix4(m)
+        return g
+      }
+      const ball = (p, r) => {
+        const g = new THREE.SphereGeometry(r, 12, 10)
+        g.translate(p.x, p.y, p.z)
+        return g
+      }
+
+      const model = new THREE.Group()
+      core.add(model)
+
+      // smoked-glass gem (flat-shaded for crisp facets)
+      const gemPos = []
+      for (const [a, b, c] of facesArr) gemPos.push(a.x, a.y, a.z, b.x, b.y, b.z, c.x, c.y, c.z)
+      const gemGeo = new THREE.BufferGeometry()
+      gemGeo.setAttribute('position', new THREE.Float32BufferAttribute(gemPos, 3))
+      gemGeo.computeVertexNormals()
+      geos.push(gemGeo)
       const glass = new THREE.MeshPhysicalMaterial({
-        color: 0x0b1320, metalness: 0, roughness: 0.05, transmission: 0.95, thickness: 1.5,
-        ior: 1.5, envMapIntensity: 1.4, clearcoat: 1.0, clearcoatRoughness: 0.0, side: THREE.DoubleSide
+        color: 0x1c1f25, metalness: 0, roughness: 0.06, transmission: 0.82, ior: 1.6, thickness: 2.2,
+        attenuationColor: new THREE.Color(0x090b10), attenuationDistance: 1.05,
+        clearcoat: 1, clearcoatRoughness: 0.08, envMapIntensity: 1.25, flatShading: true
       })
       mats.push(glass)
-      core.add(new THREE.Mesh(gemGeo, glass))
+      model.add(new THREE.Mesh(gemGeo, glass))
 
-      // Titanium bezels + glowing etch tubes traced along every facet seam.
-      const edges = new THREE.EdgesGeometry(gemGeo)
-      const ep = edges.attributes.position.array
-      const bezelMat = new THREE.MeshStandardMaterial({ color: 0x12161c, metalness: 1.0, roughness: 0.4, envMapIntensity: 1.4 })
-      etchMat = new THREE.MeshStandardMaterial({ color: CYAN.clone(), emissive: CYAN.clone(), emissiveIntensity: 2.6, metalness: 0.5, roughness: 0.2 })
-      mats.push(bezelMat, etchMat)
-      const bezelG = new THREE.Group()
-      const etchG = new THREE.Group()
-      for (let i = 0; i < ep.length; i += 6) {
-        const v1 = new THREE.Vector3(ep[i], ep[i + 1], ep[i + 2])
-        const v2 = new THREE.Vector3(ep[i + 3], ep[i + 4], ep[i + 5])
-        const curve = new THREE.LineCurve3(v1, v2)
-        const bz = new THREE.TubeGeometry(curve, 1, 0.035, 6, false)
-        const et = new THREE.TubeGeometry(curve, 1, 0.009, 6, false)
-        geos.push(bz, et)
-        bezelG.add(new THREE.Mesh(bz, bezelMat))
-        etchG.add(new THREE.Mesh(et, etchMat))
+      // metal bezels along every seam, capped at each vertex (merged → one draw call)
+      const bezelGeos = []
+      for (const [a, b] of edgesArr) bezelGeos.push(tube(a, b, 0.026))
+      for (const v of vertsArr) bezelGeos.push(ball(v, 0.046))
+      const bezelGeo = mergeGeometries(bezelGeos)
+      bezelGeos.forEach((g) => g.dispose())
+      geos.push(bezelGeo)
+      const bezelMat = new THREE.MeshPhysicalMaterial({ color: 0x43474f, metalness: 1, roughness: 0.42, envMapIntensity: 1, clearcoat: 0.3 })
+      mats.push(bezelMat)
+      model.add(new THREE.Mesh(bezelGeo, bezelMat))
+
+      // engraved circuit traces — the glowing, reactive element
+      const traceGeos = []
+      for (const [A, B, C] of facesArr) {
+        const ctr = new V().add(A).add(B).add(C).multiplyScalar(1 / 3)
+        let n = new V().subVectors(B, A).cross(new V().subVectors(C, A)).normalize()
+        if (n.dot(ctr) < 0) n.negate()
+        const off = n.clone().multiplyScalar(0.007)
+        const ctrO = ctr.clone().add(off)
+        const inset = [A, B, C].map((p) => p.clone().lerp(ctr, 0.17).add(off))
+        for (let i = 0; i < 3; i++) {
+          traceGeos.push(tube(inset[i], inset[(i + 1) % 3], 0.0085))
+          const mid = inset[i].clone().lerp(ctrO, 0.55)
+          traceGeos.push(tube(inset[i], mid, 0.0065))
+          traceGeos.push(ball(mid, 0.016))
+        }
+        traceGeos.push(ball(ctrO, 0.022))
       }
-      edges.dispose()
-      etchG.scale.setScalar(1.025)
-      core.add(bezelG, etchG)
+      const tracesGeo = mergeGeometries(traceGeos)
+      traceGeos.forEach((g) => g.dispose())
+      geos.push(tracesGeo)
+      tracesMat = new THREE.MeshStandardMaterial({ color: 0x0a0e14, emissive: CYAN.clone(), emissiveIntensity: 1.8, metalness: 0.6, roughness: 0.3 })
+      mats.push(tracesMat)
+      model.add(new THREE.Mesh(tracesGeo, tracesMat))
 
-      // Metallic nucleus with an inner light that bleeds through the glass.
-      const nucGeo = new THREE.IcosahedronGeometry(0.26, 0)
+      // faceted nucleus — metal + reactive emission
+      const nucGeo = new THREE.OctahedronGeometry(0.34, 0)
       geos.push(nucGeo)
       nucMat = new THREE.MeshPhysicalMaterial({
-        color: 0x050505, metalness: 1.0, roughness: 0.1, clearcoat: 1.0,
-        emissive: CYAN.clone(), emissiveIntensity: 0.6, envMapIntensity: 2.5
+        color: 0x20262e, metalness: 1, roughness: 0.16, flatShading: true,
+        emissive: CYAN.clone(), emissiveIntensity: 0.6, envMapIntensity: 1.3
       })
       mats.push(nucMat)
-      nucleus.add(new THREE.Mesh(nucGeo, nucMat))
-      accentLight = new THREE.PointLight(CYAN.clone(), 1.4, 3)
+      const nucMesh = new THREE.Mesh(nucGeo, nucMat)
+      nucMesh.scale.set(1, 1.25, 1)
+      nucleus.add(nucMesh)
+      accentLight = new THREE.PointLight(CYAN.clone(), 1.2, 3)
       nucleus.add(accentLight)
+
+      // recenter vertically so it spins about its middle, then frame it three-quarter
+      const box0 = new THREE.Box3().setFromObject(model)
+      const cy = box0.getCenter(new V()).y
+      const size = box0.getSize(new V())
+      model.position.y -= cy
+      nucleus.position.y -= cy
+      const maxDim = Math.max(size.x, size.y, size.z)
+      const fitDist = (maxDim / (2 * Math.tan((FOV * Math.PI) / 360))) * 1.5
+      camera.position.set(0.5, 0.32, 0.95).normalize().multiplyScalar(fitDist)
+      camera.lookAt(0, 0, 0)
 
       composer = new EffectComposer(renderer)
       composer.setSize(width, h)
       composer.addPass(new RenderPass(scene, camera))
-      bloom = new UnrealBloomPass(new THREE.Vector2(width, h), 0.5, 0.4, 0.82)
+      bloom = new UnrealBloomPass(new THREE.Vector2(width, h), 0.6, 0.45, 0.8)
       composer.addPass(bloom)
       composer.addPass(new OutputPass())
     } else {
       // ── Lite tier: fresnel shell, no transmission/bloom — cheap and always smooth. ──
+      const gemGeo = new THREE.OctahedronGeometry(1.2, 0)
+      gemGeo.scale(1, 1.45, 1)
+      gemGeo.computeVertexNormals()
+      geos.push(gemGeo)
+
       const gemMat = new THREE.MeshStandardMaterial({
         color: 0x14233f, metalness: 0.25, roughness: 0.35, flatShading: true,
         transparent: true, opacity: 0.92, emissive: CYAN.clone(), emissiveIntensity: 0.12
@@ -222,26 +293,25 @@ export default function GhostCore({ active = false, height = 150, quality = 'aut
       mix += (target - mix) * Math.min(1, dt * 4)
 
       core.rotation.y += dt * (0.26 + mix * 0.34)
-      core.rotation.x = Math.sin(t * 0.4) * 0.14
-      core.position.y = Math.sin(t * 0.8) * 0.08
-      nucleus.rotation.y -= dt * 1.2
-      nucleus.rotation.x += dt * 0.8
-      renderer.toneMappingExposure = 1.15 + mix * 0.12 // lift brightness when thinking
+      core.rotation.x = Math.sin(t * 0.4) * 0.12
+      core.position.y = Math.sin(t * 0.8) * 0.06
+      nucleus.rotation.y -= dt * 0.9
+      nucleus.rotation.x += dt * 0.5
+      renderer.toneMappingExposure = 1.1 + mix * 0.14 // lift brightness when thinking
 
       // Nucleus "heartbeat" — faster + wider as it energises.
       const p = (0.4 + mix * 0.45) + Math.sin(t * (2.2 + mix * 3)) * (0.16 + mix * 0.34)
 
       if (isHigh) {
         tmpA.copy(CYAN).lerp(MAGENTA, mix)
-        etchMat.color.copy(tmpA)
-        etchMat.emissive.copy(tmpA)
-        etchMat.emissiveIntensity = 2.4 + mix * 1.4 + p * 0.6
+        tracesMat.emissive.copy(tmpA)
+        tracesMat.emissiveIntensity = 1.6 + mix * 1.6 + p * 0.6
         nucMat.emissive.copy(tmpB.copy(CYAN).lerp(HOT, mix))
-        nucMat.emissiveIntensity = 0.5 + mix * 0.9 + p * 0.4
+        nucMat.emissiveIntensity = 0.5 + mix * 1.0 + p * 0.4
         accentLight.color.copy(tmpA)
-        accentLight.intensity = 1.3 + mix * 1.1
+        accentLight.intensity = 1.1 + mix * 1.2
         rimLight.color.copy(tmpA)
-        bloom.strength = 0.5 + mix * 0.35 + p * 0.12
+        bloom.strength = 0.55 + mix * 0.4 + p * 0.12
       } else {
         nucleus.scale.setScalar(0.85 + p * 0.3)
         nucMat.opacity = 0.5 + p * 0.4

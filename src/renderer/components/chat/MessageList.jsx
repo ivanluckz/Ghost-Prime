@@ -23,7 +23,7 @@ export default function MessageList({ messages, onExample, runningIds, trackColo
     <div className="messages">
       {messages.length === 0 && (
         <div className="empty">
-          <GhostCore active={false} height={210} className="hero-core" />
+          <GhostCore active={false} height={210} quality="high" className="hero-core" />
           <h1 className="empty-title">
             Ask <span className="empty-title-accent">Ghost-Prime</span> anything to begin
           </h1>
