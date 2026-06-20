@@ -890,92 +890,11 @@ html.native-frame .sidebar-head {
   align-items: center;
 }
 
-/* ---------- Hero orb (empty state) ---------- */
-.hero-orb {
-  position: relative;
-  width: 132px;
-  height: 132px;
-  margin: 0 auto 28px;
-  display: grid;
-  place-items: center;
-}
-
-.orb-halo {
-  position: absolute;
-  inset: -34%;
-  border-radius: 50%;
-  background: radial-gradient(circle, rgba(0, 230, 255, 0.3), rgba(124, 92, 255, 0.14) 46%, transparent 70%);
-  filter: blur(16px);
-  animation: orbpulse 4.2s ease-in-out infinite;
-}
-
-.orb-ring {
-  position: absolute;
-  border-radius: 50%;
-  -webkit-mask: radial-gradient(closest-side, transparent calc(100% - 2px), #000 calc(100% - 2px));
-  mask: radial-gradient(closest-side, transparent calc(100% - 2px), #000 calc(100% - 2px));
-}
-
-.orb-ring-1 {
-  inset: 0;
-  background: conic-gradient(from 0deg, transparent 0 58%, var(--cyan) 80%, transparent 96%);
-  filter: drop-shadow(0 0 6px rgba(0, 230, 255, 0.8));
-  animation: rotate 6.5s linear infinite;
-}
-
-.orb-ring-2 {
-  inset: 15px;
-  background: conic-gradient(from 180deg, transparent 0 60%, var(--violet) 82%, transparent 97%);
-  filter: drop-shadow(0 0 5px rgba(124, 92, 255, 0.7));
-  animation: rotate-rev 9s linear infinite;
-}
-
-.orb-ring-3 {
-  inset: 30px;
-  background: conic-gradient(from 90deg, transparent 0 64%, var(--magenta) 84%, transparent 98%);
-  filter: drop-shadow(0 0 5px rgba(255, 69, 192, 0.6));
-  animation: rotate 12s linear infinite;
-}
-
-.orb-core {
-  position: absolute;
-  width: 52px;
-  height: 52px;
-  border-radius: 50%;
-  background: radial-gradient(circle at 38% 30%, #ffffff, var(--cyan) 30%, var(--violet) 72%, rgba(124, 92, 255, 0) 100%);
-  box-shadow:
-    0 0 30px rgba(0, 230, 255, 0.6),
-    0 0 64px rgba(124, 92, 255, 0.4),
-    inset 0 0 18px rgba(255, 255, 255, 0.4);
-  animation: orbpulse 3.4s ease-in-out infinite;
-}
-
-.orb-glyph {
-  position: relative;
-  z-index: 1;
-  font-size: 24px;
-  line-height: 1;
-  color: rgba(3, 6, 16, 0.88);
-  text-shadow: 0 1px 2px rgba(255, 255, 255, 0.55);
-  animation: floaty 6s ease-in-out infinite;
-}
-
-@keyframes orbpulse {
-  0%,
-  100% {
-    transform: scale(1);
-    opacity: 0.9;
-  }
-  50% {
-    transform: scale(1.08);
-    opacity: 1;
-  }
-}
-
-@keyframes rotate-rev {
-  to {
-    transform: rotate(-360deg);
-  }
+/* ---------- Hero core (empty state — three.js GhostCore) ---------- */
+.hero-core {
+  width: 230px;
+  height: 210px;
+  margin: 0 auto 22px;
 }
 
 /* Kept for compatibility (legacy glyph) */

@@ -15,9 +15,6 @@ daemon/model/
 .venv/
 __pycache__/
 
-# Big generated media
-assets/intro.mp4
-
 # Local tooling state
 .claude/
 .cursor/

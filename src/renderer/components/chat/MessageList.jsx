@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react'
 import Message from './Message.jsx'
 import ToolCard from '../tools/ToolCard.jsx'
+import GhostCore from '../GhostCore.jsx'
 
 const EXAMPLES = [
   { icon: '❯', text: 'What files are in my home directory?' },
@@ -22,14 +23,7 @@ export default function MessageList({ messages, onExample, runningIds, trackColo
     <div className="messages">
       {messages.length === 0 && (
         <div className="empty">
-          <div className="hero-orb" aria-hidden="true">
-            <span className="orb-halo" />
-            <span className="orb-ring orb-ring-1" />
-            <span className="orb-ring orb-ring-2" />
-            <span className="orb-ring orb-ring-3" />
-            <span className="orb-core" />
-            <span className="orb-glyph">◇</span>
-          </div>
+          <GhostCore active={false} height={210} className="hero-core" />
           <h1 className="empty-title">
             Ask <span className="empty-title-accent">Ghost-Prime</span> anything to begin
           </h1>
