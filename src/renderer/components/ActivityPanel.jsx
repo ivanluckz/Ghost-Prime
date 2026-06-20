@@ -94,7 +94,7 @@ export default function ActivityPanel({
 
       <div className="activity-body">
         <div className="act-core">
-          <GhostCore active={busy} height={132} />
+          <GhostCore active={busy} height={132} quality="lite" />
           <div className="act-core-cap">{busy ? 'thinking…' : 'standby'}</div>
         </div>
 

@@ -12,17 +12,36 @@ const VIOLET = new THREE.Color(0x7c5cff)
 const MAGENTA = new THREE.Color(0xff45c0)
 const HOT = new THREE.Color(0x9fe8ff)
 
+// Probe the GPU once per session: software renderers (Crostini's SwiftShader/llvmpipe) can't afford
+// the glass tier's transmission + bloom, so we transparently fall back to the cheap fresnel tier.
+let _tier = null
+function resolveTier() {
+  if (_tier) return _tier
+  try {
+    const c = document.createElement('canvas')
+    const gl = c.getContext('webgl') || c.getContext('experimental-webgl')
+    if (!gl) return (_tier = 'lite')
+    const dbg = gl.getExtension('WEBGL_debug_renderer_info')
+    const r = dbg ? String(gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL)) : ''
+    gl.getExtension('WEBGL_lose_context')?.loseContext()
+    _tier = !r ? 'high' : /swiftshader|llvmpipe|softpipe|software|basic render|microsoft|mesa offscreen/i.test(r) ? 'lite' : 'high'
+  } catch {
+    _tier = 'high'
+  }
+  return _tier
+}
+
 // The Ghost-Prime Core — a procedural holographic gem in three.js. `active` (wire it to the Activity
 // panel's busy flag) smoothly energises it: spins up, the etch + nucleus flare brighter, the bloom
-// swells, and the accents shift cyan → magenta — so the Core visibly "thinks" while the agent works.
+// swells, exposure lifts, and the accents shift cyan → magenta — so the Core visibly "thinks".
 //
-//   quality="high" (default) — real glass: MeshPhysical transmission + env reflections + UnrealBloom.
-//                              Gorgeous on a real GPU (the extension); ~fine on Crostini software GL.
-//   quality="lite"          — fresnel shell, no transmission/bloom. Guaranteed-smooth fallback.
+//   quality="auto" (default) — probe the GPU: glass on real hardware, fresnel on software GL.
+//   quality="high"           — force real glass: MeshPhysical transmission + env + UnrealBloom.
+//   quality="lite"           — force the fresnel shell (no transmission/bloom).
 //
-// Either way it renders on a transparent canvas sized to its container, pauses while the window is
-// hidden, honours prefers-reduced-motion, and fully disposes on unmount.
-export default function GhostCore({ active = false, height = 150, quality = 'high', className = '' }) {
+// Renders on a transparent canvas sized to its container, caps to `fps`, pauses while the window is
+// hidden, survives GPU context loss, honours prefers-reduced-motion, and fully disposes on unmount.
+export default function GhostCore({ active = false, height = 150, quality = 'auto', fps = 30, className = '' }) {
   const mountRef = useRef(null)
   const activeRef = useRef(active)
   activeRef.current = active
@@ -31,17 +50,20 @@ export default function GhostCore({ active = false, height = 150, quality = 'hig
     const mount = mountRef.current
     if (!mount) return
     const reduce = window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches
+    const tier = quality === 'auto' ? resolveTier() : quality
+    const isHigh = tier === 'high'
+    mount.dataset.tier = tier
 
     let width = mount.clientWidth || 240
     const h = height
 
     let renderer
     try {
-      renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, powerPreference: 'low-power' })
+      renderer = new THREE.WebGLRenderer({ antialias: isHigh, alpha: true, powerPreference: 'low-power' })
     } catch {
       return // No WebGL context — fail silent, leave an empty slot.
     }
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, quality === 'high' ? 1.25 : 1.5))
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, isHigh ? 1.25 : 1.5))
     renderer.setSize(width, h)
     renderer.toneMapping = THREE.ACESFilmicToneMapping
     renderer.toneMappingExposure = 1.15
@@ -72,14 +94,14 @@ export default function GhostCore({ active = false, height = 150, quality = 'hig
     gemGeo.computeVertexNormals()
     geos.push(gemGeo)
 
-    // Per-frame reactive material refs (set by whichever tier builds).
+    // Per-frame reactive refs (set by whichever tier builds).
     let etchMat = null
     let nucMat = null
     let glowMat = null
     let rimLight = null
     let accentLight = null
 
-    if (quality === 'high') {
+    if (isHigh) {
       // Studio-grade reflections/refractions from a tiny baked room.
       pmrem = new THREE.PMREMGenerator(renderer)
       envTex = pmrem.fromScene(new RoomEnvironment(), 0.04).texture
@@ -184,15 +206,18 @@ export default function GhostCore({ active = false, height = 150, quality = 'hig
 
     let raf = 0
     let mix = 0 // eased 0→1 idle→active, drives the whole transition
-    let last = performance.now()
-    const start = last
+    let lastDraw = 0
+    const start = performance.now()
+    const frameMin = 1000 / Math.max(1, fps)
     const tmpA = new THREE.Color()
     const tmpB = new THREE.Color()
 
     function frame(now) {
+      raf = reduce ? 0 : requestAnimationFrame(frame)
+      if (lastDraw && now - lastDraw < frameMin) return // FPS cap — skip this tick
+      const dt = Math.min(0.05, lastDraw ? (now - lastDraw) / 1000 : 0.016)
+      lastDraw = now
       const t = (now - start) / 1000
-      const dt = Math.min(0.05, (now - last) / 1000)
-      last = now
       const target = activeRef.current ? 1 : 0
       mix += (target - mix) * Math.min(1, dt * 4)
 
@@ -201,11 +226,12 @@ export default function GhostCore({ active = false, height = 150, quality = 'hig
       core.position.y = Math.sin(t * 0.8) * 0.08
       nucleus.rotation.y -= dt * 1.2
       nucleus.rotation.x += dt * 0.8
+      renderer.toneMappingExposure = 1.15 + mix * 0.12 // lift brightness when thinking
 
       // Nucleus "heartbeat" — faster + wider as it energises.
       const p = (0.4 + mix * 0.45) + Math.sin(t * (2.2 + mix * 3)) * (0.16 + mix * 0.34)
 
-      if (quality === 'high') {
+      if (isHigh) {
         tmpA.copy(CYAN).lerp(MAGENTA, mix)
         etchMat.color.copy(tmpA)
         etchMat.emissive.copy(tmpA)
@@ -225,22 +251,30 @@ export default function GhostCore({ active = false, height = 150, quality = 'hig
       }
 
       renderFrame()
-      if (!reduce) raf = requestAnimationFrame(frame)
     }
 
     if (reduce) frame(start + 700)
     else raf = requestAnimationFrame(frame)
 
-    // Don't burn cycles while the window is hidden.
-    const onVis = () => {
-      if (document.hidden) {
-        if (raf) { cancelAnimationFrame(raf); raf = 0 }
-      } else if (!reduce && !raf) {
-        last = performance.now()
-        raf = requestAnimationFrame(frame)
-      }
+    const resume = () => {
+      if (reduce || document.hidden || raf) return
+      lastDraw = 0
+      raf = requestAnimationFrame(frame)
     }
+    const pause = () => {
+      if (raf) { cancelAnimationFrame(raf); raf = 0 }
+    }
+
+    // Don't burn cycles while the window is hidden.
+    const onVis = () => (document.hidden ? pause() : resume())
     document.addEventListener('visibilitychange', onVis)
+
+    // Survive a GPU context loss (Crostini's virtio-gpu can drop the process) instead of freezing.
+    const canvas = renderer.domElement
+    const onLost = (e) => { e.preventDefault(); pause() }
+    const onRestored = () => resume()
+    canvas.addEventListener('webglcontextlost', onLost, false)
+    canvas.addEventListener('webglcontextrestored', onRestored, false)
 
     const ro = new ResizeObserver(() => {
       const nw = mount.clientWidth
@@ -255,8 +289,10 @@ export default function GhostCore({ active = false, height = 150, quality = 'hig
     ro.observe(mount)
 
     return () => {
-      if (raf) cancelAnimationFrame(raf)
+      pause()
       document.removeEventListener('visibilitychange', onVis)
+      canvas.removeEventListener('webglcontextlost', onLost)
+      canvas.removeEventListener('webglcontextrestored', onRestored)
       ro.disconnect()
       geos.forEach((g) => g.dispose())
       mats.forEach((m) => m.dispose())
@@ -267,7 +303,7 @@ export default function GhostCore({ active = false, height = 150, quality = 'hig
       renderer.dispose()
       renderer.domElement.remove()
     }
-  }, [height, quality])
+  }, [height, quality, fps])
 
   return <div ref={mountRef} className={`ghost-core ${className}`} style={{ height }} aria-hidden="true" />
 }

@@ -892,9 +892,21 @@ html.native-frame .sidebar-head {
 
 /* ---------- Hero core (empty state — three.js GhostCore) ---------- */
 .hero-core {
+  position: relative;
   width: 230px;
   height: 210px;
   margin: 0 auto 22px;
+}
+
+/* Soft volumetric halo behind the Core — pure CSS, grounds it on the dark HUD. */
+.hero-core::before {
+  content: '';
+  position: absolute;
+  inset: -12% -8% 4%;
+  background: radial-gradient(circle at 50% 46%, rgba(0, 230, 255, 0.2), rgba(124, 92, 255, 0.1) 46%, transparent 70%);
+  filter: blur(18px);
+  z-index: -1;
+  pointer-events: none;
 }
 
 /* Kept for compatibility (legacy glyph) */
