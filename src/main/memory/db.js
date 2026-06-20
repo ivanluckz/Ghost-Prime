@@ -23,7 +23,23 @@ export function initDb(appRoot = app.getAppPath()) {
   // Columns added after a table's first migration (SQLite has no ADD COLUMN IF NOT EXISTS).
   const hasCol = (table, col) => db.prepare(`PRAGMA table_info(${table})`).all().some((c) => c.name === col)
   if (!hasCol('sessions', 'parent_id')) db.exec('ALTER TABLE sessions ADD COLUMN parent_id TEXT') // nested sub-chats
+  if (!hasCol('memories', 'tags')) db.exec('ALTER TABLE memories ADD COLUMN tags TEXT') // ,a,b, wrapped
+  if (!hasCol('memories', 'expires_at')) db.exec('ALTER TABLE memories ADD COLUMN expires_at INTEGER') // ms epoch, nullable
+
+  // Drop memories that have expired since last run.
+  db.prepare('DELETE FROM memories WHERE expires_at IS NOT NULL AND expires_at < ?').run(Date.now())
   return db
+}
+
+// Tags are stored wrapped in commas (",work,billing,") so a single LIKE '%,tag,%' matches one tag.
+const NOT_EXPIRED = '(expires_at IS NULL OR expires_at > ?)'
+function wrapTags(tags) {
+  const list = Array.isArray(tags) ? tags : typeof tags === 'string' ? tags.split(',') : []
+  const clean = list.map((t) => String(t).trim().toLowerCase()).filter(Boolean)
+  return clean.length ? ',' + clean.join(',') + ',' : null
+}
+function unwrapTags(s) {
+  return s ? s.split(',').filter(Boolean) : []
 }
 
 // --- Sessions ------------------------------------------------------------
@@ -138,51 +154,64 @@ export function sessionMessages(sessionId) {
 }
 
 // --- Memory (cross-session facts the agent chooses to remember) -----------
-export function saveMemory(content, type = 'fact', importance = 5) {
+// opts: { tags: string[]|csv, expiresAt: msEpoch }  — expiresAt makes a memory auto-forget after a time.
+export function saveMemory(content, type = 'fact', importance = 5, opts = {}) {
   if (!db || !content) return null
   const id = randomUUID()
   db.prepare(
-    'INSERT INTO memories (id, session_id, type, content, importance, created_at) VALUES (?, ?, ?, ?, ?, ?)'
-  ).run(id, currentSessionId, type, content, importance, Date.now())
+    'INSERT INTO memories (id, session_id, type, content, importance, created_at, tags, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
+  ).run(id, currentSessionId, type, content, importance, Date.now(), wrapTags(opts.tags), opts.expiresAt || null)
   return id
 }
 
-export function recallMemories(query, limit = 8) {
+const MEM_COLS = 'id, type, content, importance, created_at, tags, expires_at'
+const withTags = (r) => ({ ...r, tags: unwrapTags(r.tags) })
+
+// query = keyword (LIKE on content); opts.tag filters to memories carrying that tag. Expired rows are
+// always excluded. Falls back to the digest when a query matches nothing.
+export function recallMemories(query, limit = 8, opts = {}) {
   if (!db) return []
-  let rows
-  if (query && query.trim()) {
-    // Keyword match (no embeddings yet); fall back to most-important if nothing matches.
-    rows = db
-      .prepare(
-        'SELECT id, type, content, importance, created_at FROM memories WHERE content LIKE ? ORDER BY importance DESC, created_at DESC LIMIT ?'
-      )
-      .all(`%${query.trim()}%`, limit)
-    if (rows.length === 0) rows = memoryDigest(limit)
-  } else {
-    rows = memoryDigest(limit)
+  const now = Date.now()
+  const where = [NOT_EXPIRED]
+  const params = [now]
+  const q = query && query.trim()
+  if (q) {
+    where.push('content LIKE ?')
+    params.push(`%${q}%`)
   }
+  if (opts.tag && String(opts.tag).trim()) {
+    where.push('tags LIKE ?')
+    params.push(`%,${String(opts.tag).trim().toLowerCase()},%`)
+  }
+  let rows = db
+    .prepare(
+      `SELECT ${MEM_COLS} FROM memories WHERE ${where.join(' AND ')} ORDER BY importance DESC, created_at DESC LIMIT ?`
+    )
+    .all(...params, limit)
+  if (rows.length === 0 && (q || opts.tag)) rows = memoryDigest(limit)
   if (rows.length) {
-    const now = Date.now()
     const upd = db.prepare('UPDATE memories SET last_accessed = ? WHERE id = ?')
     db.transaction((ids) => ids.forEach((id) => upd.run(now, id)))(rows.map((r) => r.id).filter(Boolean))
   }
-  return rows
+  return rows.map(withTags)
 }
 
-// Compact, highest-signal memories — used both for recall fallback and for
+// Compact, highest-signal (non-expired) memories — used for recall fallback and for
 // auto-injecting context into the agent's system prompt.
 export function memoryDigest(limit = 8) {
   if (!db) return []
   return db
-    .prepare('SELECT id, type, content, importance, created_at FROM memories ORDER BY importance DESC, created_at DESC LIMIT ?')
-    .all(limit)
+    .prepare(`SELECT ${MEM_COLS} FROM memories WHERE ${NOT_EXPIRED} ORDER BY importance DESC, created_at DESC LIMIT ?`)
+    .all(Date.now(), limit)
+    .map(withTags)
 }
 
 export function allMemories(limit = 200) {
   if (!db) return []
   return db
-    .prepare('SELECT id, type, content, importance, created_at FROM memories ORDER BY created_at DESC LIMIT ?')
-    .all(limit)
+    .prepare(`SELECT ${MEM_COLS} FROM memories WHERE ${NOT_EXPIRED} ORDER BY created_at DESC LIMIT ?`)
+    .all(Date.now(), limit)
+    .map(withTags)
 }
 
 // Forget everything the agent has remembered across sessions. Returns how many facts were removed.

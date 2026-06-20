@@ -81,6 +81,7 @@ function snapshot() {
     alive: s.alive,
     agent: s.agent,
     busy: !!s.capture,
+    lastExit: s.lastExit,
     createdAt: s.createdAt
   }))
 }
@@ -111,7 +112,8 @@ export async function createSession({ name, cwd, cols = 80, rows = 24, agent = f
     createdAt: Date.now(),
     scrollback: '',
     capture: null,
-    osc: null // null = unknown, true = OSC-133 integration live, false = fell back to printf markers
+    osc: null, // null = unknown, true = OSC-133 integration live, false = fell back to printf markers
+    lastExit: null // exit code once the shell process dies (so shell_list surfaces deaths)
   }
 
   shell.onData((data) => {
@@ -123,6 +125,7 @@ export async function createSession({ name, cwd, cols = 80, rows = 24, agent = f
   })
   shell.onExit(({ exitCode }) => {
     session.alive = false
+    session.lastExit = exitCode
     broadcast('shell:data', { id: session.id, data: `\r\n\x1b[2m[process exited: ${exitCode}]\x1b[0m\r\n` })
     if (session.capture) session.capture.onExit(exitCode)
     emitSessions()
@@ -342,6 +345,7 @@ export function readSession({ id, maxBytes = 8000 }) {
     name: s.name,
     alive: s.alive,
     busy: !!s.capture,
+    lastExit: s.lastExit,
     output: stripAnsi(s.scrollback).trimEnd().slice(-maxBytes)
   }
 }

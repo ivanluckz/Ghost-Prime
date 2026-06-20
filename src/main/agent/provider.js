@@ -1,4 +1,5 @@
 import { homedir } from 'node:os'
+import { clipboard, Notification, BrowserWindow } from 'electron'
 import OpenAI from 'openai'
 import * as browser from '../tools/browser.js'
 import * as screen from '../tools/screen.js'
@@ -62,6 +63,10 @@ const BROWSER_TOOL_NAMES = [
 const MEMORY_SERVER = 'ghost-memory'
 const MEMORY_TOOL_NAMES = ['memory_save', 'memory_recall'].map((n) => `mcp__${MEMORY_SERVER}__${n}`)
 
+// Local-machine conveniences: read/write the system clipboard, push a desktop notification.
+const SYSTEM_SERVER = 'ghost-system'
+const SYSTEM_TOOL_NAMES = ['clipboard_read', 'clipboard_write', 'notify_user'].map((n) => `mcp__${SYSTEM_SERVER}__${n}`)
+
 // Experimental desktop control (screenshot + keyboard/mouse for native Linux apps, beyond the
 // browser). Off unless GHOST_SCREEN_TOOLS=1 — limited on Crostini (see src/main/tools/screen.js).
 const SCREEN_ENABLED = process.env.GHOST_SCREEN_TOOLS === '1'
@@ -112,7 +117,9 @@ YOUR TOOLS — all already loaded and directly callable this turn. There is NO s
 - Read / Write / Edit / Glob / Grep — read and change local files.
 - WebFetch / WebSearch — fetch a URL or search the web for current information.
 - browser_navigate / browser_get_text / browser_click / browser_fill / browser_screenshot — drive the user's REAL Google Chrome, already signed in to their sites. To open a page, call browser_navigate immediately.
-- memory_save / memory_recall — your long-term memory across sessions.
+- memory_save / memory_recall — your long-term memory across sessions (supports tags + a ttl for temporary facts).
+- clipboard_read / clipboard_write — read or set the user's system clipboard.
+- notify_user — pop a desktop notification (use it when a long/background task finishes and they may be away).
 
 DRIVING THE BROWSER:
 - To click, prefer browser_click with a "text" argument — the element's visible label, e.g. {text:"Log In"}. If you must use a selector it has to be STANDARD CSS (#id, .class, [aria-label=...], [data-...]) or xpath — never jQuery selectors like :contains(), :visible, or :eq().
@@ -371,25 +378,35 @@ async function getMemoryMcpServer() {
     tools: [
       tool(
         'memory_save',
-        'Save a durable fact, preference, or note to remember across sessions.',
+        'Save a durable fact, preference, or note to remember across sessions. Add { tags } to ' +
+          'categorize it for later filtered recall (e.g. ["billing","acme"]). Add { ttl_days } for ' +
+          'something only temporarily true (e.g. "is travelling this week" → ttl_days: 7) so it ' +
+          'auto-forgets instead of lingering as stale fact.',
         {
           content: z.string(),
           type: z.enum(['fact', 'preference', 'task', 'event']).optional(),
-          importance: z.number().min(1).max(10).optional()
+          importance: z.number().min(1).max(10).optional(),
+          tags: z.array(z.string()).optional(),
+          ttl_days: z.number().positive().optional()
         },
-        async ({ content, type, importance }) => {
-          const id = saveMemory(content, type || 'fact', importance || 5)
+        async ({ content, type, importance, tags, ttl_days }) => {
+          const expiresAt = ttl_days ? Date.now() + ttl_days * 86_400_000 : null
+          const id = saveMemory(content, type || 'fact', importance || 5, { tags, expiresAt })
           return { content: [{ type: 'text', text: id ? 'Saved to memory.' : 'Could not save memory.' }] }
         }
       ),
       tool(
         'memory_recall',
-        'Search long-term memory for facts/preferences relevant to a query (omit query for the most important).',
-        { query: z.string().optional() },
-        async ({ query }) => {
-          const rows = recallMemories(query || '', 8)
+        'Search long-term memory for facts/preferences relevant to a query (omit query for the most ' +
+          'important). Pass { tag } to restrict to memories carrying that tag. Expired memories are ' +
+          'never returned.',
+        { query: z.string().optional(), tag: z.string().optional() },
+        async ({ query, tag }) => {
+          const rows = recallMemories(query || '', 8, { tag })
           const text = rows.length
-            ? rows.map((r) => `- [${r.type}] ${r.content}`).join('\n')
+            ? rows
+                .map((r) => `- [${r.type}${r.tags?.length ? ' · ' + r.tags.join(',') : ''}] ${r.content}`)
+                .join('\n')
             : 'No memories stored yet.'
           return { content: [{ type: 'text', text }] }
         }
@@ -397,6 +414,61 @@ async function getMemoryMcpServer() {
     ]
   })
   return memoryMcpServer
+}
+
+// ---------------------------------------------------------------------------
+// System MCP server — local-machine conveniences: clipboard + desktop notifications.
+// ---------------------------------------------------------------------------
+let systemMcpServer = null
+async function getSystemMcpServer() {
+  if (systemMcpServer) return systemMcpServer
+  const { createSdkMcpServer, tool } = await import('@anthropic-ai/claude-agent-sdk')
+  const { z } = await import('zod')
+
+  systemMcpServer = createSdkMcpServer({
+    name: SYSTEM_SERVER,
+    version: '1.0.0',
+    tools: [
+      tool(
+        'clipboard_read',
+        "Read the user's current system clipboard (text). Use it instead of asking them to paste, " +
+          'or to pick up something they just copied.',
+        {},
+        async () => {
+          const text = clipboard.readText() || ''
+          return { content: [{ type: 'text', text: text ? text : '(clipboard is empty)' }] }
+        }
+      ),
+      tool(
+        'clipboard_write',
+        "Put text on the user's system clipboard so they can paste it anywhere.",
+        { text: z.string() },
+        async ({ text }) => {
+          clipboard.writeText(String(text ?? ''))
+          return { content: [{ type: 'text', text: 'Copied to clipboard.' }] }
+        }
+      ),
+      tool(
+        'notify_user',
+        'Send the user a desktop notification — use it to get their attention when a long or ' +
+          'background task finishes, or when you need them while they are away from the window. Pass ' +
+          '{ title, body }.',
+        { title: z.string().optional(), body: z.string() },
+        async ({ title, body }) => {
+          try {
+            if (Notification.isSupported()) new Notification({ title: title || 'Ghost-Prime', body: String(body || '') }).show()
+          } catch {}
+          for (const w of BrowserWindow.getAllWindows()) {
+            try {
+              w.flashFrame(true) // bounce the taskbar entry for attention
+            } catch {}
+          }
+          return { content: [{ type: 'text', text: 'Notified the user.' }] }
+        }
+      )
+    ]
+  })
+  return systemMcpServer
 }
 
 let screenMcpServer = null
@@ -505,10 +577,9 @@ async function getShellMcpServer() {
         async ({ terminal, maxBytes }) => {
           const r = shell.readSession({ id: terminal, maxBytes })
           if (r.error) return { content: [{ type: 'text', text: r.error }] }
+          const tag = r.alive ? '' : ` (exited${r.lastExit != null ? ` code ${r.lastExit}` : ''})`
           return {
-            content: [
-              { type: 'text', text: `[${r.name} · ${terminal}]${r.alive ? '' : ' (exited)'}\n${r.output || '(no output yet)'}` }
-            ]
+            content: [{ type: 'text', text: `[${r.name} · ${terminal}]${tag}\n${r.output || '(no output yet)'}` }]
           }
         }
       ),
@@ -519,13 +590,10 @@ async function getShellMcpServer() {
         {},
         async () => {
           const rows = shell.listSessions()
+          const stateOf = (s) =>
+            s.alive ? (s.busy ? 'running a command' : 'idle') : `exited${s.lastExit != null ? ` (code ${s.lastExit})` : ''}`
           const text = rows.length
-            ? rows
-                .map(
-                  (s) =>
-                    `- ${s.id} "${s.name}" — ${s.alive ? (s.busy ? 'running a command' : 'idle') : 'exited'} · ${s.cwd}`
-                )
-                .join('\n')
+            ? rows.map((s) => `- ${s.id} "${s.name}" — ${stateOf(s)} · ${s.cwd}`).join('\n')
             : 'No terminals open yet — shell_run will open one automatically.'
           return { content: [{ type: 'text', text }] }
         }
@@ -582,6 +650,7 @@ async function streamChatClaudeAgent({ messages, signal, onDelta, onEvent, model
   const browserServer = await getBrowserMcpServer()
   const memoryServer = await getMemoryMcpServer()
   const shellServer = await getShellMcpServer()
+  const systemServer = await getSystemMcpServer()
   const screenServer = SCREEN_ENABLED ? await getScreenMcpServer() : null
 
   // Auto-inject the highest-signal memories so Claude "remembers" without being asked.
@@ -622,12 +691,14 @@ async function streamChatClaudeAgent({ messages, signal, onDelta, onEvent, model
         ...SHELL_TOOL_NAMES,
         ...BROWSER_TOOL_NAMES,
         ...MEMORY_TOOL_NAMES,
+        ...SYSTEM_TOOL_NAMES,
         ...(screenServer ? SCREEN_TOOL_NAMES : [])
       ],
       mcpServers: {
         [BROWSER_SERVER]: browserServer,
         [MEMORY_SERVER]: memoryServer,
         [SHELL_SERVER]: shellServer,
+        [SYSTEM_SERVER]: systemServer,
         ...(screenServer ? { [SCREEN_SERVER]: screenServer } : {})
       },
       permissionMode, // plan | auto | bypassPermissions — from the UI mode (Shift+Tab)
