@@ -69,7 +69,8 @@ function createWindow() {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: false,
-      backgroundThrottling: false // keep streaming/animations live while you're over in Chrome
+      backgroundThrottling: false, // keep streaming/animations live while you're over in Chrome
+      autoplayPolicy: 'no-user-gesture-required' // let the intro sting + sfx play on launch
     }
   })
 

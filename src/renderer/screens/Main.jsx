@@ -4,6 +4,7 @@ import ChatInput from '../components/chat/ChatInput.jsx'
 import SessionSidebar from '../components/SessionSidebar.jsx'
 import SettingsPanel from '../components/SettingsPanel.jsx'
 import ActivityPanel from '../components/ActivityPanel.jsx'
+import { playActivate, isMuted, toggleMuted, onMuteChange } from '../audio.js'
 
 // Build identity, injected by electron.vite.config.js — shown in the topbar so it's obvious which
 // build is live (the stamp changes every rebuild). typeof guard keeps it safe if not defined.
@@ -32,6 +33,7 @@ export default function Main() {
   const [mirror, setMirror] = useState(false) // mirror chat into Chrome's side panel
   const [activityOpen, setActivityOpen] = useState(true) // right-hand Mission Control activity panel
   const [browserTarget, setBrowserTarget] = useState('group') // which tab browser tools act on
+  const [muted, setMutedState] = useState(isMuted()) // master sound mute (intro sting + sfx)
   const voiceOutRef = useRef(false)
   const sendRef = useRef(null) // latest send(), so externally-pushed tasks avoid a stale closure
 
@@ -153,6 +155,9 @@ export default function Main() {
       offError()
     }
   }, [])
+
+  // Keep the mute button in sync if the setting is toggled elsewhere.
+  useEffect(() => onMuteChange(setMutedState), [])
 
   // Right-click "Ask Ghost about this" in Chrome pushes a task up here — run it.
   useEffect(() => window.ghost.onExternalTask?.(({ prompt }) => prompt && sendRef.current?.(prompt)), [])
@@ -361,6 +366,7 @@ export default function Main() {
   // Send a prompt to the agent NOW. History is the conversation so far (each task runs sequentially,
   // so by the time we dispatch, prior replies are already in `messages` as context).
   function dispatch(t) {
+    playActivate() // swell as the Core powers up for this task
     window.ghost.voice?.stopSpeaking()
     const history = messages
       .filter((m) => m.role === 'user' || m.role === 'assistant')
@@ -437,6 +443,15 @@ export default function Main() {
               }
             >
               {voiceOut ? '🔊' : '🔇'}
+            </button>
+            <button
+              type="button"
+              className={`voice-toggle ${muted ? '' : 'on'}`}
+              onClick={() => setMutedState(toggleMuted())}
+              title={muted ? 'Sound muted (intro + sfx) — click to unmute' : 'Sound on (intro + sfx) — click to mute'}
+              aria-label="Toggle app sound"
+            >
+              🎵
             </button>
             <button
               type="button"

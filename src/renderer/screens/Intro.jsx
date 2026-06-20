@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react'
 import introVideo from '@assets/intro.mp4'
+import { playIntro, stopIntro } from '../audio.js'
 
 export default function Intro({ onComplete }) {
   const videoRef = useRef(null)
@@ -8,10 +9,12 @@ export default function Intro({ onComplete }) {
   function finish() {
     if (doneRef.current) return
     doneRef.current = true
+    stopIntro()
     onComplete()
   }
 
   useEffect(() => {
+    playIntro() // cinematic sting over the (muted) video
     const onKey = () => finish()
     window.addEventListener('keydown', onKey)
 
@@ -28,6 +31,7 @@ export default function Intro({ onComplete }) {
       window.removeEventListener('keydown', onKey)
       clearTimeout(cap)
       clearTimeout(stall)
+      stopIntro()
     }
   }, [])
 
