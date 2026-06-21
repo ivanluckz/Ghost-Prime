@@ -7,6 +7,7 @@ import { registerIpc } from './ipc.js'
 import { startBridge, onBridgeTask, watchExtensionForReload } from './tools/browser-bridge.js'
 import { initHotkey } from './hotkey.js'
 import { killAll as killAllShells } from './tools/shell-sessions.js'
+import { startDiscord, stopDiscord } from './discord/index.js'
 
 // Load .env from the project root. Under electron-vite dev, getAppPath() === project root.
 dotenv.config({ path: join(app.getAppPath(), '.env') })
@@ -141,6 +142,7 @@ app.whenReady().then(() => {
   }
   registerIpc()
   startBridge() // local HTTP bridge for the Chrome extension (drives your real browser)
+  startDiscord() // Discord relay — only live while Ghost-Prime runs; no-op unless DISCORD_BOT_TOKEN is set
   // Tasks pushed up from the extension (right-click "Ask Ghost about this") → summon + run.
   onBridgeTask((prompt) => {
     if (!mainWindow) return
@@ -182,6 +184,7 @@ app.whenReady().then(() => {
 app.on('will-quit', () => {
   globalShortcut.unregisterAll()
   killAllShells() // terminate any live PTY shells so they don't orphan
+  stopDiscord() // take the bot offline with the app
 })
 
 app.on('window-all-closed', () => {
