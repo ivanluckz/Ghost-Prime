@@ -56,7 +56,11 @@ const BROWSER_TOOL_NAMES = [
   'browser_click_at',
   'browser_scroll',
   'browser_wait_for',
-  'browser_press_key'
+  'browser_press_key',
+  'browser_list_tabs',
+  'browser_use_tab',
+  'browser_list_browsers',
+  'browser_use_browser'
 ].map((n) => `mcp__${BROWSER_SERVER}__${n}`)
 
 // Our cross-session memory, exposed to the agent as an in-process SDK MCP server.
@@ -117,6 +121,7 @@ YOUR TOOLS — all already loaded and directly callable this turn. There is NO s
 - Read / Write / Edit / Glob / Grep — read and change local files.
 - WebFetch / WebSearch — fetch a URL or search the web for current information.
 - browser_navigate / browser_get_text / browser_click / browser_fill / browser_screenshot — drive the user's REAL Google Chrome, already signed in to their sites. To open a page, call browser_navigate immediately.
+- browser_list_tabs — see every open tab (url, title, which window, what's playing audio); browser_use_tab pins which tab/window to act on (use these when several Chrome windows are open). browser_list_browsers / browser_use_browser switch between separate connected browsers/profiles.
 - memory_save / memory_recall — your long-term memory across sessions (supports tags + a ttl for temporary facts).
 - clipboard_read / clipboard_write — read or set the user's system clipboard.
 - notify_user — pop a desktop notification (use it when a long/background task finishes and they may be away).
@@ -132,6 +137,7 @@ DRIVING THE BROWSER:
 - To TYPE into an editor that browser_fill can't fill — Google Docs/Slides, code editors, Notion, anything with no real input field — first click into it (browser_click / browser_click_at), then browser_press_key with { text } to type, and { keys } for shortcuts/special keys ("Enter", "Control+A", "ArrowDown"). browser_fill is only for real form fields; reach for browser_press_key the moment a fill has nowhere to land.
 - Copy and paste work through the real system clipboard via browser_press_key: { keys: "Control+C" } (or "Control+X") copies the current selection out, and { keys: "Control+V" } pastes the clipboard in. So to move text between pages/apps: select it (e.g. Control+A), Control+C, click the destination, Control+V. To paste text YOU already have, just use { text } — no clipboard needed.
 - Per-site permissions may block a site: if a browser tool returns that a site is blocked or not on the allow-list, do NOT keep retrying — tell the user it's blocked and that they can change it in Settings → Site access.
+- LOGIN POPUPS ("Continue with Google/Apple/Microsoft", OAuth consent): the popup opens as a NEW TAB/window, not the page you were on. After clicking the sign-in button, call browser_list_tabs — the popup shows up as a new tab (often the accounts.google.com one) — browser_use_tab to its tabId, complete the sign-in there (pick the account, click Continue/Allow), then browser_use_tab back to your original tab. Don't give up assuming the popup is invisible; it's just another tab.
 - If the conversation opens with a "[Current browser tab the user is viewing]" block, that's the page they're looking at right now — treat it as the meaning of "this page / here / this", and don't call browser_get_text on it again unless you need fuller or fresher content.
 
 MEMORY:
@@ -355,6 +361,63 @@ async function getBrowserMcpServer() {
             .filter(Boolean)
             .join('; ')
           return { content: [{ type: 'text', text: did || 'sent keystrokes' }] }
+        }
+      ),
+      tool(
+        'browser_list_tabs',
+        'List every open browser tab — its tabId, window, URL, title, whether it is the active/focused ' +
+          'tab, and whether it is playing audio (audible). Use this to SEE what the user has open and ' +
+          'what is playing, to find the right tab when several windows are open, and to get a tabId to ' +
+          'pin with browser_use_tab.',
+        {},
+        async () => {
+          const r = await browser.browserListTabs()
+          const tabs = r.tabs || []
+          if (!tabs.length) return { content: [{ type: 'text', text: 'No open tabs found.' }] }
+          const text = tabs
+            .map(
+              (t) =>
+                `- tabId ${t.tabId} [win ${t.windowId}${t.focusedWindow ? '*' : ''}]${t.active ? ' (active)' : ''}` +
+                `${t.audible ? ' 🔊' : ''}${t.muted ? ' (muted)' : ''} — ${t.title || '(no title)'} · ${t.url}`
+            )
+            .join('\n')
+          return { content: [{ type: 'text', text: `${text}\n\n(* = focused window, 🔊 = playing audio)` }] }
+        }
+      ),
+      tool(
+        'browser_use_tab',
+        'Pin which tab/window your browser actions act on, by tabId (from browser_list_tabs). This is ' +
+          'how you choose between several open Chrome windows ("do this in window A"). Pass ' +
+          '{ tabId: null } to unpin and go back to the default tab.',
+        { tabId: z.number().nullable() },
+        async ({ tabId }) => {
+          const set = browser.setTargetTab(tabId)
+          return { content: [{ type: 'text', text: set == null ? 'Unpinned — using the default tab.' : `Acting on tab ${set} now.` }] }
+        }
+      ),
+      tool(
+        'browser_list_browsers',
+        'List the connected browsers/devices (separate Chrome/Brave windows or profiles, or a phone) ' +
+          'that Ghost can drive, and which one is currently selected. Use when more than one browser ' +
+          'is connected and you need to pick.',
+        {},
+        async () => {
+          const list = browser.listBrowsers() || []
+          if (!list.length) return { content: [{ type: 'text', text: 'No browsers connected.' }] }
+          const text = list
+            .map((d) => `- ${d.id} "${d.name}" (${d.kind})${d.selected ? ' — SELECTED' : ''}${d.connected ? '' : ' [offline]'}`)
+            .join('\n')
+          return { content: [{ type: 'text', text }] }
+        }
+      ),
+      tool(
+        'browser_use_browser',
+        'Choose which connected browser/device to drive, by id (from browser_list_browsers). Use this ' +
+          'to switch between two separate browsers/profiles.',
+        { id: z.string() },
+        async ({ id }) => {
+          const ok = browser.useBrowser(id)
+          return { content: [{ type: 'text', text: ok ? `Now driving ${id}.` : `No connected browser with id ${id}.` }] }
         }
       )
     ]

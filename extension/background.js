@@ -127,6 +127,14 @@ async function activeTab() {
 // different tab or in another app. Set GHOST_BROWSER_FOCUS=1 (app side → args.focus) to bring
 // Ghost's tab forward so you can watch it work.
 async function resolveTab(cmd, args) {
+  // Explicit tab pin (from browser_use_tab) wins — lets the agent act on a chosen tab/window even
+  // when several Chrome windows are open.
+  if (args && args.tabId != null) {
+    try {
+      const t = await chrome.tabs.get(args.tabId)
+      if (t && t.id != null) return t
+    } catch {}
+  }
   if (args && args.target === 'active') {
     const t = await activeTab()
     if (t) return t
@@ -687,6 +695,27 @@ async function run(cmd, args) {
           return g.ok ? readOnePage(u, keepOpen) : Promise.resolve({ url: u, title: '', text: '', error: g.reason })
         })
       )
+    }
+  }
+  // List every open tab (across all Chrome windows) so the agent can see what's open, what's playing
+  // audio, and which window each tab is in — and then target one with browser_use_tab. Doesn't touch
+  // any tab. Covers "what tabs are open" (#5), "what's playing" (audible, #8), and window targeting.
+  if (cmd === 'listTabs') {
+    const all = await chrome.tabs.query({})
+    const focused = await chrome.windows.getLastFocused().catch(() => null)
+    return {
+      tabs: all
+        .filter((t) => t.id != null)
+        .map((t) => ({
+          tabId: t.id,
+          windowId: t.windowId,
+          url: t.url || t.pendingUrl || '',
+          title: t.title || '',
+          active: !!t.active,
+          audible: !!t.audible,
+          muted: !!(t.mutedInfo && t.mutedInfo.muted),
+          focusedWindow: focused ? t.windowId === focused.id : false
+        }))
     }
   }
   const tab = await resolveTab(cmd, args)

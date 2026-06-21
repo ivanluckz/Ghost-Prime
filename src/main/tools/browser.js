@@ -18,6 +18,17 @@ export function getActiveTabMode() {
   return ACTIVE_TAB_MODE
 }
 
+// A specific tab the agent pinned with browser_use_tab — overrides target/group so commands act on a
+// chosen tab/window even with several Chrome windows open. null = no pin (use group/active logic).
+let TARGET_TAB_ID = null
+export function setTargetTab(tabId) {
+  TARGET_TAB_ID = tabId == null ? null : Number(tabId)
+  return TARGET_TAB_ID
+}
+export function getTargetTab() {
+  return TARGET_TAB_ID
+}
+
 // Metadata sent with every extension command: which tab to target, the live per-site policy
 // (checked inside the extension against the real page URL), and whether to bring Ghost's tab to the
 // foreground while acting. focus defaults OFF so the bot works in the background on an unfocused
@@ -25,6 +36,7 @@ export function getActiveTabMode() {
 function meta() {
   return {
     target: ACTIVE_TAB_MODE ? 'active' : 'group',
+    tabId: TARGET_TAB_ID, // pinned tab (browser_use_tab) — overrides target when set
     policy: policySnapshot(),
     focus: process.env.GHOST_BROWSER_FOCUS === '1'
   }
@@ -577,4 +589,35 @@ export async function browserClose() {
     page = null
   }
   return { ok: true }
+}
+
+// List every open tab — url, title, which window, and whether it's playing audio (audible) — so the
+// agent can see what's open / what's playing and then pin one with setTargetTab.
+export async function browserListTabs() {
+  if ((await ensureBrowserBackend()) === 'extension') return bridge.sendCommand('listTabs', { ...meta() }, 15000)
+  // Playwright fallback: enumerate the context's pages (no per-tab audible signal here).
+  await ensurePage()
+  const pages = context.pages()
+  const tabs = await Promise.all(
+    pages.map(async (pg, i) => ({
+      tabId: i,
+      windowId: 0,
+      url: pg.url(),
+      title: await pg.title().catch(() => ''),
+      active: pg === page,
+      audible: false,
+      muted: false,
+      focusedWindow: pg === page
+    }))
+  )
+  return { tabs }
+}
+
+// Connected executor browsers (separate Chrome/Brave/profiles) from the bridge — for picking which
+// one to drive when more than one is connected.
+export function listBrowsers() {
+  return bridge.listDevices()
+}
+export function useBrowser(id) {
+  return bridge.selectDevice(id)
 }
