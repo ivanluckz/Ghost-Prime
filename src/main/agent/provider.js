@@ -71,6 +71,12 @@ const MEMORY_TOOL_NAMES = ['memory_save', 'memory_recall'].map((n) => `mcp__${ME
 const SYSTEM_SERVER = 'ghost-system'
 const SYSTEM_TOOL_NAMES = ['clipboard_read', 'clipboard_write', 'notify_user'].map((n) => `mcp__${SYSTEM_SERVER}__${n}`)
 
+// External Canva MCP (the @canva/cli dev server) — gives the agent Canva's tools. Spawned per session
+// via npx; needs Node >= 22. On by default; set GHOST_CANVA=0 to drop it (saves tokens for this
+// cost-sensitive user). `mcp__canva` in allowedTools permits all of its tools.
+const CANVA_ENABLED = process.env.GHOST_CANVA !== '0'
+const CANVA_SERVER = 'canva'
+
 // Experimental desktop control (screenshot + keyboard/mouse for native Linux apps, beyond the
 // browser). Off unless GHOST_SCREEN_TOOLS=1 — limited on Crostini (see src/main/tools/screen.js).
 const SCREEN_ENABLED = process.env.GHOST_SCREEN_TOOLS === '1'
@@ -747,7 +753,12 @@ async function streamChatClaudeAgent({ messages, signal, onDelta, onEvent, model
       model: useModel,
       ...(supportsEffort && !thinkingOff ? { effort: effortVal } : {}), // 'low' = snappy (effort guides thinking)
       ...(thinkingOff ? { thinking: { type: 'disabled' } } : {}),
-      systemPrompt: SYSTEM_PROMPT + memoryContext,
+      systemPrompt:
+        SYSTEM_PROMPT +
+        memoryContext +
+        (CANVA_ENABLED
+          ? '\n\nCANVA: Canva tools (mcp__canva__*) are available — use them for Canva design/app tasks. The first call may require the user to authorize Canva.'
+          : ''),
       includePartialMessages: true,
       allowedTools: [
         ...AGENT_TOOLS,
@@ -755,6 +766,7 @@ async function streamChatClaudeAgent({ messages, signal, onDelta, onEvent, model
         ...BROWSER_TOOL_NAMES,
         ...MEMORY_TOOL_NAMES,
         ...SYSTEM_TOOL_NAMES,
+        ...(CANVA_ENABLED ? [`mcp__${CANVA_SERVER}`] : []), // allow all Canva tools
         ...(screenServer ? SCREEN_TOOL_NAMES : [])
       ],
       mcpServers: {
@@ -762,6 +774,11 @@ async function streamChatClaudeAgent({ messages, signal, onDelta, onEvent, model
         [MEMORY_SERVER]: memoryServer,
         [SHELL_SERVER]: shellServer,
         [SYSTEM_SERVER]: systemServer,
+        // External stdio server (the @canva/cli MCP). Tools are deferred behind tool-search by
+        // default, so this adds little per-turn cost until the agent actually reaches for Canva.
+        ...(CANVA_ENABLED
+          ? { [CANVA_SERVER]: { type: 'stdio', command: 'npx', args: ['-y', '@canva/cli@latest', 'mcp'] } }
+          : {}),
         ...(screenServer ? { [SCREEN_SERVER]: screenServer } : {})
       },
       permissionMode, // plan | auto | bypassPermissions — from the UI mode (Shift+Tab)
