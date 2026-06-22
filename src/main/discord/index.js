@@ -2,8 +2,16 @@ import { streamChat } from '../agent/provider.js'
 
 // Discord relay for Ghost-Prime. Runs INSIDE the Electron main process, so the bot is online only
 // while Ghost-Prime is running — message it from Discord and it talks to the same agent (tools and
-// all). discord.js is ESM-only-ish + heavy, so it's loaded lazily and the whole thing is a no-op
-// unless DISCORD_BOT_TOKEN is set.
+// all). discord.js is heavy + ESM-ish, so it's loaded lazily and the whole thing is a no-op unless
+// DISCORD_BOT_TOKEN is set.
+//
+// What it does:
+//   • Streams the reply LIVE — you watch the message fill in, with a status line ("🌐 browsing…",
+//     "⌨️ running a command…") while the agent works.
+//   • Reads text attachments (.txt/.md/code/logs/JSON…) so you can drop a long file instead of pasting.
+//   • Sends very long answers back as a single .txt attachment instead of a wall of chunks.
+//   • Control commands: !help · !reset · !stop · !mode · !status.
+//   • In servers it answers in the configured channel OR whenever you @mention it.
 //
 // SAFETY: this agent can run shell + drive the browser, so the bot ONLY obeys user IDs on
 // DISCORD_ALLOWED_USER_IDS. With no allowlist it logs in but refuses every message.
@@ -11,17 +19,36 @@ import { streamChat } from '../agent/provider.js'
 let client = null
 let AttachmentBuilder = null // captured from discord.js on startup, used for long-reply .txt files
 const histories = new Map() // channelId -> [{role, content}]
-const chains = new Map() // channelId -> Promise (serialize requests per channel)
+const chains = new Map() // channelId -> Promise (serialize agent runs per channel)
+const running = new Map() // channelId -> AbortController (in-flight run, so !stop can cancel it)
+const modes = new Map() // channelId -> 'plan' | 'auto' | 'full' (per-channel autonomy override)
 
 const MAX_HISTORY = 20 // messages kept per channel for context
 const DISCORD_LIMIT = 1900 // stay under Discord's 2000-char message cap
 // Past this many chars (~2 messages) a reply goes out as a .txt attachment instead of many chunks.
 const FILE_THRESHOLD = DISCORD_LIMIT * 2
 const ATTACH_MAX_BYTES = 256 * 1024 // cap per inbound text attachment we'll read (256 KB)
+const EDIT_INTERVAL = 1100 // ms between live message edits — keeps us clear of Discord's edit rate limit
 // File extensions / mime prefixes we treat as readable text. Catches the obvious code/doc types so
 // someone can drop a long file on the message instead of pasting it.
 const TEXT_EXTS =
   /\.(txt|md|markdown|log|json|ya?ml|csv|tsv|xml|html?|css|js|mjs|cjs|ts|tsx|jsx|py|rb|go|rs|java|kt|c|h|cpp|cc|hpp|sh|bash|zsh|sql|toml|ini|cfg|conf|env|diff|patch|gradle|properties)$/i
+
+const DEFAULT_MODE = () => process.env.DISCORD_MODE || 'auto' // plan | auto | full
+
+const HELP = [
+  '**Ghost-Prime — Discord control**',
+  'Just message me and I act on your machine — browse the web, run shell commands, edit files, remember things. Attach a text file (`.txt`, `.md`, code, logs, JSON…) and I’ll read it.',
+  '',
+  '**Commands**',
+  '`!help` — this message',
+  '`!reset` — forget this conversation’s history',
+  '`!stop` — cancel what I’m doing right now',
+  '`!mode [plan|auto|full]` — show or set autonomy (`full` skips permission checks — careful)',
+  '`!status` — show brain, mode, and history size'
+].join('\n')
+
+const COMMANDS = new Set(['help', 'commands', 'reset', 'clear', 'stop', 'cancel', 'mode', 'status', 'ping'])
 
 function allowedIds() {
   return (process.env.DISCORD_ALLOWED_USER_IDS || '')
@@ -31,7 +58,23 @@ function allowedIds() {
 }
 const isAllowed = (userId) => allowedIds().includes(String(userId))
 
-// Split a long reply into Discord-sized chunks, preferring to break on newlines / code fences.
+// A friendly verb + emoji for the status line, derived from the tool the agent just called.
+function activityFor(name) {
+  const n = String(name || '')
+  if (/browser_/.test(n) || /ghost-browser/.test(n)) return ['🌐', 'browsing']
+  if (/shell_/.test(n)) return ['⌨️', 'running a command']
+  if (/memory_/.test(n)) return ['🧠', 'checking memory']
+  if (/canva/i.test(n)) return ['🎨', 'working in Canva']
+  if (/web(fetch|search)/i.test(n)) return ['🔎', 'searching the web']
+  if (/^(Read|Write|Edit|Glob|Grep)$/.test(n)) return ['📁', 'working with files']
+  if (/clipboard/.test(n)) return ['📋', 'using the clipboard']
+  if (/notify/.test(n)) return ['🔔', 'getting your attention']
+  if (/screen_|launch_app/.test(n)) return ['🖥️', 'controlling the desktop']
+  return ['⚙️', 'working']
+}
+const statusLine = ([emoji, verb]) => `${emoji} _${verb}…_`
+
+// Split a long reply into Discord-sized chunks, preferring to break on newlines.
 function chunk(text, size = DISCORD_LIMIT) {
   const out = []
   let buf = ''
@@ -52,6 +95,34 @@ function chunk(text, size = DISCORD_LIMIT) {
   }
   if (buf) out.push(buf)
   return out.length ? out : ['(no response)']
+}
+
+// Keep ``` code fences balanced across a chunk boundary: close an open fence at the end of a part
+// and reopen it (same language) at the start of the next, so neither message shows a broken fence.
+function balanceFences(parts) {
+  const out = []
+  let carryLang = null // non-null => we're inside an unclosed fence opened in a previous part
+  for (const raw of parts) {
+    let s = carryLang !== null ? '```' + carryLang + '\n' + raw : raw
+    let open = false
+    let lang = ''
+    for (const f of s.match(/```[^\n`]*/g) || []) {
+      if (!open) {
+        open = true
+        lang = f.slice(3).trim()
+      } else {
+        open = false
+      }
+    }
+    if (open) {
+      s += '\n```'
+      carryLang = lang
+    } else {
+      carryLang = null
+    }
+    out.push(s)
+  }
+  return out
 }
 
 const looksTextual = (att) =>
@@ -132,34 +203,91 @@ export function stopDiscord() {
   try {
     client?.destroy()
   } catch {}
+  for (const ac of running.values()) {
+    try {
+      ac.abort()
+    } catch {}
+  }
+  running.clear()
   client = null
+}
+
+// Handle the !commands. Returns true if the message WAS a command (and was handled), so the caller
+// stops. Run OUTSIDE the per-channel chain so !stop works while a run is in flight.
+function handleCommand(msg, typed) {
+  if (!typed.startsWith('!')) return false
+  const [word, ...rest] = typed.slice(1).split(/\s+/)
+  const cmd = word.toLowerCase()
+  if (!COMMANDS.has(cmd)) return false // unknown !thing — treat as a normal prompt
+  const arg = rest.join(' ').trim()
+  const channelId = msg.channelId
+
+  if (cmd === 'help' || cmd === 'commands') {
+    msg.reply(HELP).catch(() => {})
+  } else if (cmd === 'reset' || cmd === 'clear') {
+    histories.delete(channelId)
+    msg.reply('🧹 Cleared this conversation’s history.').catch(() => {})
+  } else if (cmd === 'stop' || cmd === 'cancel') {
+    const ac = running.get(channelId)
+    if (ac) {
+      ac.abort()
+      msg.reply('🛑 Stopping…').catch(() => {})
+    } else {
+      msg.reply('Nothing is running right now.').catch(() => {})
+    }
+  } else if (cmd === 'mode') {
+    if (!arg) {
+      msg.reply(`Mode is **${modes.get(channelId) || DEFAULT_MODE()}**. Set it with \`!mode plan|auto|full\`.`).catch(() => {})
+    } else if (!['plan', 'auto', 'full'].includes(arg.toLowerCase())) {
+      msg.reply('Mode must be `plan`, `auto`, or `full`.').catch(() => {})
+    } else {
+      const m = arg.toLowerCase()
+      modes.set(channelId, m)
+      msg.reply(`Mode set to **${m}**.${m === 'full' ? ' ⚠️ I’ll skip permission checks in this channel.' : ''}`).catch(() => {})
+    }
+  } else if (cmd === 'status' || cmd === 'ping') {
+    const m = modes.get(channelId) || DEFAULT_MODE()
+    const h = histories.get(channelId)?.length || 0
+    const brain = process.env.GHOST_PROVIDER || 'claude-agent'
+    msg
+      .reply(`🟢 Online · brain: \`${brain}\` · mode: **${m}** · history: ${h} msg${h === 1 ? '' : 's'}${running.has(channelId) ? ' · (working…)' : ''}`)
+      .catch(() => {})
+  }
+  return true
 }
 
 async function handleMessage(msg) {
   if (!client || msg.author?.bot) return
   const isDM = !msg.guild
+  const mentioned = !!(msg.guild && client.user && msg.mentions?.users?.has(client.user.id))
   const inConfiguredChannel = process.env.DISCORD_CHANNEL_ID && msg.channelId === process.env.DISCORD_CHANNEL_ID
-  // Only act in DMs or the one configured channel — never react across whole servers.
-  if (!isDM && !inConfiguredChannel) return
+  // In a server: only act in the configured channel or when explicitly @mentioned. Never react
+  // across whole servers. DMs are always fair game.
+  if (!isDM && !inConfiguredChannel && !mentioned) return
 
   if (!isAllowed(msg.author?.id)) {
     msg.reply("You're not authorized to control Ghost-Prime.").catch(() => {})
     return
   }
 
-  const typed = msg.content?.trim() || ''
-  const fileBlocks = await readTextAttachments(msg)
-  const hasFiles = fileBlocks.length > 0
+  // Strip a leading/inline @Ghost mention so the agent sees a clean prompt.
+  let typed = (msg.content || '').replace(/<@!?(\d+)>/g, (m, id) => (client.user && id === client.user.id ? '' : m)).trim()
 
-  if (!typed && !hasFiles) {
+  // Commands run immediately (not queued behind a running agent) so !stop can interrupt.
+  if (handleCommand(msg, typed)) return
+
+  const fileBlocks = await readTextAttachments(msg)
+  if (!typed && !fileBlocks.length) {
     // No text and nothing readable attached — almost always the Message Content Intent is off, OR
     // they attached only non-text files (images/binaries) we can't read.
     const onlyAttachments = msg.attachments?.size > 0
-    msg.reply(
-      onlyAttachments
-        ? "I can only read text-based attachments (`.txt`, `.md`, code, logs, JSON, etc.) — that file looks binary."
-        : "I can't read message content. Enable the **Message Content Intent** in the Discord Developer Portal → your app → Bot."
-    ).catch(() => {})
+    msg
+      .reply(
+        onlyAttachments
+          ? "I can only read text-based attachments (`.txt`, `.md`, code, logs, JSON, etc.) — that file looks binary."
+          : "I can't read message content. Enable the **Message Content Intent** in the Discord Developer Portal → your app → Bot."
+      )
+      .catch(() => {})
     return
   }
 
@@ -176,42 +304,107 @@ async function respond(msg, content) {
   const channelId = msg.channelId
   const history = histories.get(channelId) || []
   const messages = [...history, { role: 'user', content }]
+  const mode = modes.get(channelId) || DEFAULT_MODE()
 
+  // A live placeholder we edit as the agent thinks → acts → types its answer.
   msg.channel.sendTyping().catch(() => {})
-  const typing = setInterval(() => msg.channel.sendTyping().catch(() => {}), 8000)
+  let placeholder = null
+  try {
+    placeholder = await msg.channel.send(statusLine(['🧠', 'thinking']))
+  } catch {}
+
+  const ac = new AbortController()
+  running.set(channelId, ac)
+
+  // Throttled live editor: re-render at most once per EDIT_INTERVAL.
+  let liveText = ''
+  let activity = ['🧠', 'thinking']
+  let closing = false
+  let timer = null
+  let lastRendered = ''
+  let lastEditAt = 0
+  const render = () => {
+    if (liveText) {
+      const cap = DISCORD_LIMIT - 50
+      const head = liveText.length > cap ? liveText.slice(0, cap) + '…' : liveText
+      return head + (closing ? '' : ' ▌')
+    }
+    return statusLine(activity)
+  }
+  const pump = () => {
+    if (closing || timer || !placeholder) return
+    const wait = Math.max(0, EDIT_INTERVAL - (Date.now() - lastEditAt))
+    timer = setTimeout(async () => {
+      timer = null
+      const text = render()
+      if (text && text !== lastRendered) {
+        lastRendered = text
+        lastEditAt = Date.now()
+        try {
+          await placeholder.edit(text)
+        } catch {}
+      }
+    }, wait)
+  }
 
   let reply
   try {
     reply = await streamChat({
       messages,
-      mode: process.env.DISCORD_MODE || 'auto' // plan | auto | full (full = no permission checks — careful)
+      mode, // plan | auto | full (full = no permission checks — careful)
+      signal: ac.signal,
+      onDelta: (t) => {
+        liveText += t
+        pump()
+      },
+      onEvent: (ev) => {
+        if (ev?.kind === 'tool_use') {
+          activity = activityFor(ev.name)
+          if (!liveText) pump() // only drive the status line until real text starts streaming
+        }
+      }
     })
   } catch (e) {
-    reply = `⚠️ ${e?.message || e}`
+    if (ac.signal.aborted) {
+      reply = (liveText.trim() ? liveText.trim() + '\n\n' : '') + '🛑 _Stopped._'
+    } else {
+      reply = `⚠️ ${e?.message || e}`
+    }
   } finally {
-    clearInterval(typing)
+    running.delete(channelId)
+    closing = true
+    if (timer) {
+      clearTimeout(timer)
+      timer = null
+    }
   }
-  reply = (reply || '').trim() || '(no response)'
+  reply = (reply ?? '').trim() || '(no response)'
 
   history.push({ role: 'user', content }, { role: 'assistant', content: reply })
   while (history.length > MAX_HISTORY) history.shift()
   histories.set(channelId, history)
 
-  // Long answers go out as a single .txt attachment (readable, no 5-message spam) with a short
-  // preview line. Falls back to chunked messages if the file can't be built/sent.
+  await deliver(msg.channel, placeholder, reply)
+}
+
+// Land the final reply: edit the live placeholder into the answer. Long answers go out as a single
+// .txt attachment (a preview line + the file) instead of many chunked messages.
+async function deliver(channel, placeholder, reply) {
   if (reply.length > FILE_THRESHOLD && AttachmentBuilder) {
     try {
       const file = new AttachmentBuilder(Buffer.from(reply, 'utf8'), { name: 'ghost-reply.txt' })
       const preview = reply.slice(0, 240).replace(/\s+/g, ' ').trim()
-      await msg.channel.send({
-        content: `📄 Long answer (${reply.length} chars) — full text attached.\n> ${preview}…`,
-        files: [file]
-      })
+      const payload = { content: `📄 Long answer (${reply.length} chars) — full text attached.\n> ${preview}…`, files: [file] }
+      if (placeholder) await placeholder.edit(payload).catch(() => channel.send(payload).catch(() => {}))
+      else await channel.send(payload).catch(() => {})
       return
     } catch (e) {
       console.warn('[discord] file reply failed, falling back to chunks:', e?.message || e)
     }
   }
 
-  for (const part of chunk(reply)) await msg.channel.send(part).catch(() => {})
+  const parts = balanceFences(chunk(reply))
+  if (placeholder) await placeholder.edit(parts[0]).catch(() => channel.send(parts[0]).catch(() => {}))
+  else await channel.send(parts[0]).catch(() => {})
+  for (let i = 1; i < parts.length; i++) await channel.send(parts[i]).catch(() => {})
 }
