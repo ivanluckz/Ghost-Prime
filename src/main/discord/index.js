@@ -9,11 +9,19 @@ import { streamChat } from '../agent/provider.js'
 // DISCORD_ALLOWED_USER_IDS. With no allowlist it logs in but refuses every message.
 
 let client = null
+let AttachmentBuilder = null // captured from discord.js on startup, used for long-reply .txt files
 const histories = new Map() // channelId -> [{role, content}]
 const chains = new Map() // channelId -> Promise (serialize requests per channel)
 
 const MAX_HISTORY = 20 // messages kept per channel for context
 const DISCORD_LIMIT = 1900 // stay under Discord's 2000-char message cap
+// Past this many chars (~2 messages) a reply goes out as a .txt attachment instead of many chunks.
+const FILE_THRESHOLD = DISCORD_LIMIT * 2
+const ATTACH_MAX_BYTES = 256 * 1024 // cap per inbound text attachment we'll read (256 KB)
+// File extensions / mime prefixes we treat as readable text. Catches the obvious code/doc types so
+// someone can drop a long file on the message instead of pasting it.
+const TEXT_EXTS =
+  /\.(txt|md|markdown|log|json|ya?ml|csv|tsv|xml|html?|css|js|mjs|cjs|ts|tsx|jsx|py|rb|go|rs|java|kt|c|h|cpp|cc|hpp|sh|bash|zsh|sql|toml|ini|cfg|conf|env|diff|patch|gradle|properties)$/i
 
 function allowedIds() {
   return (process.env.DISCORD_ALLOWED_USER_IDS || '')
@@ -46,6 +54,35 @@ function chunk(text, size = DISCORD_LIMIT) {
   return out.length ? out : ['(no response)']
 }
 
+const looksTextual = (att) =>
+  (att.contentType && /^text\//i.test(att.contentType)) ||
+  /\b(json|xml|yaml|javascript|x-sh|csv)\b/i.test(att.contentType || '') ||
+  TEXT_EXTS.test(att.name || '')
+
+// Download any text-like attachments on a message and return them as labelled blocks to feed the
+// agent. Lets a user drop a long file ("see attached") instead of pasting it into the message.
+async function readTextAttachments(msg) {
+  const atts = msg.attachments ? [...msg.attachments.values()] : []
+  const blocks = []
+  for (const att of atts) {
+    if (!looksTextual(att)) continue
+    if (att.size && att.size > ATTACH_MAX_BYTES) {
+      blocks.push(`[attachment ${att.name} skipped — ${Math.round(att.size / 1024)} KB exceeds the ${ATTACH_MAX_BYTES / 1024} KB limit]`)
+      continue
+    }
+    try {
+      const res = await fetch(att.url)
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      let text = await res.text()
+      if (text.length > ATTACH_MAX_BYTES) text = text.slice(0, ATTACH_MAX_BYTES) + '\n…[truncated]'
+      blocks.push(`--- attached file: ${att.name || 'file'} ---\n${text}`)
+    } catch (e) {
+      blocks.push(`[failed to read attachment ${att.name}: ${e?.message || e}]`)
+    }
+  }
+  return blocks
+}
+
 export async function startDiscord() {
   const token = process.env.DISCORD_BOT_TOKEN
   if (!token) return // not configured — silent no-op
@@ -58,6 +95,7 @@ export async function startDiscord() {
     return
   }
   const { Client, GatewayIntentBits, Partials, ActivityType } = discord
+  AttachmentBuilder = discord.AttachmentBuilder
 
   if (!allowedIds().length) {
     console.warn('[discord] DISCORD_BOT_TOKEN is set but DISCORD_ALLOWED_USER_IDS is empty — the bot will refuse every message until you add your Discord user id.')
@@ -109,12 +147,24 @@ async function handleMessage(msg) {
     return
   }
 
-  const content = msg.content?.trim()
-  if (!content) {
-    // Almost always means the Message Content Intent isn't enabled in the dev portal.
-    msg.reply("I can't read message content. Enable the **Message Content Intent** in the Discord Developer Portal → your app → Bot.").catch(() => {})
+  const typed = msg.content?.trim() || ''
+  const fileBlocks = await readTextAttachments(msg)
+  const hasFiles = fileBlocks.length > 0
+
+  if (!typed && !hasFiles) {
+    // No text and nothing readable attached — almost always the Message Content Intent is off, OR
+    // they attached only non-text files (images/binaries) we can't read.
+    const onlyAttachments = msg.attachments?.size > 0
+    msg.reply(
+      onlyAttachments
+        ? "I can only read text-based attachments (`.txt`, `.md`, code, logs, JSON, etc.) — that file looks binary."
+        : "I can't read message content. Enable the **Message Content Intent** in the Discord Developer Portal → your app → Bot."
+    ).catch(() => {})
     return
   }
+
+  // Fold any attached files into the prompt so the agent sees them as part of the message.
+  const content = [typed, ...fileBlocks].filter(Boolean).join('\n\n')
 
   // Serialize per channel so concurrent messages don't interleave their agent runs.
   const prev = chains.get(msg.channelId) || Promise.resolve()
@@ -146,6 +196,22 @@ async function respond(msg, content) {
   history.push({ role: 'user', content }, { role: 'assistant', content: reply })
   while (history.length > MAX_HISTORY) history.shift()
   histories.set(channelId, history)
+
+  // Long answers go out as a single .txt attachment (readable, no 5-message spam) with a short
+  // preview line. Falls back to chunked messages if the file can't be built/sent.
+  if (reply.length > FILE_THRESHOLD && AttachmentBuilder) {
+    try {
+      const file = new AttachmentBuilder(Buffer.from(reply, 'utf8'), { name: 'ghost-reply.txt' })
+      const preview = reply.slice(0, 240).replace(/\s+/g, ' ').trim()
+      await msg.channel.send({
+        content: `📄 Long answer (${reply.length} chars) — full text attached.\n> ${preview}…`,
+        files: [file]
+      })
+      return
+    } catch (e) {
+      console.warn('[discord] file reply failed, falling back to chunks:', e?.message || e)
+    }
+  }
 
   for (const part of chunk(reply)) await msg.channel.send(part).catch(() => {})
 }
