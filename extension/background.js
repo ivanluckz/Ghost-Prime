@@ -439,8 +439,9 @@ function fillInPage({ selector, label, value }) {
   return { ok: true }
 }
 
-function getTextInPage() {
-  return { url: location.href, title: document.title, text: (document.body?.innerText || '').slice(0, 20000) }
+function getTextInPage(maxChars) {
+  const cap = Number(maxChars) || 20000
+  return { url: location.href, title: document.title, text: (document.body?.innerText || '').slice(0, cap) }
 }
 
 function clickAtInPage({ x, y }) {
@@ -734,32 +735,73 @@ async function run(cmd, args) {
       maybeGlow(tab.id)
       return { url: t.url, title: t.title }
     }
+    case 'goBack':
+    case 'goForward': {
+      const back = cmd === 'goBack'
+      try {
+        await (back ? chrome.tabs.goBack(tab.id) : chrome.tabs.goForward(tab.id))
+      } catch {
+        throw new Error(`Can't go ${back ? 'back' : 'forward'} — no ${back ? 'previous' : 'next'} page in this tab's history.`)
+      }
+      await waitComplete(tab.id)
+      const t = await chrome.tabs.get(tab.id)
+      maybeGlow(tab.id)
+      return { url: t.url, title: t.title }
+    }
+    case 'reloadTab': {
+      await chrome.tabs.reload(tab.id)
+      await waitComplete(tab.id)
+      const t = await chrome.tabs.get(tab.id)
+      maybeGlow(tab.id)
+      return { url: t.url, title: t.title }
+    }
     case 'getText': {
-      const [{ result }] = await chrome.scripting.executeScript({ target: { tabId: tab.id }, func: getTextInPage })
-      return result
+      const offset = Math.max(0, Number(args.offset) || 0)
+      const limit = Math.min(Number(args.limit) || 20000, 50000)
+      // Read EVERY frame (like click/fill do) — chat widgets, embeds and OAuth popups render inside
+      // iframes that a top-frame-only read misses. Each frame returns up to offset+limit chars so
+      // pagination can still reach deep into a long main document.
+      const frames = await injectAllFrames(tab.id, getTextInPage, offset + limit)
+      const main = (frames.find((f) => f.frameId === 0) || frames[0] || {}).result || {}
+      const subs = frames
+        .filter((f) => f.frameId !== 0 && f?.result?.text && f.result.text.trim().length > 40)
+        .map((f) => f.result.text)
+      const full = [main.text || '', ...subs].filter(Boolean).join('\n\n--- (frame) ---\n\n')
+      const text = full.slice(offset, offset + limit)
+      const nextOffset = offset + text.length < full.length ? offset + text.length : null
+      return { url: main.url || tab.url, title: main.title || '', text, offset, nextOffset, totalChars: full.length }
     }
     case 'screenshot': {
+      const fullPage = !!args.fullPage
       // Clear the glow first so it never shows up inside the screenshot the agent looks at.
       await chrome.scripting.executeScript({ target: { tabId: tab.id }, func: removeGlowInPage }).catch(() => {})
-      // If the tab is already visible, the cheap path captures it (no debugger banner).
-      if (tab.active) {
+      // Cheap path (no debugger banner): a visible tab, viewport only — captureVisibleTab can't do
+      // full-page, so skip it when fullPage was asked for.
+      if (!fullPage && tab.active) {
         try {
           const dataUrl = await chrome.tabs.captureVisibleTab(tab.windowId, { format: 'png' })
           return { base64: String(dataUrl).split(',')[1] || '', url: tab.url }
         } catch {}
       }
-      // Background / occluded tab: CDP screenshots it WITHOUT bringing it forward — but that needs
-      // the debugger, so quiet mode skips it and brings the tab to the front instead.
+      // CDP path: screenshots a background tab WITHOUT bringing it forward, and is the ONLY way to
+      // capture the full scrollable page (captureBeyondViewport). Needs the debugger, so quiet mode
+      // skips it and falls through to a visible-viewport capture instead.
       if (!cfg.quietDebugger) {
         try {
           const shot = await withDebugger(tab.id, async (target) => {
             await cdpSend(target, 'Page.enable').catch(() => {})
-            return cdpSend(target, 'Page.captureScreenshot', { format: 'png', captureBeyondViewport: false })
+            const params = { format: 'png', captureBeyondViewport: fullPage }
+            if (fullPage) {
+              const m = await cdpSend(target, 'Page.getLayoutMetrics').catch(() => null)
+              const c = m && (m.cssContentSize || m.contentSize)
+              if (c) params.clip = { x: 0, y: 0, width: Math.ceil(c.width), height: Math.ceil(c.height), scale: 1 }
+            }
+            return cdpSend(target, 'Page.captureScreenshot', params)
           })
           if (shot && shot.data) return { base64: shot.data, url: tab.url }
         } catch {}
       }
-      // Quiet mode, or debugger blocked/failed: bring it forward and capture the visible tab.
+      // Quiet mode, or debugger blocked/failed: bring it forward and capture the visible viewport.
       await chrome.tabs.update(tab.id, { active: true }).catch(() => {})
       await sleep(150)
       const dataUrl = await chrome.tabs.captureVisibleTab(tab.windowId, { format: 'png' })
@@ -878,8 +920,21 @@ async function run(cmd, args) {
 
 // ---- Poll loop ----
 
+// The bridge holds /poll open for ~25s (long-poll). Abort a bit past that so a DEAD socket — app
+// crashed mid-request, laptop suspend/resume, a stalled hold — THROWS instead of leaving this await
+// hanging forever. A hung await would wedge the loop: the `looping` guard then blocks the keepalive
+// alarm from ever restarting it, so the bridge would silently stop until Chrome killed the worker.
+const POLL_TIMEOUT = 35000
+
 async function pollOnce() {
-  const r = await fetch(q('/poll'))
+  const ctrl = new AbortController()
+  const to = setTimeout(() => ctrl.abort(), POLL_TIMEOUT)
+  let r
+  try {
+    r = await fetch(q('/poll'), { signal: ctrl.signal })
+  } finally {
+    clearTimeout(to)
+  }
   if (!r.ok) throw new Error(`poll ${r.status}`)
   const job = await r.json()
   if (!job || !job.cmd) return

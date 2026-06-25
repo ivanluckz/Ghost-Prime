@@ -48,6 +48,9 @@ const SHELL_TOOL_NAMES = ['shell_run', 'shell_open', 'shell_read', 'shell_list',
 const BROWSER_SERVER = 'ghost-browser'
 const BROWSER_TOOL_NAMES = [
   'browser_navigate',
+  'browser_go_back',
+  'browser_go_forward',
+  'browser_reload',
   'browser_get_text',
   'browser_click',
   'browser_fill',
@@ -127,6 +130,7 @@ YOUR TOOLS — all already loaded and directly callable this turn. There is NO s
 - Read / Write / Edit / Glob / Grep — read and change local files.
 - WebFetch / WebSearch — fetch a URL or search the web for current information.
 - browser_navigate / browser_get_text / browser_click / browser_fill / browser_screenshot — drive the user's REAL Google Chrome, already signed in to their sites. To open a page, call browser_navigate immediately.
+- browser_go_back / browser_go_forward / browser_reload — the browser's Back/Forward/Refresh buttons for the current tab. browser_screenshot takes { fullPage: true } to grab the whole scrollable page; browser_get_text returns a nextOffset for long pages — call it again with that offset to read further.
 - browser_list_tabs — see every open tab (url, title, which window, what's playing audio); browser_use_tab pins which tab/window to act on (use these when several Chrome windows are open). browser_list_browsers / browser_use_browser switch between separate connected browsers/profiles.
 - memory_save / memory_recall — your long-term memory across sessions (supports tags + a ttl for temporary facts).
 - clipboard_read / clipboard_write — read or set the user's system clipboard.
@@ -249,12 +253,45 @@ async function getBrowserMcpServer() {
         }
       ),
       tool(
-        'browser_get_text',
-        'Get the visible text of the current page. Use to read page content before acting.',
+        'browser_go_back',
+        "Go back to the previous page in the current tab's history (the browser Back button).",
         {},
         async () => {
-          const r = await browser.browserGetText()
-          return { content: [{ type: 'text', text: `# ${r.title}\n${r.url}\n\n${r.text}` }] }
+          const r = await browser.browserGoBack()
+          return { content: [{ type: 'text', text: `Went back — now at ${r.url} — "${r.title}"` }] }
+        }
+      ),
+      tool(
+        'browser_go_forward',
+        "Go forward to the next page in the current tab's history (the browser Forward button).",
+        {},
+        async () => {
+          const r = await browser.browserGoForward()
+          return { content: [{ type: 'text', text: `Went forward — now at ${r.url} — "${r.title}"` }] }
+        }
+      ),
+      tool(
+        'browser_reload',
+        'Reload / refresh the current page.',
+        {},
+        async () => {
+          const r = await browser.browserReload()
+          return { content: [{ type: 'text', text: `Reloaded — ${r.url} — "${r.title}"` }] }
+        }
+      ),
+      tool(
+        'browser_get_text',
+        'Get the visible text of the current page (main document plus substantial iframes). Returns up ' +
+          'to ~20k characters; if the page is longer, the result ends with a nextOffset — call again ' +
+          'with { offset: <nextOffset> } to read the next chunk. Use to read page content before acting.',
+        { offset: z.number().optional() },
+        async ({ offset }) => {
+          const r = await browser.browserGetText({ offset })
+          const more =
+            r.nextOffset != null
+              ? `\n\n…(${r.totalChars - r.nextOffset} more characters — call browser_get_text with offset:${r.nextOffset} to continue)`
+              : ''
+          return { content: [{ type: 'text', text: `# ${r.title}\n${r.url}\n\n${r.text}${more}` }] }
         }
       ),
       tool(
@@ -286,10 +323,11 @@ async function getBrowserMcpServer() {
       ),
       tool(
         'browser_screenshot',
-        'Capture a screenshot of the current browser page so you can see it.',
-        {},
-        async () => {
-          const r = await browser.browserScreenshot()
+        'Capture a screenshot of the current browser page so you can see it. Defaults to the visible ' +
+          'viewport; pass { fullPage: true } to capture the entire scrollable page in one image.',
+        { fullPage: z.boolean().optional() },
+        async ({ fullPage }) => {
+          const r = await browser.browserScreenshot({ fullPage })
           return { content: [{ type: 'image', data: r.base64, mimeType: 'image/png' }] }
         }
       ),

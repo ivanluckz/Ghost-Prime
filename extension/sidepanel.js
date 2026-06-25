@@ -32,8 +32,77 @@ function setConnected(on) {
   dotEl.title = on ? 'connected to Ghost-Prime' : 'waiting for Ghost-Prime…'
 }
 
+// Render message text WITHOUT innerHTML (stays XSS-proof): plain text nodes, with http(s) URLs
+// turned into real links. The trailing class excludes common sentence punctuation from the link.
+const URL_RE = /https?:\/\/[^\s<>()]+[^\s<>().,!?:;'"]/g
+function setBody(el, text) {
+  el.textContent = ''
+  const s = String(text)
+  let last = 0
+  for (const m of s.matchAll(URL_RE)) {
+    if (m.index > last) el.appendChild(document.createTextNode(s.slice(last, m.index)))
+    const a = document.createElement('a')
+    a.href = m[0]
+    a.textContent = m[0]
+    a.target = '_blank'
+    a.rel = 'noreferrer noopener'
+    el.appendChild(a)
+    last = m.index + m[0].length
+  }
+  if (last < s.length) el.appendChild(document.createTextNode(s.slice(last)))
+}
+
+function buildMsg(role, content) {
+  const div = document.createElement('div')
+  div.className = `msg ${role}`
+  div.dataset.role = role
+  div.dataset.content = content
+  if (role !== 'system') {
+    const who = document.createElement('div')
+    who.className = 'who'
+    who.textContent = role === 'user' ? 'you' : 'ghost'
+    div.appendChild(who)
+  }
+  const body = document.createElement('div')
+  body.className = 'body'
+  setBody(body, content)
+  div.appendChild(body)
+  return div
+}
+
+// Reconcile the existing bubbles against the new transcript instead of rebuilding from scratch.
+// Unchanged bubbles are left alone, a streaming bubble has only its body updated (no re-animation),
+// and only genuinely new bubbles get created — so the panel no longer flickers/re-animates the
+// whole conversation on every streamed token, and scroll position / text selection survive.
+function renderMessages(messages) {
+  const nodes = [...logEl.querySelectorAll('.msg')]
+  let i = 0
+  for (const m of messages) {
+    if (!m || !m.content) continue
+    const role = m.role === 'user' ? 'user' : m.role === 'system' ? 'system' : 'assistant'
+    const content = m.content
+    const node = nodes[i]
+    if (node && node.dataset.role === role) {
+      if (node.dataset.content !== content) {
+        setBody(node.querySelector('.body'), content)
+        node.dataset.content = content
+      }
+    } else {
+      const fresh = buildMsg(role, content)
+      node ? logEl.replaceChild(fresh, node) : logEl.appendChild(fresh)
+    }
+    i++
+  }
+  // Drop any leftover bubbles (history was reset / shrank).
+  for (let j = nodes.length - 1; j >= i; j--) nodes[j].remove()
+}
+
 function render(state) {
   const messages = (state && state.messages) || []
+  // Stick to the bottom only if the user is already there (don't yank them up while they scroll back).
+  const nearBottom = logEl.scrollHeight - logEl.scrollTop - logEl.clientHeight < 80
+  const prevCount = logEl.querySelectorAll('.msg').length
+
   if (!messages.length) {
     // Mirroring is off but the user just sent from here: don't wipe their optimistic bubble. The
     // reply is happening in the app (not mirrored back), so keep what's on screen and explain.
@@ -47,32 +116,14 @@ function render(state) {
     emptyMsg.textContent = state && state.mirroring === false
       ? 'Mirroring is off. Turn on “Mirror chat to Chrome” in the Ghost-Prime app to see the conversation here.'
       : 'No messages yet — say hello below.'
-    // remove any previously rendered bubbles
     ;[...logEl.querySelectorAll('.msg')].forEach((n) => n.remove())
     hintEl.textContent = ''
     return
   }
   emptyEl.style.display = 'none'
-  // Rebuild the list (snapshots are small and this keeps streaming-in-place trivially correct).
-  ;[...logEl.querySelectorAll('.msg')].forEach((n) => n.remove())
-  for (const m of messages) {
-    if (!m || !m.content) continue
-    const role = m.role === 'user' ? 'user' : m.role === 'system' ? 'system' : 'assistant'
-    const div = document.createElement('div')
-    div.className = `msg ${role}`
-    if (role !== 'system') {
-      const who = document.createElement('div')
-      who.className = 'who'
-      who.textContent = role === 'user' ? 'you' : 'ghost'
-      div.appendChild(who)
-    }
-    const body = document.createElement('div')
-    body.textContent = m.content
-    div.appendChild(body)
-    logEl.appendChild(div)
-  }
+  renderMessages(messages)
   hintEl.textContent = state && state.mirroring === false ? 'Live mirror is off in the app.' : ''
-  logEl.scrollTop = logEl.scrollHeight
+  if (nearBottom || logEl.querySelectorAll('.msg').length > prevCount) logEl.scrollTop = logEl.scrollHeight
 }
 
 async function poll() {
@@ -97,17 +148,10 @@ async function send() {
   boxEl.value = ''
   autoGrow()
   localSent = true
-  // Optimistic echo so it feels instant even before the app mirrors it back.
+  // Optimistic echo so it feels instant even before the app mirrors it back. Built the same way as
+  // server bubbles so the reconcile in render() adopts it (no duplicate) once the app mirrors it.
   emptyEl.style.display = 'none'
-  const div = document.createElement('div')
-  div.className = 'msg user'
-  const who = document.createElement('div')
-  who.className = 'who'
-  who.textContent = 'you'
-  const body = document.createElement('div')
-  body.textContent = text
-  div.append(who, body)
-  logEl.appendChild(div)
+  logEl.appendChild(buildMsg('user', text))
   logEl.scrollTop = logEl.scrollHeight
   try {
     await fetch(url('/task'), {

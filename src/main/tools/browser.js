@@ -215,11 +215,34 @@ export async function browserNavigate({ url }) {
   return { url: p.url(), title: await p.title() }
 }
 
-export async function browserScreenshot() {
-  if ((await ensureBrowserBackend()) === 'extension') return bridge.sendCommand('screenshot', { ...meta() })
+export async function browserScreenshot({ fullPage } = {}) {
+  if ((await ensureBrowserBackend()) === 'extension') return bridge.sendCommand('screenshot', { fullPage: !!fullPage, ...meta() })
   const p = await ensurePage()
-  const buf = await p.screenshot({ type: 'png', fullPage: false })
+  const buf = await p.screenshot({ type: 'png', fullPage: !!fullPage })
   return { base64: buf.toString('base64'), url: p.url() }
+}
+
+// Back / forward / reload in the active tab's own history — the browser's nav buttons, for the
+// agent. Extension path runs against your real Chrome tab; Playwright path drives its own page.
+export async function browserGoBack() {
+  if ((await ensureBrowserBackend()) === 'extension') return bridge.sendCommand('goBack', { ...meta() }, 35000)
+  const p = await ensurePage()
+  await p.goBack({ waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => {})
+  return { url: p.url(), title: await p.title() }
+}
+
+export async function browserGoForward() {
+  if ((await ensureBrowserBackend()) === 'extension') return bridge.sendCommand('goForward', { ...meta() }, 35000)
+  const p = await ensurePage()
+  await p.goForward({ waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => {})
+  return { url: p.url(), title: await p.title() }
+}
+
+export async function browserReload() {
+  if ((await ensureBrowserBackend()) === 'extension') return bridge.sendCommand('reloadTab', { ...meta() }, 35000)
+  const p = await ensurePage()
+  await p.reload({ waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => {})
+  return { url: p.url(), title: await p.title() }
 }
 
 // Playwright's CSS engine parses STANDARD CSS only. jQuery-style pseudo-classes like
@@ -388,11 +411,14 @@ export async function browserFill({ selector, value, label } = {}) {
   return { ok: true }
 }
 
-export async function browserGetText() {
-  if ((await ensureBrowserBackend()) === 'extension') return bridge.sendCommand('getText', { ...meta() })
+export async function browserGetText({ offset } = {}) {
+  const off = Math.max(0, Number(offset) || 0)
+  if ((await ensureBrowserBackend()) === 'extension') return bridge.sendCommand('getText', { offset: off, ...meta() })
   const p = await ensurePage()
   const text = await p.evaluate(() => document.body?.innerText || '')
-  return { url: p.url(), title: await p.title(), text: text.slice(0, 20000) }
+  const slice = text.slice(off, off + 20000)
+  const nextOffset = off + slice.length < text.length ? off + slice.length : null
+  return { url: p.url(), title: await p.title(), text: slice, offset: off, nextOffset, totalChars: text.length }
 }
 
 // Open several URLs at once and return each page's readable text — the fast path for multi-page

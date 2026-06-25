@@ -5,17 +5,23 @@ import {
   browserClick,
   browserFill,
   browserGetText,
-  browserClose
+  browserClose,
+  browserGoBack,
+  browserGoForward,
+  browserReload
 } from './browser.js'
 
 // Dispatch map: tool name -> async handler(args) -> result object.
 export const toolHandlers = {
   terminal_run: ({ command, timeout_ms }) => runCommand({ command, timeoutMs: timeout_ms }),
   browser_navigate: ({ url }) => browserNavigate({ url }),
-  browser_screenshot: () => browserScreenshot(),
+  browser_go_back: () => browserGoBack(),
+  browser_go_forward: () => browserGoForward(),
+  browser_reload: () => browserReload(),
+  browser_screenshot: ({ fullPage } = {}) => browserScreenshot({ fullPage }),
   browser_click: ({ selector }) => browserClick({ selector }),
   browser_fill: ({ selector, value }) => browserFill({ selector, value }),
-  browser_get_text: () => browserGetText(),
+  browser_get_text: ({ offset } = {}) => browserGetText({ offset }),
   browser_close: () => browserClose()
 }
 
@@ -52,9 +58,36 @@ export const toolSpecs = [
   {
     type: 'function',
     function: {
+      name: 'browser_go_back',
+      description: "Go back to the previous page in the current tab's history (the browser Back button).",
+      parameters: { type: 'object', properties: {} }
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'browser_go_forward',
+      description: "Go forward to the next page in the current tab's history (the browser Forward button).",
+      parameters: { type: 'object', properties: {} }
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'browser_reload',
+      description: 'Reload / refresh the current page.',
+      parameters: { type: 'object', properties: {} }
+    }
+  },
+  {
+    type: 'function',
+    function: {
       name: 'browser_screenshot',
       description: 'Capture a PNG screenshot of the current browser page (returned as base64) for visual inspection.',
-      parameters: { type: 'object', properties: {} }
+      parameters: {
+        type: 'object',
+        properties: { fullPage: { type: 'boolean', description: 'Capture the whole scrollable page instead of just the viewport.' } }
+      }
     }
   },
   {
@@ -88,8 +121,13 @@ export const toolSpecs = [
     type: 'function',
     function: {
       name: 'browser_get_text',
-      description: 'Extract the visible text of the current page (cleaned, truncated). Use to read page content.',
-      parameters: { type: 'object', properties: {} }
+      description:
+        'Extract the visible text of the current page (cleaned, ~20k chars). For longer pages the result ' +
+        'ends with a nextOffset — call again with { offset } to read the next chunk.',
+      parameters: {
+        type: 'object',
+        properties: { offset: { type: 'integer', description: 'Character offset to start reading from (for pagination).' } }
+      }
     }
   },
   {

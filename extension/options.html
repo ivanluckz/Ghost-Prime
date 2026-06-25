@@ -79,7 +79,17 @@
         transition: background 0.15s ease;
       }
       button.save:hover { background: rgba(0, 230, 255, 0.28); }
+      .tokrow { display: flex; gap: 8px; align-items: stretch; }
+      .tokrow input { flex: 1; }
+      button.ghost {
+        padding: 8px 12px; border-radius: 9px; border: 1px solid var(--line);
+        background: rgba(255, 255, 255, 0.04); color: var(--dim); font: inherit; cursor: pointer;
+        transition: background 0.15s ease, color 0.15s ease;
+      }
+      button.ghost:hover { background: rgba(255, 255, 255, 0.08); color: var(--text); }
+      .warn { color: #ffcf6b; font-size: 12px; line-height: 1.5; margin: 8px 0 0; display: none; }
       .ok { color: var(--mint); font-size: 13px; }
+      .bad { color: #ff6b8a; font-size: 13px; }
       .hint { color: var(--faint); font-size: 12px; line-height: 1.6; margin-top: 16px; }
       code { color: #aef3ff; }
     </style>
@@ -114,10 +124,18 @@
         <label class="fld" for="port">Bridge port</label>
         <input id="port" type="number" />
         <label class="fld" for="token">Shared token</label>
-        <input id="token" type="text" />
+        <div class="tokrow">
+          <input id="token" type="password" autocomplete="off" spellcheck="false" />
+          <button type="button" class="ghost" id="reveal" title="Show / hide token">show</button>
+        </div>
+        <p class="warn" id="tokenWarn"></p>
       </div>
 
-      <div class="actions"><button class="save" id="save">Save</button><span id="status" class="ok"></span></div>
+      <div class="actions">
+        <button class="save" id="save">Save</button>
+        <button type="button" class="ghost" id="test">Test connection</button>
+        <span id="status" class="ok"></span>
+      </div>
       <p class="hint">
         Host/port/token must match <code>GHOST_BRIDGE_PORT</code> and <code>GHOST_BRIDGE_TOKEN</code> in the app’s
         <code>.env</code> (defaults 8731 / ghost-local). Open the Ghost-Prime app, then this Chrome connects automatically.
