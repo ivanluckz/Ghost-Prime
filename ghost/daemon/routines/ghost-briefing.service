@@ -1,0 +1,8 @@
+[Unit]
+Description=Ghost-Prime morning briefing
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h/Projects/Ghost-Prime
+# Edit the prompt to taste. With spoken replies on (🔊 / /voice on) it'll read it aloud.
+ExecStart=/usr/bin/env node scripts/run-task.mjs "Good morning. Summarize my unread email and the top AI news today, then read it to me concisely."

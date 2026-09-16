@@ -1,0 +1,40 @@
+{
+  "name": "ghost-prime",
+  "version": "1.5.0",
+  "description": "Local AI agent for Chrome OS / Crostini — sees, controls, and remembers.",
+  "main": "./out/main/index.js",
+  "license": "MIT",
+  "scripts": {
+    "dev": "ELECTRON_OZONE_PLATFORM_HINT=x11 electron-vite dev",
+    "build": "electron-vite build",
+    "postbuild": "node scripts/push-after-build.mjs",
+    "start": "electron-vite preview",
+    "rebuild": "electron-rebuild -f -o better-sqlite3,node-pty",
+    "postinstall": "electron-rebuild -f -o better-sqlite3,node-pty",
+    "ext:deploy": "node scripts/deploy-extension.mjs",
+    "bridge:smoke": "node scripts/bridge-smoke.mjs"
+  },
+  "dependencies": {
+    "@anthropic-ai/claude-agent-sdk": "^0.3.177",
+    "@huggingface/transformers": "^4.2.0",
+    "@xterm/addon-fit": "^0.11.0",
+    "@xterm/xterm": "^6.0.0",
+    "better-sqlite3": "^11.8.1",
+    "discord.js": "^14.26.4",
+    "dotenv": "^16.4.7",
+    "node-pty": "^1.1.0",
+    "openai": "^4.77.0",
+    "playwright": "^1.60.0",
+    "three": "^0.184.0",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@electron/rebuild": "^3.7.1",
+    "@vitejs/plugin-react": "^4.3.4",
+    "electron": "^33.3.1",
+    "electron-vite": "^2.3.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "vite": "^5.4.11"
+  }
+}

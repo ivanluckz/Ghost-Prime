@@ -1,0 +1,10 @@
+#Fri Jun 19 21:06:46 CAT 2026
+base.0=/home/lol/Projects/Ghost-Prime/android-connector/app/build/intermediates/dex/debug/mergeExtDexDebug/classes.dex
+base.1=/home/lol/Projects/Ghost-Prime/android-connector/app/build/intermediates/dex/debug/mergeProjectDexDebug/0/classes.dex
+base.2=/home/lol/Projects/Ghost-Prime/android-connector/app/build/intermediates/dex/debug/mergeProjectDexDebug/13/classes.dex
+path.0=classes.dex
+path.1=0/classes.dex
+path.2=13/classes.dex
+renamed.0=classes.dex
+renamed.1=classes2.dex
+renamed.2=classes3.dex

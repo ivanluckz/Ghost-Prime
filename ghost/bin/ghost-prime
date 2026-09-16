@@ -1,0 +1,66 @@
+#!/usr/bin/env bash
+# Ghost-Prime — terminal launcher. Installed on PATH as `ghost-prime` (a symlink to this file).
+#
+#   ghost-prime           start the app (detached — returns your prompt)
+#   ghost-prime -f        start in the foreground (Ctrl+C to quit)
+#   ghost-prime stop      stop a running instance
+#   ghost-prime status    is it running?
+set -uo pipefail
+
+GHOST_DIR="/home/lol/Projects/Ghost-Prime"
+LOG="${TMPDIR:-/tmp}/ghost-prime.log"
+ELECTRON="$GHOST_DIR/node_modules/electron/dist/electron"
+
+cd "$GHOST_DIR" 2>/dev/null || {
+  echo "Ghost-Prime not found at $GHOST_DIR" >&2
+  exit 1
+}
+
+is_running() { pgrep -f "$ELECTRON \\." >/dev/null 2>&1; }
+
+case "${1:-start}" in
+  stop)
+    if is_running; then
+      pkill -f "$ELECTRON" && echo "Ghost-Prime stopped."
+    else
+      echo "Ghost-Prime is not running."
+    fi
+    exit 0
+    ;;
+  status)
+    if is_running; then
+      echo "Ghost-Prime is running (pid $(pgrep -f "$ELECTRON \\." | head -1))."
+    else
+      echo "Ghost-Prime is not running."
+    fi
+    exit 0
+    ;;
+  -f | --foreground)
+    export ELECTRON_OZONE_PLATFORM_HINT=${GHOST_OZONE_PLATFORM:-x11}
+    exec "$ELECTRON" .
+    ;;
+  start | "") ;;
+  *)
+    echo "usage: ghost-prime [start|stop|status|-f]" >&2
+    exit 2
+    ;;
+esac
+
+# Build on first run if needed.
+if [ ! -f out/main/index.js ]; then
+  echo "First run — building Ghost-Prime…"
+  npm run build >/dev/null 2>&1 || {
+    echo "Build failed. Run 'npm run build' in $GHOST_DIR to see why." >&2
+    exit 1
+  }
+fi
+
+if is_running; then
+  echo "Ghost-Prime is already running (pid $(pgrep -f "$ELECTRON \\." | head -1))."
+  exit 0
+fi
+
+export ELECTRON_OZONE_PLATFORM_HINT=${GHOST_OZONE_PLATFORM:-x11}
+nohup "$ELECTRON" . >"$LOG" 2>&1 &
+echo "Ghost-Prime started (pid $!).  logs: $LOG"
+echo "stop with:  ghost-prime stop"
