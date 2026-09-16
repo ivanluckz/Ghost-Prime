@@ -1,6 +1,0 @@
-<?xml version="1.0" encoding="utf-8"?>
-<resources>
-    <string name="app_name">Ghost-Prime</string>
-    <string name="accessibility_label">Ghost-Prime Connector</string>
-    <string name="accessibility_description">Lets the Ghost-Prime app on your computer see this screen’s elements and tap, swipe, and type on your behalf. Turn this off any time to revoke control.</string>
-</resources>

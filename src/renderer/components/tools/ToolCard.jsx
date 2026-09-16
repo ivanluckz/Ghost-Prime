@@ -1,30 +1,63 @@
 import { useState } from 'react'
 
-// Per-tool glyph + kind (kind drives the left-rail accent color in styles.css).
 const TOOL_META = {
   Bash: { glyph: '❯', kind: 'terminal' },
+  terminal_run: { glyph: '❯', kind: 'terminal' },
+  shell_run: { glyph: '❯', kind: 'terminal' },
   Read: { glyph: '▤', kind: 'file' },
+  file_read: { glyph: '▤', kind: 'file' },
   Write: { glyph: '✎', kind: 'file' },
+  file_write: { glyph: '✎', kind: 'file' },
   Edit: { glyph: '✎', kind: 'file' },
+  file_edit: { glyph: '✎', kind: 'file' },
   Glob: { glyph: '⌕', kind: 'search' },
+  file_search: { glyph: '⌕', kind: 'search' },
   Grep: { glyph: '⌕', kind: 'search' },
+  file_grep: { glyph: '⌕', kind: 'search' },
   WebFetch: { glyph: '⤓', kind: 'web' },
+  web_fetch: { glyph: '⤓', kind: 'web' },
   WebSearch: { glyph: '⌕', kind: 'web' },
+  web_search: { glyph: '⌕', kind: 'web' },
   browser_navigate: { glyph: '◉', kind: 'browser' },
   browser_get_text: { glyph: '▤', kind: 'browser' },
   browser_click: { glyph: '⊙', kind: 'browser' },
   browser_fill: { glyph: '✎', kind: 'browser' },
-  browser_screenshot: { glyph: '◉', kind: 'browser' }
+  browser_screenshot: { glyph: '◉', kind: 'browser' },
+  browser_read_pages: { glyph: '▤', kind: 'browser' },
+  browser_scroll: { glyph: '↕', kind: 'browser' },
+  browser_press_key: { glyph: '⌨', kind: 'browser' },
+  browser_list_tabs: { glyph: '◫', kind: 'browser' },
+  browser_use_tab: { glyph: '◫', kind: 'browser' },
+  system_volume: { glyph: '🔊', kind: 'system' },
+  system_brightness: { glyph: '🔆', kind: 'system' },
+  system_power: { glyph: '⚡', kind: 'system' },
+  system_telemetry: { glyph: '📊', kind: 'system' },
+  weather_get: { glyph: '🌤', kind: 'weather' },
+  reminder_set: { glyph: '⏰', kind: 'reminder' },
+  reminder_list: { glyph: '⏰', kind: 'reminder' },
+  reminder_cancel: { glyph: '⏰', kind: 'reminder' },
+  youtube_play: { glyph: '▶', kind: 'media' },
+  jarvis_action_run: { glyph: '⚙', kind: 'jarvis' },
+  memory_save: { glyph: '🧠', kind: 'memory' },
+  memory_recall: { glyph: '🧠', kind: 'memory' },
+  clipboard_read: { glyph: '📋', kind: 'system' },
+  clipboard_write: { glyph: '📋', kind: 'system' },
+  notify_user: { glyph: '🔔', kind: 'system' },
+  screen_screenshot: { glyph: '🖥', kind: 'system' }
 }
 
 function summarizeInput(input) {
   if (!input || typeof input !== 'object') return ''
   if (input.command) return input.command
+  if (input.path) return input.path
   if (input.file_path) return input.file_path
   if (input.url) return input.url
   if (input.selector) return input.value ? `${input.selector} ← ${input.value}` : input.selector
   if (input.pattern) return input.pattern
   if (input.query) return input.query
+  if (input.action) return input.value ? `${input.action} (${input.value})` : input.action
+  if (input.location) return input.location
+  if (input.text) return input.text
   try {
     return JSON.stringify(input).slice(0, 140)
   } catch {

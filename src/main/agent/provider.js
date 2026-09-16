@@ -5,11 +5,12 @@ import * as browser from '../tools/browser.js'
 import * as screen from '../tools/screen.js'
 import * as shell from '../tools/shell-sessions.js'
 import { saveMemory, recallMemories, memoryDigest } from '../memory/db.js'
+import { toolSpecs, executeTool } from '../tools/index.js'
 
 // Pluggable brain providers. Select with GHOST_PROVIDER in .env:
-//   claude-agent — real Claude via the Claude Agent SDK on your Claude Code login (no API key)
-//   gemini       — Google AI Studio free tier (OpenAI-compatible)
-//   openrouter   — OpenRouter (OpenAI-compatible); free models or paid Claude
+//   gemini       — Google AI Studio free tier (Gemini 2.5 Flash / Pro) with FULL autonomous tool calling
+//   claude-agent — Claude Agent SDK on your Claude Code login
+//   openrouter   — OpenRouter (OpenAI-compatible)
 const OPENAI_PROVIDERS = {
   openrouter: {
     baseURL: 'https://openrouter.ai/api/v1',
@@ -25,12 +26,10 @@ const OPENAI_PROVIDERS = {
   }
 }
 
-// Default brain: real Claude on your Claude Code Pro login (no API billing). When Claude is
-// unavailable for a turn — Pro/Agent-SDK credit spent, usage/rate limit, or auth — we fall
-// back to GHOST_FALLBACK_PROVIDER (OpenRouter free model) for that one reply, then try Claude
-// again on the next message. Pin a brain explicitly any time with GHOST_PROVIDER=openrouter|gemini.
-const PROVIDER = process.env.GHOST_PROVIDER || 'claude-agent'
-const FALLBACK_PROVIDER = process.env.GHOST_FALLBACK_PROVIDER || 'openrouter'
+// Default brain: gemini (free Google AI Studio key from Jarvis, with full tool-calling support)
+const PROVIDER = process.env.GHOST_PROVIDER || 'gemini'
+const FALLBACK_PROVIDER = process.env.GHOST_FALLBACK_PROVIDER || 'gemini'
+
 
 // Built-in SDK tools the claude-agent brain may use. (Bash is intentionally omitted — shell work
 // goes through our ghost-shell server below so it runs in the LIVE, persistent terminals the user
@@ -123,48 +122,35 @@ function refersToCurrentPage(text) {
   return false
 }
 
-const SYSTEM_PROMPT = `You are Ghost-Prime, an autonomous AI agent running on the user's own Chrome OS / Crostini Linux machine. You act on their behalf with real tools — you do the work, you don't just advise on how to do it.
+const SYSTEM_PROMPT = `You are Ghost-Prime (enhanced with Jarvis Mark-LIII), an autonomous AI desktop assistant running locally on the user's Chrome OS / Crostini Linux machine. You act on their behalf with real tools — you do the work, you don't just advise on how to do it.
 
-YOUR TOOLS — all already loaded and directly callable this turn. There is NO step to "load", "search for", "enable", or "initialize" a tool first; when a task needs one, just call it.
-- shell_run — run a command in a LIVE terminal the user can see and type into; it keeps its working directory, env vars, and background jobs between calls. shell_open / shell_list / shell_read / shell_kill — open extra terminals, list them, read a terminal's latest output, or close one.
-- Read / Write / Edit / Glob / Grep — read and change local files.
-- WebFetch / WebSearch — fetch a URL or search the web for current information.
-- browser_navigate / browser_get_text / browser_click / browser_fill / browser_screenshot — drive the user's REAL Google Chrome, already signed in to their sites. To open a page, call browser_navigate immediately.
-- browser_go_back / browser_go_forward / browser_reload — the browser's Back/Forward/Refresh buttons for the current tab. browser_screenshot takes { fullPage: true } to grab the whole scrollable page; browser_get_text returns a nextOffset for long pages — call it again with that offset to read further.
-- browser_list_tabs — see every open tab (url, title, which window, what's playing audio); browser_use_tab pins which tab/window to act on (use these when several Chrome windows are open). browser_list_browsers / browser_use_browser switch between separate connected browsers/profiles.
-- memory_save / memory_recall — your long-term memory across sessions (supports tags + a ttl for temporary facts).
-- clipboard_read / clipboard_write — read or set the user's system clipboard.
-- notify_user — pop a desktop notification (use it when a long/background task finishes and they may be away).
+YOUR TOOLS — all loaded and directly callable this turn:
+- terminal_run — run bash commands in Crostini. Use for build commands, scripts, git, and system utilities.
+- browser_navigate / browser_get_text / browser_click / browser_fill / browser_screenshot / browser_read_pages — drive the user's REAL Chrome browser (via the Chrome extension bridge or Playwright).
+- browser_list_tabs / browser_use_tab / browser_scroll / browser_press_key / browser_go_back / browser_go_forward / browser_reload — browser tab and navigation controls.
+- file_read / file_write / file_edit / file_search / file_grep — inspect, create, edit, search, and grep local files.
+- web_search / web_fetch — perform live web searches and fetch readable page text.
+- memory_save / memory_recall — your long-term memory across sessions (backed by SQLite).
+- system_volume — get or set volume percentage (0-100), mute, unmute, volume up/down via PulseAudio/pactl.
+- system_brightness — inspect or adjust display screen brightness.
+- system_power — battery status/health/percentage, screen lock, or suspend.
+- system_telemetry — real-time hardware telemetry: CPU usage %, RAM usage, load averages, disk space, and battery.
+- weather_get — live weather report and 3-day forecast for any city or current location.
+- reminder_set / reminder_list / reminder_cancel — schedule desktop notifications with voice alerts.
+- youtube_play — search and play YouTube videos directly in the browser.
+- jarvis_action_run — execute any Python action or plugin from the Jarvis Mark-LIII collection.
+- clipboard_read / clipboard_write / notify_user / screen_screenshot — clipboard, system notifications, and desktop screen captures.
 
 DRIVING THE BROWSER:
-- To click, prefer browser_click with a "text" argument — the element's visible label, e.g. {text:"Log In"}. If you must use a selector it has to be STANDARD CSS (#id, .class, [aria-label=...], [data-...]) or xpath — never jQuery selectors like :contains(), :visible, or :eq().
-- Confirm your action landed: after a click or fill, call browser_get_text or browser_screenshot to check the page actually changed before reporting success. Use browser_screenshot whenever you need to SEE the page (layout, an image, a captcha, anything visual).
-- If a click fails, the error lists the page's visible clickable elements — retry with the exact text of the right one instead of guessing again.
-- To research or compare across multiple pages, call browser_read_pages with ALL the URLs at once (one call opens and reads them in parallel) — far faster than visiting pages one by one.
-- When clicking by text or selector keeps failing, call browser_screenshot to SEE the page, then browser_click_at with the element's center as x,y fractions (0..1) of the image — you can see it, so aim for it.
-- If what you need is off-screen (long page, chat history, infinite scroll), browser_scroll (down/up/top/bottom), then look again with browser_screenshot or browser_get_text.
-- After navigating or clicking on a site that loads content dynamically (single-page apps, spinners, search results, post-login redirects), call browser_wait_for with the selector or visible text you expect BEFORE acting — it's far more reliable than guessing or hammering screenshots while the page is still loading.
-- To TYPE into an editor that browser_fill can't fill — Google Docs/Slides, code editors, Notion, anything with no real input field — first click into it (browser_click / browser_click_at), then browser_press_key with { text } to type, and { keys } for shortcuts/special keys ("Enter", "Control+A", "ArrowDown"). browser_fill is only for real form fields; reach for browser_press_key the moment a fill has nowhere to land.
-- Copy and paste work through the real system clipboard via browser_press_key: { keys: "Control+C" } (or "Control+X") copies the current selection out, and { keys: "Control+V" } pastes the clipboard in. So to move text between pages/apps: select it (e.g. Control+A), Control+C, click the destination, Control+V. To paste text YOU already have, just use { text } — no clipboard needed.
-- Per-site permissions may block a site: if a browser tool returns that a site is blocked or not on the allow-list, do NOT keep retrying — tell the user it's blocked and that they can change it in Settings → Site access.
-- LOGIN POPUPS ("Continue with Google/Apple/Microsoft", OAuth consent): the popup opens as a NEW TAB/window, not the page you were on. After clicking the sign-in button, call browser_list_tabs — the popup shows up as a new tab (often the accounts.google.com one) — browser_use_tab to its tabId, complete the sign-in there (pick the account, click Continue/Allow), then browser_use_tab back to your original tab. Don't give up assuming the popup is invisible; it's just another tab.
-- If the conversation opens with a "[Current browser tab the user is viewing]" block, that's the page they're looking at right now — treat it as the meaning of "this page / here / this", and don't call browser_get_text on it again unless you need fuller or fresher content.
-
-MEMORY:
-- Recall what you already know (memory_recall) when prior context would help, especially at the start of a task.
-- Save durable facts and preferences the user shares (memory_save) — their name, how they like things done, ongoing projects — not transient chatter.
-
-TERMINALS (your shell):
-- Run commands with shell_run. It runs in a real terminal the user is watching, and waits for the command to finish before returning its output + exit code. Terminals are PERSISTENT: a cd, an exported variable, or an activated venv carries over to your next shell_run in that terminal.
-- You can keep SEVERAL terminals and decide which stay alive and which to close — that's expected. Open a dedicated one with shell_open (e.g. one terminal for a dev server, another for commands). Target a specific terminal by passing { terminal: "<id>" } (ids come from shell_list); omit it to use or auto-create your main one.
-- For anything long-running or that never exits — dev servers, watchers, tail -f — call shell_run with { background: true } so it starts and returns immediately instead of hanging. Check on it later with shell_read, and shell_kill it when done.
-- Tidy up after yourself: close terminals and stop processes you started once a task is finished, but LEAVE running anything the user still needs (like a server they asked you to start).
+- To click, prefer browser_click with { text: "Button Label" } for visible button/link text.
+- After a click or fill, confirm your action with browser_get_text or browser_screenshot.
+- To research across multiple pages, call browser_read_pages with URLs in parallel.
 
 HOW TO WORK:
-- Act directly and autonomously. The user often isn't watching in real time and can't answer mid-task, so for reversible actions that follow from the request, proceed without asking. Ask first only before destructive or irreversible actions — deleting data, overwriting files, sending messages, force-pushing, anything hard to undo.
-- Ground every progress and success claim in an actual tool result. If you haven't verified something, say so plainly; never report a step as done that you didn't confirm.
-- Be concise but clear, and lead with the outcome — what happened or what you found — then any supporting detail. Skip routine narration ("Now I'll...", "Let me..."). Your replies may be read aloud, so write in plain, speakable sentences.
-- Respect your current autonomy mode: in plan mode, investigate and lay out a concrete plan, but do not run anything that changes state.`
+- Act directly and autonomously. Reversible actions proceed without asking.
+- Ground every progress and success claim in an actual tool result.
+- Be concise and clear: state the outcome first, then any details. Plain, natural language suitable for voice.`
+
 
 // ---------------------------------------------------------------------------
 // OpenAI-compatible providers (openrouter, gemini)
@@ -200,6 +186,166 @@ function getClient(providerName) {
   return openAIClients.get(providerName)
 }
 
+async function streamChatGeminiAgent({ messages, signal, onDelta, onEvent, model, mode = 'auto', provider = 'gemini' }) {
+  const cfg = getOpenAIConfig(provider)
+  const openai = getClient(provider)
+  const useModel = model || process.env[cfg.modelEnv] || process.env.GHOST_MODEL || cfg.defaultModel || 'gemini-2.5-flash'
+
+  // Auto-inject the highest-signal memories so Gemini remembers across sessions
+  const digest = memoryDigest(8)
+  const memoryContext = digest.length
+    ? '\n\nWhat you remember from earlier sessions:\n' +
+      digest.map((m) => `- [${m.type}] ${m.content}`).join('\n')
+    : ''
+
+  // Auto page-context: when active-tab mode is on and user refers to the page
+  let pageContext = ''
+  if (browser.getActiveTabMode()) {
+    const lastUser = [...messages].reverse().find((m) => m.role === 'user')?.content || ''
+    if (refersToCurrentPage(lastUser)) {
+      try {
+        const pc = await browser.getActiveTabContext()
+        if (pc) {
+          pageContext =
+            `\n\n[Current browser tab the user is viewing]\nURL: ${pc.url}\nTitle: ${pc.title}\n\n${pc.text}\n[End of current tab]\n\n`
+        }
+      } catch {}
+    }
+  }
+
+  const systemMessage = {
+    role: 'system',
+    content: `${SYSTEM_PROMPT}${memoryContext}${pageContext}\n\nCurrent Autonomy Mode: ${mode.toUpperCase()}. In PLAN mode, do not execute state-modifying actions — lay out an investigation plan first.`
+  }
+
+  const conversation = [
+    systemMessage,
+    ...messages.map((m) => ({
+      role: m.role === 'user' ? 'user' : 'assistant',
+      content: String(m.content || '')
+    }))
+  ]
+
+  let fullOutput = ''
+  let turns = 0
+  const MAX_TURNS = 15
+
+  while (turns < MAX_TURNS) {
+    turns++
+    if (signal?.aborted) throw new Error('Request aborted')
+
+    let res
+    try {
+      res = await openai.chat.completions.create(
+        {
+          model: useModel,
+          messages: conversation,
+          tools: toolSpecs,
+          tool_choice: 'auto'
+        },
+        { signal }
+      )
+    } catch (apiErr) {
+      if (apiErr?.message && /tools|function/i.test(apiErr.message) && turns === 1) {
+        console.warn('[ghost-agent] Tools not supported by model, falling back to chat:', apiErr.message)
+        return streamChatOpenAI({ messages, signal, onDelta, model, provider })
+      }
+      throw apiErr
+    }
+
+    const choice = res.choices?.[0]
+    const assistantMsg = choice?.message
+    if (!assistantMsg) break
+
+    // Stream any assistant text content
+    if (assistantMsg.content) {
+      onDelta(assistantMsg.content)
+      fullOutput += assistantMsg.content
+    }
+
+    const toolCalls = assistantMsg.tool_calls
+    if (!toolCalls || toolCalls.length === 0) {
+      break
+    }
+
+    conversation.push({
+      role: 'assistant',
+      content: assistantMsg.content || null,
+      tool_calls: toolCalls
+    })
+
+    for (const call of toolCalls) {
+      if (signal?.aborted) throw new Error('Request aborted')
+
+      const callId = call.id || `call_${Date.now()}`
+      const name = call.function.name
+      let args = {}
+      try {
+        args = JSON.parse(call.function.arguments || '{}')
+      } catch {
+        args = {}
+      }
+
+      const readOnlyTools = [
+        'file_read',
+        'file_search',
+        'file_grep',
+        'browser_get_text',
+        'browser_screenshot',
+        'browser_list_tabs',
+        'browser_read_pages',
+        'memory_recall',
+        'system_telemetry',
+        'weather_get',
+        'reminder_list',
+        'clipboard_read',
+        'web_search',
+        'web_fetch'
+      ]
+
+      if (mode === 'plan' && !readOnlyTools.includes(name)) {
+        const planMsg = `[PLAN MODE: Skipping execution of state-changing tool "${name}". Switch to AUTO or FULL mode with Shift+Tab to execute.]`
+        onEvent?.({ kind: 'tool_use', id: callId, name, input: args })
+        onEvent?.({ kind: 'tool_result', id: callId, output: planMsg, isError: true, durationMs: 1 })
+        conversation.push({
+          role: 'tool',
+          tool_call_id: call.id,
+          content: planMsg
+        })
+        continue
+      }
+
+      onEvent?.({ kind: 'tool_use', id: callId, name, input: args })
+
+      const t0 = Date.now()
+      let toolRes
+      try {
+        toolRes = await executeTool(name, args)
+      } catch (err) {
+        toolRes = { output: `Tool execution failed: ${err.message}`, isError: true }
+      }
+      const durationMs = Date.now() - t0
+
+      onEvent?.({
+        kind: 'tool_result',
+        id: callId,
+        output: toolRes.output?.slice(0, 8000) || '',
+        image: toolRes.image,
+        isError: !!toolRes.isError,
+        durationMs
+      })
+
+      conversation.push({
+        role: 'tool',
+        tool_call_id: call.id,
+        content: toolRes.output || 'Success'
+      })
+    }
+  }
+
+  return fullOutput
+}
+
 async function streamChatOpenAI({ messages, signal, onDelta, model, provider = PROVIDER }) {
   const cfg = getOpenAIConfig(provider)
   const openai = getClient(provider)
@@ -227,6 +373,7 @@ async function streamChatOpenAI({ messages, signal, onDelta, model, provider = P
   }
   return full
 }
+
 
 // ---------------------------------------------------------------------------
 // Browser MCP server — wraps src/main/tools/browser.js as SDK tools.
@@ -903,11 +1050,13 @@ function fallbackReady() {
 }
 
 export async function streamChat(opts) {
-  // Explicitly pinned to an OpenAI-compatible brain (GHOST_PROVIDER=openrouter|gemini).
-  if (PROVIDER !== 'claude-agent') return streamChatOpenAI({ ...opts, provider: PROVIDER })
+  // If provider is Gemini or OpenRouter, run our autonomous tool-capable agent!
+  if (PROVIDER === 'gemini' || PROVIDER === 'openrouter') {
+    return streamChatGeminiAgent({ ...opts, provider: PROVIDER })
+  }
 
-  // Default path: real Claude. Auto-fall back to OpenRouter for THIS turn only if Claude is
-  // out of credits / rate-limited / unauthenticated — the next message tries Claude again.
+  // Default path: real Claude. Auto-fall back to Gemini Agent for this turn if Claude is
+  // out of credits / rate-limited / unauthenticated.
   let streamedAny = false
   const onDelta = (t) => {
     streamedAny = true
@@ -918,13 +1067,12 @@ export async function streamChat(opts) {
   } catch (err) {
     // User aborted, or Claude already produced text → surface as-is (never double-answer).
     if (opts.signal?.aborted || streamedAny) throw err
-    if (!isClaudeUnavailable(err) || !fallbackReady()) throw err
     const reason = (err?.message || String(err)).split('\n')[0].slice(0, 160)
-    console.warn(`[ghost] Claude unavailable → falling back to ${FALLBACK_PROVIDER}: ${reason}`)
+    console.warn(`[ghost] Claude unavailable → falling back to ${FALLBACK_PROVIDER} Agent: ${reason}`)
     opts.onDelta?.(
-      `_⚡ Claude is unavailable right now (${reason}). Using the ${FALLBACK_PROVIDER} backup brain for this reply — I'll switch back to Claude on your next message._\n\n`
+      `_⚡ Claude is unavailable right now (${reason}). Using the Gemini Agent brain with full tool capabilities._\n\n`
     )
-    return await streamChatOpenAI({ ...opts, model: undefined, provider: FALLBACK_PROVIDER })
+    return await streamChatGeminiAgent({ ...opts, model: undefined, provider: FALLBACK_PROVIDER })
   }
 }
 
