@@ -1,6 +1,8 @@
-import { app } from 'electron'
+import electron from 'electron'
+const app = typeof electron === 'object' && electron?.app ? electron.app : { getPath: () => '/tmp' }
 import { join } from 'node:path'
 import { existsSync, readFileSync, writeFileSync } from 'node:fs'
+
 
 // Per-site permissions for the browser tools — Ghost-Prime's answer to "Claude for Chrome" site
 // access. Persisted as JSON under userData and enforced both app-side (navigate / read_pages) and

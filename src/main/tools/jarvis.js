@@ -2,7 +2,11 @@ import { exec, spawn } from 'node:child_process'
 import { readFileSync, existsSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { promisify } from 'node:util'
-import { Notification } from 'electron'
+import electron from 'electron'
+const Notification = typeof electron === 'object' && electron?.Notification
+  ? electron.Notification
+  : class { show() {} static isSupported() { return false } }
+
 
 const execAsync = promisify(exec)
 const APP_ROOT = process.cwd()

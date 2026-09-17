@@ -23,8 +23,9 @@ export default function Main() {
   const [messages, setMessages] = useState([]) // { role:'user'|'assistant'|'tool', reqId, ... }
   const [running, setRunning] = useState({}) // reqId -> { prompt, startedAt } — the single in-flight task
   const [queue, setQueue] = useState([]) // prompts waiting their turn (FIFO) — one task runs at a time
-  const [mode, setMode] = useState('auto')
+  const [mode, setMode] = useState('full')
   const [agent, setAgent] = useState({}) // { model, effort, thinking } — runtime overrides via / commands
+
   const [voiceOut, setVoiceOut] = useState(false) // speak replies aloud
   const [ttsOk, setTtsOk] = useState(false)
   const [sessions, setSessions] = useState([])
