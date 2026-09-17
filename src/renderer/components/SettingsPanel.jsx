@@ -36,7 +36,8 @@ function prettyAccel(acc) {
 // access. Tab target and site policy live in the main process; we load + save them here. The
 // mirror toggle is lifted to Main (it drives the push), so it comes in as a prop.
 export default function SettingsPanel({ onClose, mirror, onMirrorChange, onChatsCleared }) {
-  const [target, setTarget] = useState('group')
+  const [target, setTarget] = useState('active')
+
   const [policy, setPolicy] = useState({ mode: 'open', allow: [], block: [] })
   const [allowInput, setAllowInput] = useState('')
   const [blockInput, setBlockInput] = useState('')

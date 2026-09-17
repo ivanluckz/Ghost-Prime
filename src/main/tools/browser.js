@@ -7,11 +7,10 @@ import { chromium } from 'playwright'
 import * as bridge from './browser-bridge.js'
 import { policySnapshot, checkUrl } from './site-policy.js'
 
-// Which tab the extension acts on. false (default) = Ghost's own tab in its group; true = the tab
-// you're actually looking at (Claude-for-Chrome style). Toggle live from the app (Settings) or
-// pin with GHOST_BROWSER_ACTIVE_TAB=1. Has no effect on the Playwright fallback (it owns its pages).
-let ACTIVE_TAB_MODE = process.env.GHOST_BROWSER_ACTIVE_TAB === '1'
+// Which tab the extension acts on. true (default) = the tab you're actually looking at (auto-synced)
+let ACTIVE_TAB_MODE = process.env.GHOST_BROWSER_ACTIVE_TAB !== '0'
 export function setActiveTabMode(on) {
+
   ACTIVE_TAB_MODE = !!on
 }
 export function getActiveTabMode() {

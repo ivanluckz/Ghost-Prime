@@ -32,7 +32,8 @@ export default function Main() {
   const [activeId, setActiveId] = useState(null)
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
-  const [mirror, setMirror] = useState(false) // mirror chat into Chrome's side panel
+  const [mirror, setMirror] = useState(true) // auto-sync chat into Chrome's side panel
+
   const [activityOpen, setActivityOpen] = useState(true) // right-hand Mission Control activity panel
   const [browserTarget, setBrowserTarget] = useState('group') // which tab browser tools act on
   const [muted, setMutedState] = useState(isMuted()) // master sound mute (intro sting + sfx)
