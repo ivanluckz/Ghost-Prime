@@ -170,6 +170,14 @@ export const toolSpecs = [
   {
     type: 'function',
     function: {
+      name: 'browser_close_tab',
+      description: 'Close the current browser tab (opens about:blank if it would close the last tab).',
+      parameters: { type: 'object', properties: {} }
+    }
+  },
+  {
+    type: 'function',
+    function: {
       name: 'browser_read_pages',
       description: 'Open and read multiple URLs in parallel (fast comparison/research).',
       parameters: {
@@ -577,6 +585,10 @@ export async function executeTool(name, args = {}) {
       case 'browser_reload': {
         const r = await browser.browserReload()
         return { output: `Reloaded — ${r.url}` }
+      }
+      case 'browser_close_tab': {
+        const r = await browser.browserCloseTab()
+        return { output: `Closed tab — ${r.url || 'about:blank'}` }
       }
       case 'browser_read_pages': {
         const r = await browser.browserReadPages({ urls: args.urls, keepOpen: args.keepOpen })

@@ -2,7 +2,14 @@ import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { existsSync } from 'node:fs'
 import { spawn, spawnSync } from 'node:child_process'
-import { clipboard } from 'electron'
+import electron from 'electron'
+const clipboard =
+  typeof electron === 'object' && electron?.clipboard
+    ? electron.clipboard
+    : {
+        readText: () => '',
+        writeText: () => {}
+      }
 import { chromium } from 'playwright'
 import * as bridge from './browser-bridge.js'
 import { policySnapshot, checkUrl } from './site-policy.js'
@@ -613,7 +620,25 @@ export async function browserClose() {
     context = null
     page = null
   }
-  return { ok: true }
+  return { ok: true, closed: true }
+}
+
+// Close the CURRENT tab/page (not the whole browser). For Playwright, creates a new
+// about:blank page if the closed one was the last — so subsequent commands still work.
+export async function browserCloseTab() {
+  if ((await ensureBrowserBackend()) === 'extension') return bridge.sendCommand('closeTab', { ...meta() }, 15000)
+  await ensurePage()
+  if (context.pages().length <= 1) {
+    // Don't kill the last page — open a blank one and go there.
+    const pg = await context.newPage()
+    await page.close().catch(() => {})
+    page = pg
+  } else {
+    const closed = page
+    page = context.pages().find((p) => p !== closed) || (await context.newPage())
+    await closed.close().catch(() => {})
+  }
+  return { ok: true, url: page ? page.url() : '' }
 }
 
 // List every open tab — url, title, which window, and whether it's playing audio (audible) — so the

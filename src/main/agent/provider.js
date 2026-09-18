@@ -50,6 +50,7 @@ const BROWSER_TOOL_NAMES = [
   'browser_go_back',
   'browser_go_forward',
   'browser_reload',
+  'browser_close_tab',
   'browser_get_text',
   'browser_click',
   'browser_fill',
@@ -584,6 +585,15 @@ async function getBrowserMcpServer() {
         async ({ tabId }) => {
           const set = browser.setTargetTab(tabId)
           return { content: [{ type: 'text', text: set == null ? 'Unpinned — using the default tab.' : `Acting on tab ${set} now.` }] }
+        }
+      ),
+      tool(
+        'browser_close_tab',
+        'Close the current browser tab (opens about:blank if it would close the last tab). Use this to clean up tabs you opened during a task.',
+        {},
+        async () => {
+          const r = await browser.browserCloseTab()
+          return { content: [{ type: 'text', text: `Closed tab — ${r.url || 'about:blank'}` }] }
         }
       ),
       tool(

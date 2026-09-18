@@ -913,6 +913,23 @@ async function run(cmd, args) {
       else await runOps(null)
       return { ok: true, url: tab.url, copied }
     }
+    case 'closeTab': {
+      try {
+        const tabsInWindow = await chrome.tabs.query({ windowId: tab.windowId })
+        if (tabsInWindow.length > 1) {
+          await chrome.tabs.remove(tab.id)
+          const remaining = tabsInWindow.filter((t) => t.id !== tab.id)
+          await chrome.tabs.update(remaining[0].id, { active: true }).catch(() => {})
+          const after = await chrome.tabs.get(remaining[0].id)
+          return { ok: true, url: after.url, closedTabId: tab.id }
+        }
+        // Last tab in the window: create a new tab instead of closing the window.
+        await chrome.tabs.update(tab.id, { url: 'about:blank' })
+        return { ok: true, url: 'about:blank:', replaced: true }
+      } catch (e) {
+        throw new Error(`Couldn't close the tab: ${e?.message || e}`)
+      }
+    }
     default:
       throw new Error(`unknown command "${cmd}"`)
   }
