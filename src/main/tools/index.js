@@ -46,8 +46,20 @@ export const toolSpecs = [
   {
     type: 'function',
     function: {
+      name: 'browser_get_page',
+      description:
+        'Structured page snapshot: visible buttons, links, input fields, dropdown options, and excerpt. Use before click/fill.',
+      parameters: {
+        type: 'object',
+        properties: { limit: { type: 'integer', description: 'Max items per category (default 40).' } }
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
       name: 'browser_get_text',
-      description: 'Extract visible text and structure from the active browser tab.',
+      description: 'Extract visible text from the active browser tab (for long content; prefer browser_get_page for acting).',
       parameters: {
         type: 'object',
         properties: { offset: { type: 'integer', description: 'Offset for long pages.' } }
@@ -58,12 +70,14 @@ export const toolSpecs = [
     type: 'function',
     function: {
       name: 'browser_click',
-      description: 'Click an element on the current page by visible button/link text or CSS selector.',
+      description: 'Click an element by visible text or CSS selector. Supports double-click and right-click.',
       parameters: {
         type: 'object',
         properties: {
           text: { type: 'string', description: 'Visible text label of button/link to click (recommended).' },
-          selector: { type: 'string', description: 'CSS selector of the element.' }
+          selector: { type: 'string', description: 'CSS or xpath= selector.' },
+          double: { type: 'boolean', description: 'Double-click.' },
+          button: { type: 'string', enum: ['left', 'right', 'middle'], description: 'Mouse button.' }
         }
       }
     }
@@ -563,14 +577,27 @@ export async function executeTool(name, args = {}) {
         const r = await browser.browserNavigate({ url: args.url })
         return { output: `Navigated to ${r.url} — "${r.title}"` }
       }
+      case 'browser_get_page': {
+        const r = await browser.browserGetPage({ limit: args.limit })
+        return { output: r.formatted || browser.formatPageSnapshot(r) }
+      }
       case 'browser_get_text': {
         const r = await browser.browserGetText({ offset: args.offset })
         const more = r.nextOffset != null ? `\n\n…(${r.totalChars - r.nextOffset} more chars available)` : ''
         return { output: `# ${r.title}\n${r.url}\n\n${r.text}${more}` }
       }
       case 'browser_click': {
-        const r = await browser.browserClick({ selector: args.selector, text: args.text })
+        const r = await browser.browserClick({
+          selector: args.selector,
+          text: args.text,
+          double: args.double,
+          button: args.button
+        })
         return { output: `Clicked ${args.text ? `"${args.text}"` : args.selector} — now at ${r.url}` }
+      }
+      case 'browser_click_at': {
+        const r = await browser.browserClickAt({ x: args.x, y: args.y })
+        return { output: `Clicked at (${args.x}, ${args.y}) — now at ${r.url}` }
       }
       case 'browser_fill': {
         await browser.browserFill({ selector: args.selector, label: args.label, value: args.value })
@@ -632,6 +659,19 @@ export async function executeTool(name, args = {}) {
           .map((p, i) => `## [${i + 1}] ${p.title || p.url}\n${p.url}\n${(p.text || '').slice(0, 5000)}`)
           .join('\n\n---\n\n')
         return { output: text || 'No page content retrieved.' }
+      }
+      case 'browser_list_browsers': {
+        const list = browser.listBrowsers() || []
+        if (!list.length) return { output: 'No browsers connected.' }
+        return {
+          output: list
+            .map((d) => `- ${d.id} "${d.name}"${d.selected ? ' (selected)' : ''}${d.connected ? '' : ' [offline]'}`)
+            .join('\n')
+        }
+      }
+      case 'browser_use_browser': {
+        const ok = browser.useBrowser(args.id)
+        return { output: ok ? `Now driving ${args.id}.` : `No connected browser with id ${args.id}.` }
       }
 
       // Files

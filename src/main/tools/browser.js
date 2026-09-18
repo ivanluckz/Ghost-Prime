@@ -212,12 +212,14 @@ async function ensurePage() {
   return page
 }
 
-export async function browserNavigate({ url }) {
+export async function browserNavigate({ url, waitUntil } = {}) {
   const gate = checkUrl(url)
   if (!gate.ok) throw new Error(gate.reason)
   if ((await ensureBrowserBackend()) === 'extension') return bridge.sendCommand('navigate', { url, ...meta() }, 35000)
   const p = await ensurePage()
-  await p.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 })
+  const mode = waitUntil === 'networkidle' ? 'networkidle' : 'domcontentloaded'
+  await p.goto(url, { waitUntil: mode, timeout: 35000 })
+  await p.waitForLoadState('load', { timeout: 8000 }).catch(() => {})
   return { url: p.url(), title: await p.title() }
 }
 
@@ -262,6 +264,118 @@ function normalizeSelector(selector) {
     )
   }
   return selector.replace(/:contains\(\s*(['"]?)([\s\S]*?)\1\s*\)/gi, ':has-text("$2")')
+}
+
+// Playwright locator from CSS, xpath=..., or role hints.
+function resolveLocator(page, selector) {
+  const raw = String(selector).trim()
+  if (raw.startsWith('xpath=')) return page.locator(raw)
+  if (raw.startsWith('//') || raw.startsWith('(')) return page.locator(`xpath=${raw}`)
+  return page.locator(normalizeSelector(raw))
+}
+
+export function formatPageSnapshot(s) {
+  const lines = [`# ${s.title || '(no title)'}`, s.url || '', '']
+  if (s.buttons?.length) {
+    lines.push('## Buttons & controls')
+    for (const b of s.buttons) lines.push(`- "${b.label}"${b.selector ? ` → ${b.selector}` : ''}`)
+    lines.push('')
+  }
+  if (s.links?.length) {
+    lines.push('## Links')
+    for (const l of s.links) lines.push(`- "${l.label}" → ${l.href}`)
+    lines.push('')
+  }
+  if (s.fields?.length) {
+    lines.push('## Input fields')
+    for (const f of s.fields) {
+      const hint = [f.type, f.placeholder, f.value ? `value="${f.value.slice(0, 40)}"` : null]
+        .filter(Boolean)
+        .join(', ')
+      lines.push(`- ${f.label || f.name || f.selector}${hint ? ` (${hint})` : ''}`)
+    }
+    lines.push('')
+  }
+  if (s.selects?.length) {
+    lines.push('## Dropdowns')
+    for (const d of s.selects) {
+      const opts = (d.options || []).slice(0, 8).join(' | ')
+      lines.push(`- ${d.label || d.name || d.selector}: ${opts}${d.options?.length > 8 ? ' …' : ''}`)
+    }
+    lines.push('')
+  }
+  if (s.excerpt) {
+    lines.push('## Page excerpt')
+    lines.push(s.excerpt)
+  }
+  return lines.join('\n').trim()
+}
+
+// Injected in-page: structured list of interactive elements (self-contained for extension).
+function pageSnapshotInPage(maxItems) {
+  const cap = Math.min(Number(maxItems) || 40, 60)
+  const visible = (el) => {
+    const r = el.getBoundingClientRect()
+    if (r.width < 1 || r.height < 1) return false
+    const s = getComputedStyle(el)
+    return s.visibility !== 'hidden' && s.display !== 'none' && s.opacity !== '0'
+  }
+  const labelOf = (el) =>
+    (el.getAttribute('aria-label') || el.innerText || el.value || el.title || el.placeholder || '')
+      .trim()
+      .replace(/\s+/g, ' ')
+      .slice(0, 80)
+  const selOf = (el) => {
+    if (el.id) return `#${CSS.escape(el.id)}`
+    const name = el.getAttribute('name')
+    if (name) return `[name="${name.replace(/"/g, '\\"')}"]`
+    return ''
+  }
+  const buttons = []
+  const links = []
+  const fields = []
+  const selects = []
+  for (const el of document.querySelectorAll(
+    'button, [role="button"], [role="link"], [role="menuitem"], [role="tab"], input[type="submit"], input[type="button"], summary'
+  )) {
+    if (!visible(el)) continue
+    const label = labelOf(el)
+    if (!label) continue
+    buttons.push({ label, selector: selOf(el) })
+    if (buttons.length >= cap) break
+  }
+  for (const el of document.querySelectorAll('a[href]')) {
+    if (!visible(el)) continue
+    const label = labelOf(el)
+    if (!label) continue
+    links.push({ label, href: el.href })
+    if (links.length >= cap) break
+  }
+  for (const el of document.querySelectorAll('input, textarea, [contenteditable="true"]')) {
+    if (!visible(el)) continue
+    if (el.type === 'hidden') continue
+    fields.push({
+      label: labelOf(el),
+      name: el.name || '',
+      type: el.type || el.tagName.toLowerCase(),
+      placeholder: el.placeholder || '',
+      value: el.value || el.textContent?.slice(0, 40) || '',
+      selector: selOf(el)
+    })
+    if (fields.length >= cap) break
+  }
+  for (const el of document.querySelectorAll('select')) {
+    if (!visible(el)) continue
+    selects.push({
+      label: labelOf(el),
+      name: el.name || '',
+      selector: selOf(el),
+      options: [...el.options].map((o) => o.text.trim()).filter(Boolean)
+    })
+    if (selects.length >= cap) break
+  }
+  const excerpt = (document.body?.innerText || '').replace(/\s+/g, ' ').trim().slice(0, 1200)
+  return { url: location.href, title: document.title, buttons, links, fields, selects, excerpt }
 }
 
 // A locator (on `root`, the page or a frame) restricted to elements Playwright counts as
@@ -373,19 +487,35 @@ async function clarifyClickError(page, err, { selector, text }) {
   return err
 }
 
-export async function browserClick({ selector, text } = {}) {
-  if ((await ensureBrowserBackend()) === 'extension') return bridge.sendCommand('click', { selector, text, ...meta() })
+export async function browserClick({ selector, text, double, button = 'left' } = {}) {
+  if ((await ensureBrowserBackend()) === 'extension') {
+    return bridge.sendCommand('click', { selector, text, double: !!double, button, ...meta() })
+  }
   const p = await ensurePage()
+  const clickOpts = { timeout: 12000, button: button === 'right' ? 'right' : button === 'middle' ? 'middle' : 'left' }
   try {
+    let loc
     if (text != null && String(text).trim() !== '') {
-      await clickByText(p, String(text), 12000)
+      loc = await findClickable(p, String(text))
+      if (!loc) {
+        const e = new Error(`no visible clickable element matched the text "${text}"`)
+        e.ghostNotFound = true
+        throw e
+      }
     } else {
-      const sel = normalizeSelector(selector)
-      // Prefer a visible match; fall back to any match so explicit selectors still work.
-      let loc = p.locator(sel).and(p.locator(':visible')).first()
-      if (!(await loc.count().catch(() => 0))) loc = p.locator(sel).first()
-      await loc.scrollIntoViewIfNeeded({ timeout: 4000 }).catch(() => {})
-      await loc.click({ timeout: 12000 })
+      loc = resolveLocator(p, selector).and(p.locator(':visible')).first()
+      if (!(await loc.count().catch(() => 0))) loc = resolveLocator(p, selector).first()
+    }
+    await loc.scrollIntoViewIfNeeded({ timeout: 4000 }).catch(() => {})
+    if (double) await loc.dblclick({ timeout: 12000 })
+    else {
+      try {
+        await loc.click(clickOpts)
+      } catch (err) {
+        if (/intercept|not stable|obscur/i.test(err?.message || '')) {
+          await loc.click({ ...clickOpts, timeout: 4000, force: true })
+        } else throw err
+      }
     }
   } catch (err) {
     throw await clarifyClickError(p, err, { selector, text })
@@ -396,25 +526,56 @@ export async function browserClick({ selector, text } = {}) {
 export async function browserFill({ selector, value, label } = {}) {
   if ((await ensureBrowserBackend()) === 'extension') return bridge.sendCommand('fill', { selector, label, value, ...meta() })
   const p = await ensurePage()
+  const val = value ?? ''
   try {
     let target
     if (label != null && String(label).trim() !== '') {
       target = p.getByLabel(String(label)).and(p.locator(':visible')).first()
       if (!(await target.count().catch(() => 0))) {
-        // No matching <label> — fall back to placeholder / accessible textbox name.
-        target = p.getByPlaceholder(String(label)).or(p.getByRole('textbox', { name: String(label) })).first()
+        target = p
+          .getByPlaceholder(String(label))
+          .or(p.getByRole('textbox', { name: String(label) }))
+          .or(p.getByRole('combobox', { name: String(label) }))
+          .first()
       }
     } else {
-      const sel = normalizeSelector(selector)
-      target = p.locator(sel).and(p.locator(':visible')).first()
-      if (!(await target.count().catch(() => 0))) target = p.locator(sel).first()
+      target = resolveLocator(p, selector).and(p.locator(':visible')).first()
+      if (!(await target.count().catch(() => 0))) target = resolveLocator(p, selector).first()
     }
     await target.scrollIntoViewIfNeeded({ timeout: 4000 }).catch(() => {})
-    await target.fill(value ?? '', { timeout: 12000 })
+    const tag = await target.evaluate((el) => el.tagName).catch(() => '')
+    if (tag === 'SELECT') {
+      try {
+        await target.selectOption({ label: val }, { timeout: 12000 })
+      } catch {
+        try {
+          await target.selectOption({ value: val }, { timeout: 12000 })
+        } catch {
+          const options = await target.evaluate((el) => [...el.options].map((o) => o.text.trim()).filter(Boolean))
+          throw new Error(
+            `Couldn't match "${val}" to a dropdown option.` +
+              (options.length ? ` Choose one of: ${options.slice(0, 20).map((o) => `"${o}"`).join(', ')}.` : '')
+          )
+        }
+      }
+    } else {
+      await target.fill(val, { timeout: 12000 })
+    }
   } catch (err) {
     throw await clarifyClickError(p, err, { selector, text: label })
   }
   return { ok: true }
+}
+
+export async function browserGetPage({ limit } = {}) {
+  const cap = Math.min(Number(limit) || 40, 60)
+  if ((await ensureBrowserBackend()) === 'extension') {
+    const r = await bridge.sendCommand('getPage', { limit: cap, ...meta() })
+    return { ...r, formatted: formatPageSnapshot(r) }
+  }
+  const p = await ensurePage()
+  const snapshot = await p.evaluate(pageSnapshotInPage, cap)
+  return { ...snapshot, formatted: formatPageSnapshot(snapshot) }
 }
 
 export async function browserGetText({ offset } = {}) {

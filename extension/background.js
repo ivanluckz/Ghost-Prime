@@ -340,7 +340,7 @@ async function withDebugger(tabId, fn) {
 
 // ---- Injected page functions (must be fully self-contained) ----
 
-function clickInPage({ selector, text }) {
+function clickInPage({ selector, text, double, button }) {
   const visible = (el) => {
     const r = el.getBoundingClientRect()
     if (r.width < 1 || r.height < 1) return false
@@ -349,7 +349,13 @@ function clickInPage({ selector, text }) {
   }
   const fire = (el) => {
     el.scrollIntoView({ block: 'center', inline: 'center' })
-    el.click()
+    const btn = button === 'right' ? 2 : button === 'middle' ? 1 : 0
+    if (double) {
+      el.dispatchEvent(new MouseEvent('dblclick', { bubbles: true, cancelable: true, button: btn }))
+      return true
+    }
+    if (btn === 2) el.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, button: 2 }))
+    else el.click()
     return true
   }
   if (text && String(text).trim()) {
@@ -442,6 +448,72 @@ function fillInPage({ selector, label, value }) {
 function getTextInPage(maxChars) {
   const cap = Number(maxChars) || 20000
   return { url: location.href, title: document.title, text: (document.body?.innerText || '').slice(0, cap) }
+}
+
+function pageSnapshotInPage(maxItems) {
+  const cap = Math.min(Number(maxItems) || 40, 60)
+  const visible = (el) => {
+    const r = el.getBoundingClientRect()
+    if (r.width < 1 || r.height < 1) return false
+    const s = getComputedStyle(el)
+    return s.visibility !== 'hidden' && s.display !== 'none' && s.opacity !== '0'
+  }
+  const labelOf = (el) =>
+    (el.getAttribute('aria-label') || el.innerText || el.value || el.title || el.placeholder || '')
+      .trim()
+      .replace(/\s+/g, ' ')
+      .slice(0, 80)
+  const selOf = (el) => {
+    if (el.id) return `#${CSS.escape(el.id)}`
+    const name = el.getAttribute('name')
+    if (name) return `[name="${name.replace(/"/g, '\\"')}"]`
+    return ''
+  }
+  const buttons = []
+  const links = []
+  const fields = []
+  const selects = []
+  for (const el of document.querySelectorAll(
+    'button, [role="button"], [role="link"], [role="menuitem"], [role="tab"], input[type="submit"], input[type="button"], summary'
+  )) {
+    if (!visible(el)) continue
+    const label = labelOf(el)
+    if (!label) continue
+    buttons.push({ label, selector: selOf(el) })
+    if (buttons.length >= cap) break
+  }
+  for (const el of document.querySelectorAll('a[href]')) {
+    if (!visible(el)) continue
+    const label = labelOf(el)
+    if (!label) continue
+    links.push({ label, href: el.href })
+    if (links.length >= cap) break
+  }
+  for (const el of document.querySelectorAll('input, textarea, [contenteditable="true"]')) {
+    if (!visible(el)) continue
+    if (el.type === 'hidden') continue
+    fields.push({
+      label: labelOf(el),
+      name: el.name || '',
+      type: el.type || el.tagName.toLowerCase(),
+      placeholder: el.placeholder || '',
+      value: el.value || el.textContent?.slice(0, 40) || '',
+      selector: selOf(el)
+    })
+    if (fields.length >= cap) break
+  }
+  for (const el of document.querySelectorAll('select')) {
+    if (!visible(el)) continue
+    selects.push({
+      label: labelOf(el),
+      name: el.name || '',
+      selector: selOf(el),
+      options: [...el.options].map((o) => o.text.trim()).filter(Boolean)
+    })
+    if (selects.length >= cap) break
+  }
+  const excerpt = (document.body?.innerText || '').replace(/\s+/g, ' ').trim().slice(0, 1200)
+  return { url: location.href, title: document.title, buttons, links, fields, selects, excerpt }
 }
 
 function clickAtInPage({ x, y }) {
@@ -754,6 +826,19 @@ async function run(cmd, args) {
       const t = await chrome.tabs.get(tab.id)
       maybeGlow(tab.id)
       return { url: t.url, title: t.title }
+    }
+    case 'getPage': {
+      const frames = await injectAllFrames(tab.id, pageSnapshotInPage, args.limit || 40)
+      const main = { ...(frames.find((f) => f.frameId === 0)?.result || frames[0]?.result || {}) }
+      for (const f of frames) {
+        if (f.frameId === 0 || !f?.result) continue
+        for (const k of ['buttons', 'links', 'fields', 'selects']) {
+          main[k] = [...(main[k] || []), ...(f.result[k] || [])]
+        }
+      }
+      const cap = Math.min(Number(args.limit) || 40, 60)
+      for (const k of ['buttons', 'links', 'fields', 'selects']) main[k] = (main[k] || []).slice(0, cap)
+      return main
     }
     case 'getText': {
       const offset = Math.max(0, Number(args.offset) || 0)

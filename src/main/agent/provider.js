@@ -53,6 +53,7 @@ const BROWSER_TOOL_NAMES = [
   'browser_close_tab',
   'browser_wait_for',
   'browser_wait_for_navigation',
+  'browser_get_page',
   'browser_get_text',
   'browser_click',
   'browser_fill',
@@ -60,7 +61,6 @@ const BROWSER_TOOL_NAMES = [
   'browser_read_pages',
   'browser_click_at',
   'browser_scroll',
-  'browser_wait_for',
   'browser_press_key',
   'browser_list_tabs',
   'browser_use_tab',
@@ -129,7 +129,7 @@ const SYSTEM_PROMPT = `You are Ghost-Prime (enhanced with Jarvis Mark-LIII), an 
 
 YOUR TOOLS — all loaded and directly callable this turn:
 - terminal_run — run bash commands in Crostini. Use for build commands, scripts, git, and system utilities.
-- browser_navigate / browser_get_text / browser_click / browser_fill / browser_screenshot / browser_read_pages — drive the user's REAL Chrome browser (via the Chrome extension bridge or Playwright).
+- browser_navigate / browser_get_page / browser_get_text / browser_click / browser_fill / browser_screenshot / browser_read_pages — drive the user's REAL Chrome browser (via the Chrome extension bridge or Playwright).
 - browser_list_tabs / browser_use_tab / browser_scroll / browser_press_key / browser_go_back / browser_go_forward / browser_reload — browser tab and navigation controls.
 - file_read / file_write / file_edit / file_search / file_grep — inspect, create, edit, search, and grep local files.
 - web_search / web_fetch — perform live web searches and fetch readable page text.
@@ -145,8 +145,11 @@ YOUR TOOLS — all loaded and directly callable this turn:
 - clipboard_read / clipboard_write / notify_user / screen_screenshot — clipboard, system notifications, and desktop screen captures.
 
 DRIVING THE BROWSER:
+- Before clicking or filling, call browser_get_page to see buttons, links, fields, and dropdowns on the page.
 - To click, prefer browser_click with { text: "Button Label" } for visible button/link text.
-- After a click or fill, confirm your action with browser_get_text or browser_screenshot.
+- For dropdowns use browser_fill with { label, value }; for native <select> pass the option's visible text.
+- After a click that loads a new page, call browser_wait_for_navigation then browser_get_page.
+- After other actions, confirm with browser_get_text or browser_screenshot.
 - To research across multiple pages, call browser_read_pages with URLs in parallel.
 
 HOW TO WORK:
@@ -293,6 +296,7 @@ async function streamChatGeminiAgent({ messages, signal, onDelta, onEvent, model
         'file_read',
         'file_search',
         'file_grep',
+        'browser_get_page',
         'browser_get_text',
         'browser_screenshot',
         'browser_list_tabs',
@@ -430,10 +434,22 @@ async function getBrowserMcpServer() {
         }
       ),
       tool(
+        'browser_get_page',
+        'Get a structured snapshot of the current page: visible buttons, links, input fields, dropdown ' +
+          'options, and a short excerpt. Call this BEFORE browser_click or browser_fill so you know ' +
+          'exactly what is clickable and what labels to use. Much faster than reading 20k chars of raw text.',
+        { limit: z.number().optional() },
+        async ({ limit }) => {
+          const r = await browser.browserGetPage({ limit })
+          return { content: [{ type: 'text', text: r.formatted || browser.formatPageSnapshot(r) }] }
+        }
+      ),
+      tool(
         'browser_get_text',
         'Get the visible text of the current page (main document plus substantial iframes). Returns up ' +
           'to ~20k characters; if the page is longer, the result ends with a nextOffset — call again ' +
-          'with { offset: <nextOffset> } to read the next chunk. Use to read page content before acting.',
+          'with { offset: <nextOffset> } to read the next chunk. Prefer browser_get_page when you need ' +
+          'to interact; use this for reading long articles or full page content.',
         { offset: z.number().optional() },
         async ({ offset }) => {
           const r = await browser.browserGetText({ offset })
@@ -450,11 +466,17 @@ async function getBrowserMcpServer() {
           "element's visible button/link text — most reliable. Otherwise pass { selector } as a " +
           'STANDARD CSS selector: an id (#submit), class (.login-btn), or attribute ' +
           '([aria-label="Log In"], [data-action="login"]); :nth-of-type() for position; or an ' +
-          'xpath ("xpath=//button[normalize-space()=\'Log In\']"). NEVER use jQuery selectors ' +
+          'xpath ("xpath=//button[normalize-space()=\'Log In\']"). Pass { double: true } to ' +
+          'double-click; { button: "right" } for right-click/context menu. NEVER use jQuery selectors ' +
           'like :contains(), :visible, :eq() — they are invalid CSS and will fail.',
-        { selector: z.string().optional(), text: z.string().optional() },
-        async ({ selector, text }) => {
-          const r = await browser.browserClick({ selector, text })
+        {
+          selector: z.string().optional(),
+          text: z.string().optional(),
+          double: z.boolean().optional(),
+          button: z.enum(['left', 'right', 'middle']).optional()
+        },
+        async ({ selector, text, double, button }) => {
+          const r = await browser.browserClick({ selector, text, double, button })
           const what = text ? `text "${text}"` : selector
           return { content: [{ type: 'text', text: `Clicked ${what} — now at ${r.url}` }] }
         }
@@ -555,15 +577,6 @@ async function getBrowserMcpServer() {
             .filter(Boolean)
             .join('; ')
           return { content: [{ type: 'text', text: did || 'sent keystrokes' }] }
-        }
-      ),
-      tool(
-        'browser_wait_for',
-        'Wait until a selector or visible text appears on the current page before you act — use this whenever a page loads or changes content AFTER navigation: single-page apps, lazy/infinite lists, loading spinners, search results, post-login redirects. Pass { selector } (standard CSS) or { text } (visible text to wait for); optional { timeoutMs } (default 10000, max 30000). Resolves as soon as it shows up, or errors on timeout. Far more reliable than clicking blind or taking repeated screenshots when you already know what you are waiting for.',
-        { selector: z.string().optional(), text: z.string().optional(), timeoutMs: z.number().optional() },
-        async ({ selector, text, timeoutMs }) => {
-          await browser.browserWaitFor({ selector, text, timeoutMs })
-          return { content: [{ type: 'text', text: `Found ${selector ? `selector ${selector}` : `\"${text}\"`}.` }] }
         }
       ),
       tool(

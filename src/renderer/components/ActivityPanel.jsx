@@ -12,6 +12,7 @@ const TOOL_META = {
   WebFetch: { glyph: '⤓', kind: 'web' },
   WebSearch: { glyph: '⌕', kind: 'web' },
   browser_navigate: { glyph: '◉', kind: 'browser' },
+  browser_get_page: { glyph: '◎', kind: 'browser' },
   browser_get_text: { glyph: '▤', kind: 'browser' },
   browser_click: { glyph: '⊙', kind: 'browser' },
   browser_fill: { glyph: '✎', kind: 'browser' },
