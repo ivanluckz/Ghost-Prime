@@ -51,6 +51,8 @@ const BROWSER_TOOL_NAMES = [
   'browser_go_forward',
   'browser_reload',
   'browser_close_tab',
+  'browser_wait_for',
+  'browser_wait_for_navigation',
   'browser_get_text',
   'browser_click',
   'browser_fill',
@@ -553,6 +555,24 @@ async function getBrowserMcpServer() {
             .filter(Boolean)
             .join('; ')
           return { content: [{ type: 'text', text: did || 'sent keystrokes' }] }
+        }
+      ),
+      tool(
+        'browser_wait_for',
+        'Wait until a selector or visible text appears on the current page before you act — use this whenever a page loads or changes content AFTER navigation: single-page apps, lazy/infinite lists, loading spinners, search results, post-login redirects. Pass { selector } (standard CSS) or { text } (visible text to wait for); optional { timeoutMs } (default 10000, max 30000). Resolves as soon as it shows up, or errors on timeout. Far more reliable than clicking blind or taking repeated screenshots when you already know what you are waiting for.',
+        { selector: z.string().optional(), text: z.string().optional(), timeoutMs: z.number().optional() },
+        async ({ selector, text, timeoutMs }) => {
+          await browser.browserWaitFor({ selector, text, timeoutMs })
+          return { content: [{ type: 'text', text: `Found ${selector ? `selector ${selector}` : `\"${text}\"`}.` }] }
+        }
+      ),
+      tool(
+        'browser_wait_for_navigation',
+        'Wait for a page navigation to complete after a click or action that triggers a page load (e.g., clicking a link or submitting a form). Use this after browser_click or browser_click_at when you expect a new page to load. Pass { timeoutMs } (default 30000, max 60000).',
+        { timeoutMs: z.number().optional() },
+        async ({ timeoutMs }) => {
+          const r = await browser.browserWaitForNavigation({ timeoutMs })
+          return { content: [{ type: 'text', text: `Navigation complete — ${r.url}` }] }
         }
       ),
       tool(

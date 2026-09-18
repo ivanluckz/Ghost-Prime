@@ -614,6 +614,22 @@ export async function browserWaitFor({ selector, text, timeoutMs } = {}) {
   return { ok: true, url: p.url() }
 }
 
+// Wait for navigation to complete (after a click that triggers a page load).
+// Use this after browser_click or browser_click_at when you expect a new page to load.
+export async function browserWaitForNavigation({ timeoutMs } = {}) {
+  const ms = Math.min(Number(timeoutMs) || 30000, 60000)
+  if ((await ensureBrowserBackend()) === 'extension') {
+    return bridge.sendCommand('waitForNavigation', { timeoutMs: ms, ...meta() }, ms + 6000)
+  }
+  const p = await ensurePage()
+  try {
+    await p.waitForLoadState('domcontentloaded', { timeout: ms })
+  } catch (e) {
+    // Ignore timeout - page might already be loaded
+  }
+  return { ok: true, url: p.url() }
+}
+
 export async function browserClose() {
   if (context) {
     await context.close().catch(() => {})

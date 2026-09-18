@@ -930,6 +930,27 @@ async function run(cmd, args) {
         throw new Error(`Couldn't close the tab: ${e?.message || e}`)
       }
     }
+    case 'waitForNavigation': {
+      try {
+        await new Promise((resolve, reject) => {
+          const listener = (tabId, info) => {
+            if (tabId === tab.id && info.status === 'complete') {
+              chrome.tabs.onUpdated.removeListener(listener)
+              resolve()
+            }
+          }
+          chrome.tabs.onUpdated.addListener(listener)
+          setTimeout(() => {
+            chrome.tabs.onUpdated.removeListener(listener)
+            resolve()
+          }, Number(args.timeoutMs) || 30000)
+        })
+        const t = await chrome.tabs.get(tab.id)
+        return { ok: true, url: t.url, title: t.title }
+      } catch (e) {
+        throw new Error(`Navigation wait failed: ${e?.message || e}`)
+      }
+    }
     default:
       throw new Error(`unknown command "${cmd}"`)
   }

@@ -170,6 +170,34 @@ export const toolSpecs = [
   {
     type: 'function',
     function: {
+      name: 'browser_wait_for',
+      description: 'Wait until a selector or visible text appears on the page (for SPAs, lazy content).',
+      parameters: {
+        type: 'object',
+        properties: {
+          selector: { type: 'string', description: 'CSS selector to wait for' },
+          text: { type: 'string', description: 'Visible text to wait for' },
+          timeoutMs: { type: 'integer', description: 'Max wait time in ms (default 10000, max 30000)' }
+        }
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'browser_wait_for_navigation',
+      description: 'Wait for a page navigation to complete after a click or action that triggers a page load.',
+      parameters: {
+        type: 'object',
+        properties: {
+          timeoutMs: { type: 'integer', description: 'Max wait time in ms (default 30000, max 60000)' }
+        }
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
       name: 'browser_close_tab',
       description: 'Close the current browser tab (opens about:blank if it would close the last tab).',
       parameters: { type: 'object', properties: {} }
@@ -585,6 +613,14 @@ export async function executeTool(name, args = {}) {
       case 'browser_reload': {
         const r = await browser.browserReload()
         return { output: `Reloaded — ${r.url}` }
+      }
+      case 'browser_wait_for': {
+        const r = await browser.browserWaitFor({ selector: args.selector, text: args.text, timeoutMs: args.timeoutMs })
+        return { output: `Found ${args.selector ? `selector ${args.selector}` : `text "${args.text}"`}` }
+      }
+      case 'browser_wait_for_navigation': {
+        const r = await browser.browserWaitForNavigation({ timeoutMs: args.timeoutMs })
+        return { output: `Navigation complete — ${r.url}` }
       }
       case 'browser_close_tab': {
         const r = await browser.browserCloseTab()
