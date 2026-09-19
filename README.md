@@ -84,6 +84,22 @@ GEMINI_MODEL=gemini-2.5-flash
 | `node scripts/smoke-claude-agent.mjs` | Headless check that the Claude brain streams. |
 | `node scripts/smoke-claude-agent-tools.mjs` | Exercise the agent's tools (honours `GHOST_TEST_PERMISSION`). |
 | `node scripts/smoke-claude-agent-browser.mjs` | Drive the Playwright browser through the agent. |
+| `node scripts/smoke-browser-control.mjs` | Browser control layer end to end (refs, annotated screenshots, popups, dialogs, downloads) — no LLM. Prefix with `GHOST_BROWSER_HEADLESS=true GHOST_BROWSER_CHANNEL= GHOST_BROWSER_PROFILE=/tmp/ghost-pw GHOST_BROWSER_BACKEND=playwright`. |
+| `node --import ./scripts/lib/register-electron-stub.mjs scripts/smoke-brain-router.mjs` | Which brain each kind of message routes to (no LLM). |
+| `node --import ./scripts/lib/register-electron-stub.mjs scripts/smoke-gemini-browser-vision.mjs` | Proves the Gemini brain can see browser screenshots (free tier, same env prefix as above). |
+
+### Browser control
+
+The agent sees the page as a numbered list (`browser_get_page` → `[12] "Log In"`) and acts by number
+(`browser_click { ref: 12 }`), or takes `browser_screenshot { annotate: true }` to get those numbers
+drawn on the image. Every action reports where it landed, whether the page changed, and any dialog,
+download or new tab it caused. Related `.env` switches:
+
+```dotenv
+GHOST_BROWSER_BACKEND=playwright     # auto | extension | playwright (school blocks dev-mode extensions → playwright)
+GHOST_CONTROL_BRAIN=claude           # computer-control turns (browser/terminal/files/apps) → claude; set gemini to keep them free
+GHOST_BROWSER_DIALOGS=accept         # accept | dismiss — how confirm()/prompt() dialogs are answered (always reported)
+```
 
 ### Pushing & commit messages
 

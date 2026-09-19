@@ -62,6 +62,8 @@ const BROWSER_TOOL_NAMES = [
   'browser_screenshot',
   'browser_read_pages',
   'browser_click_at',
+  'browser_hover',
+  'browser_find',
   'browser_drag',
   'browser_scroll',
   'browser_press_key',
@@ -144,8 +146,8 @@ const SYSTEM_PROMPT = `You are Ghost-Prime (enhanced with Jarvis Mark-LIII), an 
 
 YOUR TOOLS — all loaded and directly callable this turn:
 - terminal_run — run bash commands in Crostini. Use for build commands, scripts, git, and system utilities.
-- browser_navigate / browser_get_page / browser_get_text / browser_click / browser_fill / browser_screenshot / browser_read_pages — drive the user's REAL Chrome browser (via the Chrome extension bridge or Playwright).
-- browser_list_tabs / browser_use_tab / browser_scroll / browser_press_key / browser_go_back / browser_go_forward / browser_reload — browser tab and navigation controls.
+- browser_navigate / browser_get_page / browser_get_text / browser_find / browser_click / browser_click_at / browser_hover / browser_fill / browser_screenshot / browser_read_pages — drive the browser (via the Chrome extension bridge or Playwright).
+- browser_list_tabs / browser_use_tab / browser_scroll / browser_press_key / browser_wait_for / browser_go_back / browser_go_forward / browser_reload — browser tab and navigation controls.
 - file_read / file_write / file_edit / file_search / file_grep — inspect, create, edit, search, and grep local files.
 - web_search / web_fetch — perform live web searches and fetch readable page text.
 - memory_save / memory_recall — your long-term memory across sessions (backed by SQLite).
@@ -162,12 +164,13 @@ YOUR TOOLS — all loaded and directly callable this turn:
 - clipboard_read / clipboard_write / notify_user / screen_screenshot — clipboard, system notifications, and desktop screen captures.
 
 DRIVING THE BROWSER:
-- Before clicking or filling, call browser_get_page to see buttons, links, fields, and dropdowns on the page.
-- To click, prefer browser_click with { text: "Button Label" } for visible button/link text.
-- For dropdowns use browser_fill with { label, value }; for native <select> pass the option's visible text.
-- After a click that loads a new page, call browser_wait_for_navigation then browser_get_page.
-- After other actions, confirm with browser_get_text or browser_screenshot.
-- To research across multiple pages, call browser_read_pages with URLs in parallel.
+- Look first: browser_get_page numbers every visible button, link, field and dropdown as [N]. Act on them with browser_click { ref: N } / browser_fill { ref: N, value } — the most reliable way. { text } (visible label) and { selector } (standard CSS) also work.
+- When layout matters or nothing is numbered where you need to click (canvas, maps, icon buttons), take browser_screenshot { annotate: true }: each element's [N] is drawn on the image — click by ref, or browser_click_at { x, y } (0..1 fractions of the image) for anything unnumbered.
+- Every action result tells you where you are now, whether the page changed ("page changed" → refs are stale, call browser_get_page again), and any dialog, download, or new tab it caused. Clicks already wait for the navigation they trigger — you do not need browser_wait_for_navigation after them.
+- Content that appears later (spinners, search results, SPAs): browser_wait_for { text | selector } before acting. Hover menus: browser_hover first. Long pages: browser_find { text } jumps to a phrase; browser_scroll reveals more.
+- Dropdowns / checkboxes: browser_fill with the option's visible text, or "true"/"false". Editors with no form field (Docs, Notion, code editors): click into them, then browser_press_key { text } / { keys }.
+- Research across several pages: browser_read_pages with all the URLs at once.
+- Confirm outcomes from actual results (URL, title, page text) — never assume a click worked.
 
 HOW TO WORK:
 - Act directly and autonomously. Reversible actions proceed without asking.
@@ -252,7 +255,8 @@ async function streamChatGeminiAgent({ messages, signal, onDelta, onEvent, model
 
   let fullOutput = ''
   let turns = 0
-  const MAX_TURNS = 15
+  const MAX_TURNS = 30 // browser tasks routinely take 15+ tool round-trips
+  const imageTurns = new Set() // screenshot turns we injected (pruned to the newest few)
 
   while (turns < MAX_TURNS) {
     turns++
@@ -298,6 +302,10 @@ async function streamChatGeminiAgent({ messages, signal, onDelta, onEvent, model
       tool_calls: toolCalls
     })
 
+    // Images a tool produced this round (browser_screenshot). Gemini's OpenAI-compatible endpoint
+    // only accepts text in tool messages, so they go back as a user turn AFTER all the tool results
+    // — that's what lets the model actually see the screenshot it asked for.
+    const toolImages = []
     for (const call of toolCalls) {
       if (signal?.aborted) throw new Error('Request aborted')
 
@@ -316,6 +324,7 @@ async function streamChatGeminiAgent({ messages, signal, onDelta, onEvent, model
         'file_grep',
         'browser_get_page',
         'browser_get_text',
+        'browser_find',
         'browser_screenshot',
         'browser_list_tabs',
         'browser_read_pages',
@@ -365,6 +374,29 @@ async function streamChatGeminiAgent({ messages, signal, onDelta, onEvent, model
         tool_call_id: call.id,
         content: toolRes.output || 'Success'
       })
+      if (toolRes.image) toolImages.push({ name, image: toolRes.image })
+    }
+
+    if (toolImages.length) {
+      // Only the newest screenshots stay in context — each one costs image tokens on every later
+      // request, and the old ones no longer show the current page anyway.
+      const KEEP_IMAGES = 2
+      const prior = conversation.filter((m) => imageTurns.has(m))
+      for (const m of prior.slice(0, Math.max(0, prior.length + toolImages.length - KEEP_IMAGES))) {
+        m.content = '[earlier screenshot removed — take a new one if you need to see the page]'
+        imageTurns.delete(m)
+      }
+      for (const { name, image } of toolImages) {
+        const turn = {
+          role: 'user',
+          content: [
+            { type: 'text', text: `[Image result of ${name} — this is the screenshot you just took, not a new message from the user.]` },
+            { type: 'image_url', image_url: { url: image } }
+          ]
+        }
+        imageTurns.add(turn)
+        conversation.push(turn)
+      }
     }
   }
 
@@ -421,7 +453,8 @@ async function getBrowserMcpServer() {
         { url: z.string() },
         async ({ url }) => {
           const r = await browser.browserNavigate({ url })
-          return { content: [{ type: 'text', text: `Navigated to ${r.url} — "${r.title}"` }] }
+          const lead = r.partial ? 'Opened (still loading when the timeout hit)' : 'Navigated'
+          return { content: [{ type: 'text', text: browser.formatActionResult(lead, { ...r, navigated: false }) }] }
         }
       ),
       tool(
@@ -430,7 +463,7 @@ async function getBrowserMcpServer() {
         {},
         async () => {
           const r = await browser.browserGoBack()
-          return { content: [{ type: 'text', text: `Went back — now at ${r.url} — "${r.title}"` }] }
+          return { content: [{ type: 'text', text: browser.formatActionResult('Went back', { ...r, navigated: false }) }] }
         }
       ),
       tool(
@@ -439,7 +472,7 @@ async function getBrowserMcpServer() {
         {},
         async () => {
           const r = await browser.browserGoForward()
-          return { content: [{ type: 'text', text: `Went forward — now at ${r.url} — "${r.title}"` }] }
+          return { content: [{ type: 'text', text: browser.formatActionResult('Went forward', { ...r, navigated: false }) }] }
         }
       ),
       tool(
@@ -448,14 +481,15 @@ async function getBrowserMcpServer() {
         {},
         async () => {
           const r = await browser.browserReload()
-          return { content: [{ type: 'text', text: `Reloaded — ${r.url} — "${r.title}"` }] }
+          return { content: [{ type: 'text', text: browser.formatActionResult('Reloaded', { ...r, navigated: false }) }] }
         }
       ),
       tool(
         'browser_get_page',
-        'Get a structured snapshot of the current page: visible buttons, links, input fields, dropdown ' +
-          'options, and a short excerpt. Call this BEFORE browser_click or browser_fill so you know ' +
-          'exactly what is clickable and what labels to use. Much faster than reading 20k chars of raw text.',
+        'Get a structured snapshot of the current page: every visible button, link, input field and ' +
+          'dropdown, each numbered [N], plus a short excerpt. Call this BEFORE browser_click or ' +
+          'browser_fill, then act with { ref: N } — the most reliable way to hit exactly the right element ' +
+          '(no ambiguous labels, no guessed selectors). Much faster than reading 20k chars of raw text.',
         { limit: z.number().optional() },
         async ({ limit }) => {
           const r = await browser.browserGetPage({ limit })
@@ -479,46 +513,78 @@ async function getBrowserMcpServer() {
         }
       ),
       tool(
+        'browser_find',
+        'Find a phrase on the current page (like Ctrl+F): returns how many times it occurs, a snippet ' +
+          'of context around each hit, and scrolls the first one into view. Use it to locate a price, ' +
+          'a name, a section — far cheaper than paging through browser_get_text.',
+        { text: z.string(), limit: z.number().optional() },
+        async ({ text, limit }) => {
+          const r = await browser.browserFind({ text, limit })
+          if (!r.count) return { content: [{ type: 'text', text: `"${text}" was not found on the page.` }] }
+          const body =
+            `${r.count} match${r.count === 1 ? '' : 'es'} for "${text}"${r.scrolled ? ' (scrolled the first one into view)' : ''}:\n` +
+            r.matches.map((m, i) => `${i + 1}. ${m}`).join('\n')
+          return { content: [{ type: 'text', text: body }] }
+        }
+      ),
+      tool(
         'browser_click',
-        'Click an element on the current page. BEST: pass { text: "Log In" } to click by the ' +
-          "element's visible button/link text — most reliable. Otherwise pass { selector } as a " +
-          'STANDARD CSS selector: an id (#submit), class (.login-btn), or attribute ' +
-          '([aria-label="Log In"], [data-action="login"]); :nth-of-type() for position; or an ' +
-          'xpath ("xpath=//button[normalize-space()=\'Log In\']"). Pass { double: true } to ' +
-          'double-click; { button: "right" } for right-click/context menu. NEVER use jQuery selectors ' +
-          'like :contains(), :visible, :eq() — they are invalid CSS and will fail.',
+        'Click an element on the current page. BEST: pass { ref: N } — the number shown next to the ' +
+          'element in browser_get_page or on an annotated screenshot — it is unambiguous. Otherwise ' +
+          '{ text: "Log In" } clicks by visible button/link text, or { selector } with a STANDARD CSS ' +
+          'selector: an id (#submit), class (.login-btn), or attribute ([aria-label="Log In"]); ' +
+          ':nth-of-type() for position; or an xpath ("xpath=//button[normalize-space()=\'Log In\']"). ' +
+          'Pass { double: true } to double-click; { button: "right" } for right-click/context menu. ' +
+          'NEVER use jQuery selectors like :contains(), :visible, :eq() — invalid CSS, they fail. ' +
+          'The result says whether the page changed (then refs are stale — call browser_get_page again) ' +
+          'and reports any dialog, download, or new tab the click caused; the click already waits for ' +
+          'the navigation it triggers.',
         {
+          ref: z.number().optional(),
           selector: z.string().optional(),
           text: z.string().optional(),
           double: z.boolean().optional(),
           button: z.enum(['left', 'right', 'middle']).optional()
         },
-        async ({ selector, text, double, button }) => {
-          const r = await browser.browserClick({ selector, text, double, button })
-          const what = text ? `text "${text}"` : selector
-          return { content: [{ type: 'text', text: `Clicked ${what} — now at ${r.url}` }] }
+        async ({ ref, selector, text, double, button }) => {
+          const r = await browser.browserClick({ ref, selector, text, double, button })
+          const what = ref != null ? `[${ref}]` : text ? `text "${text}"` : selector
+          return { content: [{ type: 'text', text: browser.formatActionResult(`Clicked ${what}`, r) }] }
         }
       ),
       tool(
         'browser_fill',
-        'Type a value into an input/textarea, OR choose an option in a native <select> dropdown ' +
-          '(matched by the option\'s value or visible text). Pass { label, value } to target the ' +
-          'field by its visible label/placeholder, or { selector, value } with a STANDARD CSS ' +
-          'selector (#id, .class, [name="email"]). Never use jQuery selectors like :contains().',
-        { selector: z.string().optional(), label: z.string().optional(), value: z.string() },
-        async ({ selector, label, value }) => {
-          await browser.browserFill({ selector, label, value })
-          return { content: [{ type: 'text', text: `Filled ${label ? `field "${label}"` : selector}` }] }
+        'Type a value into an input/textarea/editor, choose an option in a native <select> dropdown ' +
+          "(by the option's visible text or value), or set a checkbox/radio (value \"true\"/\"false\"). " +
+          'Target the field with { ref: N } from browser_get_page (preferred), { label } (its visible ' +
+          'label/placeholder), or { selector } with STANDARD CSS (#id, .class, [name="email"]) — never ' +
+          'jQuery :contains(). Add { pressEnter: true } to submit right after (search boxes, login forms).',
+        {
+          ref: z.number().optional(),
+          selector: z.string().optional(),
+          label: z.string().optional(),
+          value: z.string(),
+          pressEnter: z.boolean().optional()
+        },
+        async ({ ref, selector, label, value, pressEnter }) => {
+          const r = await browser.browserFill({ ref, selector, label, value, pressEnter })
+          const what = ref != null ? `[${ref}]` : label ? `field "${label}"` : selector
+          return { content: [{ type: 'text', text: browser.formatActionResult(`Filled ${what}${pressEnter ? ' and pressed Enter' : ''}`, r) }] }
         }
       ),
       tool(
         'browser_screenshot',
-        'Capture a screenshot of the current browser page so you can see it. Defaults to the visible ' +
-          'viewport; pass { fullPage: true } to capture the entire scrollable page in one image.',
-        { fullPage: z.boolean().optional() },
-        async ({ fullPage }) => {
-          const r = await browser.browserScreenshot({ fullPage })
-          return { content: [{ type: 'image', data: r.base64, mimeType: 'image/png' }] }
+        'Capture a screenshot of the current browser page so you can see it. Pass { annotate: true } ' +
+          "to draw every clickable element's number [N] onto the image (and get a legend) — then act " +
+          'with browser_click { ref: N }; this is the way to handle icon-only buttons, canvases and ' +
+          'layouts where text labels are ambiguous. Defaults to the visible viewport; { fullPage: true } ' +
+          'captures the entire scrollable page (not combinable with annotate).',
+        { fullPage: z.boolean().optional(), annotate: z.boolean().optional() },
+        async ({ fullPage, annotate }) => {
+          const r = await browser.browserScreenshot({ fullPage, annotate })
+          const content = [{ type: 'image', data: r.base64, mimeType: 'image/png' }]
+          if (r.marks) content.push({ type: 'text', text: `Numbered elements: ${browser.formatMarks(r.marks)}` })
+          return { content }
         }
       ),
       tool(
@@ -549,7 +615,19 @@ async function getBrowserMcpServer() {
         { x: z.number(), y: z.number() },
         async ({ x, y }) => {
           const r = await browser.browserClickAt({ x, y })
-          return { content: [{ type: 'text', text: `Clicked at (${x}, ${y}) — now at ${r.url}` }] }
+          return { content: [{ type: 'text', text: browser.formatActionResult(`Clicked at (${x}, ${y})`, r) }] }
+        }
+      ),
+      tool(
+        'browser_hover',
+        'Hover an element — by { ref: N } from browser_get_page, { text } (visible label), or ' +
+          '{ selector } (CSS). This opens hover-driven menus (nav dropdowns, row action icons, ' +
+          'tooltips); call browser_get_page afterwards to see what appeared, then click it.',
+        { ref: z.number().optional(), text: z.string().optional(), selector: z.string().optional() },
+        async ({ ref, text, selector }) => {
+          const r = await browser.browserHover({ ref, text, selector })
+          const what = ref != null ? `[${ref}]` : text ? `"${text}"` : selector
+          return { content: [{ type: 'text', text: browser.formatActionResult(`Hovering ${what}`, r) }] }
         }
       ),
       tool(
@@ -565,7 +643,7 @@ async function getBrowserMcpServer() {
         },
         async ({ fromSelector, toSelector, from, to }) => {
           const r = await browser.browserDrag({ fromSelector, toSelector, from, to })
-          return { content: [{ type: 'text', text: `Dragged (${r.mode}) — now at ${r.url}` }] }
+          return { content: [{ type: 'text', text: browser.formatActionResult(`Dragged (${r.mode})`, r) }] }
         }
       ),
       tool(
@@ -576,8 +654,8 @@ async function getBrowserMcpServer() {
           'After scrolling, call browser_screenshot or browser_get_text again to see the new content.',
         { direction: z.enum(['down', 'up', 'top', 'bottom']).optional(), amount: z.number().optional(), selector: z.string().optional() },
         async ({ direction, amount, selector }) => {
-          await browser.browserScroll({ direction, amount, selector })
-          return { content: [{ type: 'text', text: `Scrolled ${direction || 'down'}${selector ? ` in ${selector}` : ''}.` }] }
+          const r = await browser.browserScroll({ direction, amount, selector })
+          return { content: [{ type: 'text', text: `Scrolled ${direction || 'down'}${selector ? ` in ${selector}` : ''} (now at ${r.scrollY}px).` }] }
         }
       ),
       tool(
@@ -590,8 +668,8 @@ async function getBrowserMcpServer() {
           'blind or taking repeated screenshots when you already know what you are waiting for.',
         { selector: z.string().optional(), text: z.string().optional(), timeoutMs: z.number().optional() },
         async ({ selector, text, timeoutMs }) => {
-          await browser.browserWaitFor({ selector, text, timeoutMs })
-          return { content: [{ type: 'text', text: `Found ${selector ? `selector ${selector}` : `"${text}"`}.` }] }
+          const r = await browser.browserWaitFor({ selector, text, timeoutMs })
+          return { content: [{ type: 'text', text: `Found ${selector ? `selector ${selector}` : `"${text}"`} — at ${r.url}.` }] }
         }
       ),
       tool(
@@ -606,20 +684,22 @@ async function getBrowserMcpServer() {
           '"Shift+ArrowRight". Note: browser-internal pages (chrome://) cannot be driven.',
         { text: z.string().optional(), keys: z.union([z.string(), z.array(z.string())]).optional() },
         async ({ text, keys }) => {
-          await browser.browserPressKey({ text, keys })
-          const did = [text != null && text !== '' ? 'typed text' : null, keys ? `pressed ${Array.isArray(keys) ? keys.join(', ') : keys}` : null]
+          const r = await browser.browserPressKey({ text, keys })
+          const did = [text != null && text !== '' ? 'Typed text' : null, keys ? `pressed ${Array.isArray(keys) ? keys.join(', ') : keys}` : null]
             .filter(Boolean)
             .join('; ')
-          return { content: [{ type: 'text', text: did || 'sent keystrokes' }] }
+          return { content: [{ type: 'text', text: browser.formatActionResult(did || 'Sent keystrokes', r) }] }
         }
       ),
       tool(
         'browser_wait_for_navigation',
-        'Wait for a page navigation to complete after a click or action that triggers a page load (e.g., clicking a link or submitting a form). Use this after browser_click or browser_click_at when you expect a new page to load. Pass { timeoutMs } (default 30000, max 60000).',
+        'Wait for a slow page load or redirect chain to finish. Clicks, Enter and navigate already ' +
+          'wait for the navigation they trigger, so you rarely need this — reach for it when a result ' +
+          'says the page is still loading. Pass { timeoutMs } (default 30000, max 60000).',
         { timeoutMs: z.number().optional() },
         async ({ timeoutMs }) => {
           const r = await browser.browserWaitForNavigation({ timeoutMs })
-          return { content: [{ type: 'text', text: `Navigation complete — ${r.url}` }] }
+          return { content: [{ type: 'text', text: browser.formatActionResult(r.navigated ? 'Navigation complete' : 'No navigation happened', { ...r, navigated: false }) }] }
         }
       ),
       tool(
@@ -650,8 +730,8 @@ async function getBrowserMcpServer() {
           '{ tabId: null } to unpin and go back to the default tab.',
         { tabId: z.number().nullable() },
         async ({ tabId }) => {
-          const set = browser.setTargetTab(tabId)
-          return { content: [{ type: 'text', text: set == null ? 'Unpinned — using the default tab.' : `Acting on tab ${set} now.` }] }
+          const r = await browser.useTab(tabId)
+          return { content: [{ type: 'text', text: r.pinned ? browser.formatActionResult(`Acting on tab ${r.tabId} now`, r) : 'Unpinned — using the default tab.' }] }
         }
       ),
       tool(
@@ -660,7 +740,7 @@ async function getBrowserMcpServer() {
         {},
         async () => {
           const r = await browser.browserCloseTab()
-          return { content: [{ type: 'text', text: `Closed tab — ${r.url || 'about:blank'}` }] }
+          return { content: [{ type: 'text', text: browser.formatActionResult('Closed tab', r) }] }
         }
       ),
       tool(
@@ -1268,6 +1348,40 @@ function isHardTask(text) {
   if (/\[Attached file:/.test(t) && t.length > 300) return true
   return /\b(refactor|debug|implement|architect(?:ure)?|design|plan(?: out| this)?|multi-?step|step[- ]by[- ]step|analy[sz]e|optimi[sz]e|migrate|algorithm|derive|prove|reason (?:through|about)|think (?:through|hard|carefully|deeply)|write (?:a |the |some )?(?:code|function|script|module|class|test|program|app)|codebase|whole file|entire file|end[- ]to[- ]end|complex|thorough)\b/i.test(t)
 }
+// Computer control — driving the browser, running commands, changing files, opening apps — goes to
+// Claude: it's the stronger agentic brain and its browser tools hand it screenshots natively. The
+// Jarvis one-shot controls (volume, brightness, battery, weather, telemetry, YouTube, reminders,
+// clipboard) exist only on the Gemini path, so those stay there. Set GHOST_CONTROL_BRAIN=gemini to
+// keep everything on the free brain.
+const CONTROL_BRAIN = (process.env.GHOST_CONTROL_BRAIN || 'claude').toLowerCase()
+function isGeminiOnlyControl(t) {
+  return /\b(volume|mute|unmute|louder|quieter|brightness|brighter|dimmer|battery|charg(?:e|ing)|weather|forecast|temperature|cpu|ram|memory usage|disk space|telemetry|system stats|remind(?:er|ers)?|youtube|play (?:a |the |some |me )?(?:song|video|music|track)|lock (?:the |my )?screen|suspend|clipboard|notify me)\b/i.test(
+    t
+  )
+}
+export function isComputerControl(text) {
+  const t = String(text || '')
+  if (!t.trim() || isGeminiOnlyControl(t)) return false
+  // A URL or site name: the user wants something done on the web.
+  if (/https?:\/\/|\bwww\.|\b[a-z0-9-]+\.(?:com|org|net|io|de|co\.uk|edu|gov|app|dev)\b/i.test(t)) return true
+  // Browser interaction verbs.
+  if (/\b(click|tap|double[- ]?click|right[- ]?click|scroll|hover|drag|screenshot|screen ?shot)\b/i.test(t)) return true
+  if (/\b(go to|navigate|visit|browse|open|load|pull up|bring up)\b[^.?!\n]{0,40}\b(site|website|web ?page|page|url|link|tab|browser|chrome|dashboard|portal)\b/i.test(t)) return true
+  if (/\b(log|sign)[ -]?(in|out|up)\b/i.test(t)) return true
+  if (/\b(fill|type|enter|paste|put)\b[^.?!\n]{0,40}\b(form|field|box|password|username|email|search bar|search box|text ?area|editor|doc|spreadsheet|sheet|cell)\b/i.test(t)) return true
+  if (/\b(search|look (?:it |this |that )?up|find|check)\b[^.?!\n]{0,40}\b(on|in) (?:google|youtube|amazon|wikipedia|reddit|twitter|x|ebay|github|linkedin|maps|the (?:site|web|page|internet|store))\b/i.test(t)) return true
+  if (/\b(download|upload|submit|book|order|buy|purchase|add to (?:my |the )?cart|check ?out|checkout|apply for|register for|unsubscribe|cancel my)\b/i.test(t)) return true
+  if (/\b(post|send|reply|comment|message|dm|email|tweet|share)\b[^.?!\n]{0,40}\b(on|to|in|via) [a-z]/i.test(t)) return true
+  if (/\b(read|summari[sz]e|what(?:'s| is) on|what does)\b[^.?!\n]{0,24}\b(this|the|that|my) (?:page|tab|site|screen|article|form)\b/i.test(t)) return true
+  // Terminal / dev work.
+  if (/\b(run|execute|launch|start|stop|kill|restart)\b[^.?!\n]{0,40}\b(command|script|test|tests|build|server|dev server|process|container|npm|node|python|bash|it|this|that)\b/i.test(t)) return true
+  if (/\b(install|uninstall|compile|deploy|rebuild|git|npm|pnpm|yarn|pip|docker|sudo|apt|curl|ssh|bash|shell|terminal|command line|cli)\b/i.test(t)) return true
+  // Files & folders.
+  if (/\b(create|make|move|rename|delete|remove|copy|organi[sz]e|clean up|tidy|sort|edit|open|save|zip|unzip|extract)\b[^.?!\n]{0,40}\b(files?|folders?|director(?:y|ies)|downloads|desktop|documents|project|repo|\.[a-z]{2,4}\b)/i.test(t)) return true
+  // Apps.
+  if (/\b(launch|open|start|quit|close|switch to)\b[^.?!\n]{0,24}\b(app|application|program|window|terminal|discord|vs ?code|code editor|spotify|slack|zoom|calendar|settings)\b/i.test(t)) return true
+  return false
+}
 // Returns 'gemini' | 'claude'. Order: explicit per-turn override → GHOST_BRAIN_MODE → heuristic.
 export function pickBrain(opts = {}) {
   const ov = String(opts.brain || '').toLowerCase()
@@ -1276,8 +1390,11 @@ export function pickBrain(opts = {}) {
   if (mode === 'gemini' || mode === 'claude') return mode
   const lastUser = [...(opts.messages || [])].reverse().find((m) => m.role === 'user')
   const c = lastUser?.content
-  if (contentHasImage(c)) return 'gemini' // vision only works on the Gemini path today
-  return isHardTask(contentToPlain(c)) ? 'claude' : 'gemini'
+  if (contentHasImage(c)) return 'gemini' // a dropped image: only the Gemini path takes it as input
+  const text = contentToPlain(c)
+  if (isHardTask(text)) return 'claude'
+  if (CONTROL_BRAIN === 'claude' && isComputerControl(text)) return 'claude'
+  return 'gemini'
 }
 
 function runBrain(opts, brain) {

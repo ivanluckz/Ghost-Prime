@@ -37,7 +37,7 @@ export const toolSpecs = [
     type: 'function',
     function: {
       name: 'browser_navigate',
-      description: 'Navigate the browser to a given URL. Returns final URL and page title.',
+      description: 'Open a URL in the browser (a bare domain like "example.com" is fine). Returns the final URL and page title.',
       parameters: {
         type: 'object',
         properties: { url: { type: 'string', description: 'The URL to visit.' } },
@@ -50,10 +50,11 @@ export const toolSpecs = [
     function: {
       name: 'browser_get_page',
       description:
-        'Structured page snapshot: visible buttons, links, input fields, dropdown options, and excerpt. Use before click/fill.',
+        'Structured snapshot of the current page: every visible button, link, input field and dropdown, each numbered [N], plus a short excerpt. ' +
+        'Call this BEFORE acting, then use browser_click / browser_fill with { ref: N } — the most reliable way to hit the right element.',
       parameters: {
         type: 'object',
-        properties: { limit: { type: 'integer', description: 'Max items per category (default 40).' } }
+        properties: { limit: { type: 'integer', description: 'Max items per category (default 40, max 60).' } }
       }
     }
   },
@@ -61,7 +62,7 @@ export const toolSpecs = [
     type: 'function',
     function: {
       name: 'browser_get_text',
-      description: 'Extract visible text from the active browser tab (for long content; prefer browser_get_page for acting).',
+      description: 'Extract visible text from the current page and its iframes (for reading long content; prefer browser_get_page for acting). Returns up to 20k chars; pass the returned nextOffset to continue.',
       parameters: {
         type: 'object',
         properties: { offset: { type: 'integer', description: 'Offset for long pages.' } }
@@ -71,12 +72,30 @@ export const toolSpecs = [
   {
     type: 'function',
     function: {
-      name: 'browser_click',
-      description: 'Click an element by visible text or CSS selector. Supports double-click and right-click.',
+      name: 'browser_find',
+      description: 'Find a phrase on the current page (like Ctrl+F): returns the hit count and a snippet around each match, and scrolls the first one into view.',
       parameters: {
         type: 'object',
         properties: {
-          text: { type: 'string', description: 'Visible text label of button/link to click (recommended).' },
+          text: { type: 'string', description: 'Phrase to look for (case-insensitive).' },
+          limit: { type: 'integer', description: 'Max snippets to return (default 5).' }
+        },
+        required: ['text']
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'browser_click',
+      description:
+        'Click an element. BEST: { ref: N } using a number from browser_get_page or an annotated screenshot. Or { text } for its visible label, or { selector } (standard CSS only — never jQuery :contains/:eq). ' +
+        'The result says whether the page changed and reports any dialog, download or new tab; a new page means refs are stale — call browser_get_page again.',
+      parameters: {
+        type: 'object',
+        properties: {
+          ref: { type: 'integer', description: 'Element number from browser_get_page / annotated screenshot (preferred).' },
+          text: { type: 'string', description: 'Visible text label of the button/link to click.' },
           selector: { type: 'string', description: 'CSS or xpath= selector.' },
           double: { type: 'boolean', description: 'Double-click.' },
           button: { type: 'string', enum: ['left', 'right', 'middle'], description: 'Mouse button.' }
@@ -87,14 +106,49 @@ export const toolSpecs = [
   {
     type: 'function',
     function: {
-      name: 'browser_fill',
-      description: 'Fill in an input field, textarea, or select dropdown option.',
+      name: 'browser_click_at',
+      description:
+        'Click a point you located in a screenshot — x and y are fractions of the image (0..1, top-left origin). Use when no ref/text/selector reaches the element (canvas, maps, icon-only controls).',
       parameters: {
         type: 'object',
         properties: {
+          x: { type: 'number', description: 'Horizontal position, 0..1 of the viewport width.' },
+          y: { type: 'number', description: 'Vertical position, 0..1 of the viewport height.' }
+        },
+        required: ['x', 'y']
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'browser_hover',
+      description: 'Hover an element (by ref, visible text, or CSS selector) to open hover menus / reveal row actions / show tooltips before clicking what appears.',
+      parameters: {
+        type: 'object',
+        properties: {
+          ref: { type: 'integer', description: 'Element number from browser_get_page.' },
+          text: { type: 'string', description: 'Visible text of the element.' },
+          selector: { type: 'string', description: 'CSS selector.' }
+        }
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'browser_fill',
+      description:
+        'Type a value into an input/textarea/editor, pick a dropdown option (by its visible text), or set a checkbox/radio (value "true"/"false"). ' +
+        'Target it with { ref: N } from browser_get_page (preferred), { label } (visible label/placeholder), or { selector } (CSS). Add pressEnter:true to submit right after (search boxes, login forms).',
+      parameters: {
+        type: 'object',
+        properties: {
+          ref: { type: 'integer', description: 'Field number from browser_get_page (preferred).' },
           label: { type: 'string', description: 'Visible field label or placeholder.' },
-          selector: { type: 'string', description: 'CSS selector of input.' },
-          value: { type: 'string', description: 'Value to type into the field.' }
+          selector: { type: 'string', description: 'CSS selector of the input.' },
+          value: { type: 'string', description: 'Value to type / option text to choose / "true" or "false" for checkboxes.' },
+          pressEnter: { type: 'boolean', description: 'Press Enter after filling (submit).' }
         },
         required: ['value']
       }
@@ -104,10 +158,15 @@ export const toolSpecs = [
     type: 'function',
     function: {
       name: 'browser_screenshot',
-      description: 'Take a screenshot of the browser page (viewport or full page).',
+      description:
+        'Take a screenshot of the browser page so you can SEE it. Pass annotate:true to draw each clickable element\'s number [N] on the image — then click by { ref: N }. ' +
+        'Pass fullPage:true for the whole scrollable page (not combinable with annotate).',
       parameters: {
         type: 'object',
-        properties: { fullPage: { type: 'boolean', description: 'Capture full scrollable page.' } }
+        properties: {
+          fullPage: { type: 'boolean', description: 'Capture the full scrollable page.' },
+          annotate: { type: 'boolean', description: 'Number every clickable element on the image (Set-of-Mark).' }
+        }
       }
     }
   },
@@ -115,12 +174,13 @@ export const toolSpecs = [
     type: 'function',
     function: {
       name: 'browser_scroll',
-      description: 'Scroll the browser page up, down, top, or bottom.',
+      description: 'Scroll the page (or a specific scrollable element) up, down, top, or bottom to reveal more content / trigger infinite scroll. Then look again with browser_get_page or browser_screenshot.',
       parameters: {
         type: 'object',
         properties: {
           direction: { type: 'string', enum: ['up', 'down', 'top', 'bottom'], description: 'Scroll direction' },
-          amount: { type: 'number', description: 'Pixels to scroll (default 600)' }
+          amount: { type: 'number', description: 'Pixels to scroll (default ~one screen)' },
+          selector: { type: 'string', description: 'CSS selector of a scrollable panel to scroll instead of the page.' }
         }
       }
     }
@@ -129,12 +189,15 @@ export const toolSpecs = [
     type: 'function',
     function: {
       name: 'browser_press_key',
-      description: 'Send keystrokes or shortcuts (e.g. Enter, Control+A, Control+V) or type text.',
+      description:
+        'Send real keystrokes to whatever has focus — the way to type into editors with no form field (Google Docs, Notion, code editors): click into it first, then call this. ' +
+        '{ text } types literally; { keys } presses one combo ("Enter", "Control+A", "Tab", "ArrowDown", "Escape"); { sequence } presses several in order.',
       parameters: {
         type: 'object',
         properties: {
           text: { type: 'string', description: 'Text to type' },
-          keys: { type: 'string', description: 'Shortcut or special key name (e.g. Enter, Control+V)' }
+          keys: { type: 'string', description: 'One key or combo, e.g. Enter, Control+V, Shift+Tab' },
+          sequence: { type: 'array', items: { type: 'string' }, description: 'Several keys/combos to press in order.' }
         }
       }
     }
@@ -143,7 +206,7 @@ export const toolSpecs = [
     type: 'function',
     function: {
       name: 'browser_list_tabs',
-      description: 'List all open browser tabs and windows.',
+      description: 'List all open browser tabs with their tabId, URL, title and which one is active.',
       parameters: { type: 'object', properties: {} }
     }
   },
@@ -151,7 +214,7 @@ export const toolSpecs = [
     type: 'function',
     function: {
       name: 'browser_use_tab',
-      description: 'Switch active control to a specific tab ID.',
+      description: 'Switch which tab your browser actions act on (tabId from browser_list_tabs).',
       parameters: {
         type: 'object',
         properties: { tabId: { type: 'number', description: 'Target tab ID' } },
@@ -187,7 +250,7 @@ export const toolSpecs = [
     type: 'function',
     function: {
       name: 'browser_wait_for',
-      description: 'Wait until a selector or visible text appears on the page (for SPAs, lazy content).',
+      description: 'Wait until a CSS selector or visible text appears on the page (any frame) — for SPAs, spinners, search results, post-login redirects. Errors with a clear message on timeout.',
       parameters: {
         type: 'object',
         properties: {
@@ -202,7 +265,7 @@ export const toolSpecs = [
     type: 'function',
     function: {
       name: 'browser_wait_for_navigation',
-      description: 'Wait for a page navigation to complete after a click or action that triggers a page load.',
+      description: 'Wait for a slow page load / redirect chain to finish. Clicks already wait for the navigation they trigger, so you rarely need this.',
       parameters: {
         type: 'object',
         properties: {
@@ -215,7 +278,7 @@ export const toolSpecs = [
     type: 'function',
     function: {
       name: 'browser_close_tab',
-      description: 'Close the current browser tab (opens about:blank if it would close the last tab).',
+      description: 'Close the current browser tab (returns to the tab that opened it, or opens about:blank if it was the last).',
       parameters: { type: 'object', properties: {} }
     }
   },
@@ -644,7 +707,7 @@ export async function executeTool(name, args = {}) {
       // Browser
       case 'browser_navigate': {
         const r = await browser.browserNavigate({ url: args.url })
-        return { output: `Navigated to ${r.url} — "${r.title}"` }
+        return { output: browser.formatActionResult(r.partial ? 'Opened (still loading when the timeout hit)' : 'Navigated', { ...r, navigated: false }) }
       }
       case 'browser_get_page': {
         const r = await browser.browserGetPage({ limit: args.limit })
@@ -652,44 +715,70 @@ export async function executeTool(name, args = {}) {
       }
       case 'browser_get_text': {
         const r = await browser.browserGetText({ offset: args.offset })
-        const more = r.nextOffset != null ? `\n\n…(${r.totalChars - r.nextOffset} more chars available)` : ''
+        const more = r.nextOffset != null ? `\n\n…(${r.totalChars - r.nextOffset} more chars — call again with offset: ${r.nextOffset})` : ''
         return { output: `# ${r.title}\n${r.url}\n\n${r.text}${more}` }
+      }
+      case 'browser_find': {
+        const r = await browser.browserFind({ text: args.text, limit: args.limit })
+        if (!r.count) return { output: `"${args.text}" was not found on the page.` }
+        return {
+          output:
+            `${r.count} match${r.count === 1 ? '' : 'es'} for "${args.text}"${r.scrolled ? ' (scrolled the first one into view)' : ''}:\n` +
+            r.matches.map((m, i) => `${i + 1}. ${m}`).join('\n')
+        }
       }
       case 'browser_click': {
         const r = await browser.browserClick({
+          ref: args.ref,
           selector: args.selector,
           text: args.text,
           double: args.double,
           button: args.button
         })
-        return { output: `Clicked ${args.text ? `"${args.text}"` : args.selector} — now at ${r.url}` }
+        const what = args.ref != null ? `[${args.ref}]` : args.text ? `"${args.text}"` : args.selector
+        return { output: browser.formatActionResult(`Clicked ${what}`, r) }
       }
       case 'browser_click_at': {
         const r = await browser.browserClickAt({ x: args.x, y: args.y })
-        return { output: `Clicked at (${args.x}, ${args.y}) — now at ${r.url}` }
+        return { output: browser.formatActionResult(`Clicked at (${args.x}, ${args.y})`, r) }
+      }
+      case 'browser_hover': {
+        const r = await browser.browserHover({ ref: args.ref, selector: args.selector, text: args.text })
+        const what = args.ref != null ? `[${args.ref}]` : args.text ? `"${args.text}"` : args.selector
+        return { output: browser.formatActionResult(`Hovering ${what}`, r) }
       }
       case 'browser_drag': {
         const r = await browser.browserDrag(args)
-        return { output: `Dragged (${r.mode}) — now at ${r.url}` }
+        return { output: browser.formatActionResult(`Dragged (${r.mode})`, r) }
       }
       case 'browser_fill': {
-        await browser.browserFill({ selector: args.selector, label: args.label, value: args.value })
-        return { output: `Filled ${args.label ? `field "${args.label}"` : args.selector} with value.` }
+        const r = await browser.browserFill({
+          ref: args.ref,
+          selector: args.selector,
+          label: args.label,
+          value: args.value,
+          pressEnter: args.pressEnter
+        })
+        const what = args.ref != null ? `[${args.ref}]` : args.label ? `field "${args.label}"` : args.selector
+        return { output: browser.formatActionResult(`Filled ${what}${args.pressEnter ? ' and pressed Enter' : ''}`, r) }
       }
       case 'browser_screenshot': {
-        const r = await browser.browserScreenshot({ fullPage: args.fullPage })
+        const r = await browser.browserScreenshot({ fullPage: args.fullPage, annotate: args.annotate })
+        const legend = r.marks ? `\nNumbered elements: ${browser.formatMarks(r.marks)}` : ''
         return {
-          output: `Screenshot captured (${args.fullPage ? 'full page' : 'viewport'})`,
+          output: `Screenshot captured (${r.marks ? `annotated — ${r.marks.length} elements numbered` : args.fullPage ? 'full page' : 'viewport'})${legend}`,
           image: `data:image/png;base64,${r.base64}`
         }
       }
       case 'browser_scroll': {
-        const r = await browser.browserScroll({ direction: args.direction, amount: args.amount })
-        return { output: `Scrolled ${args.direction || 'down'} (${r.scrolledY}px)` }
+        const r = await browser.browserScroll({ direction: args.direction, amount: args.amount, selector: args.selector })
+        return { output: `Scrolled ${args.direction || 'down'} (now at ${r.scrollY}px)` }
       }
       case 'browser_press_key': {
-        await browser.browserPressKey({ text: args.text, keys: args.keys })
-        return { output: `Key event sent: ${args.text || args.keys}` }
+        const keys = Array.isArray(args.sequence) && args.sequence.length ? args.sequence : args.keys
+        const r = await browser.browserPressKey({ text: args.text, keys })
+        const did = [args.text ? 'Typed text' : null, keys ? `pressed ${Array.isArray(keys) ? keys.join(', ') : keys}` : null].filter(Boolean).join('; ')
+        return { output: browser.formatActionResult(did || 'Sent keystrokes', r) }
       }
       case 'browser_list_tabs': {
         const r = await browser.browserListTabs()
@@ -699,37 +788,37 @@ export async function executeTool(name, args = {}) {
         return { output: text }
       }
       case 'browser_use_tab': {
-        browser.setTargetTab(args.tabId)
-        return { output: `Target tab set to ${args.tabId}` }
+        const r = await browser.useTab(args.tabId)
+        return { output: r.pinned ? browser.formatActionResult(`Acting on tab ${r.tabId}`, r) : 'Unpinned — using the default tab.' }
       }
       case 'browser_go_back': {
         const r = await browser.browserGoBack()
-        return { output: `Went back — ${r.url}` }
+        return { output: browser.formatActionResult('Went back', { ...r, navigated: false }) }
       }
       case 'browser_go_forward': {
         const r = await browser.browserGoForward()
-        return { output: `Went forward — ${r.url}` }
+        return { output: browser.formatActionResult('Went forward', { ...r, navigated: false }) }
       }
       case 'browser_reload': {
         const r = await browser.browserReload()
-        return { output: `Reloaded — ${r.url}` }
+        return { output: browser.formatActionResult('Reloaded', { ...r, navigated: false }) }
       }
       case 'browser_wait_for': {
         const r = await browser.browserWaitFor({ selector: args.selector, text: args.text, timeoutMs: args.timeoutMs })
-        return { output: `Found ${args.selector ? `selector ${args.selector}` : `text "${args.text}"`}` }
+        return { output: `Found ${args.selector ? `selector ${args.selector}` : `text "${args.text}"`} — at ${r.url}` }
       }
       case 'browser_wait_for_navigation': {
         const r = await browser.browserWaitForNavigation({ timeoutMs: args.timeoutMs })
-        return { output: `Navigation complete — ${r.url}` }
+        return { output: browser.formatActionResult(r.navigated ? 'Navigation complete' : 'No navigation happened', { ...r, navigated: false }) }
       }
       case 'browser_close_tab': {
         const r = await browser.browserCloseTab()
-        return { output: `Closed tab — ${r.url || 'about:blank'}` }
+        return { output: browser.formatActionResult('Closed tab', r) }
       }
       case 'browser_read_pages': {
         const r = await browser.browserReadPages({ urls: args.urls, keepOpen: args.keepOpen })
         const text = (r.pages || [])
-          .map((p, i) => `## [${i + 1}] ${p.title || p.url}\n${p.url}\n${(p.text || '').slice(0, 5000)}`)
+          .map((p, i) => `## [${i + 1}] ${p.title || p.url}\n${p.url}\n${p.error ? `(could not read: ${p.error})` : (p.text || '').slice(0, 5000)}`)
           .join('\n\n---\n\n')
         return { output: text || 'No page content retrieved.' }
       }
