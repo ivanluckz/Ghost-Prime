@@ -1,4 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
+import { applyAccent, resetAccent, getSavedHue, DEFAULT_HUE } from '../theme.js'
+
+// A few one-tap accent presets (hue degrees) alongside the free hue slider.
+const HUE_SWATCHES = [188, 210, 260, 300, 330, 12, 45, 150]
 
 // Turn a browser keydown into an Electron accelerator (e.g. "CommandOrControl+Shift+G").
 function normalizeKey(e) {
@@ -48,7 +52,31 @@ export default function SettingsPanel({ onClose, mirror, onMirrorChange, onChats
   const [hkError, setHkError] = useState('')
   const [memCount, setMemCount] = useState(null)
   const [confirm, setConfirm] = useState('') // '' | 'chats' | 'memory' — two-step danger confirm
+  const [hue, setHue] = useState(getSavedHue() ?? DEFAULT_HUE)
+  const [memList, setMemList] = useState(null) // null = not loaded; [] = loaded, empty
   const ref = useRef(null)
+
+  function changeHue(h) {
+    setHue(h)
+    applyAccent(h)
+  }
+  function resetHue() {
+    resetAccent()
+    setHue(DEFAULT_HUE)
+  }
+
+  function loadMemories() {
+    window.ghost
+      .allMemories?.()
+      .then((rows) => setMemList(rows || []))
+      .catch(() => setMemList([]))
+  }
+  function deleteOneMemory(id) {
+    window.ghost.deleteMemory?.(id).then(() => {
+      setMemList((prev) => (prev || []).filter((m) => m.id !== id))
+      setMemCount((c) => (c == null ? c : Math.max(0, c - 1)))
+    })
+  }
 
   useEffect(() => {
     window.ghost.browserTarget?.get().then(setTarget).catch(() => {})
@@ -238,6 +266,37 @@ export default function SettingsPanel({ onClose, mirror, onMirrorChange, onChats
       </section>
 
       <section className="set-section">
+        <div className="set-title">Accent colour</div>
+        <p className="set-note">Recolour the HUD accent. The 3D core adopts a new colour on next launch.</p>
+        <div className="set-swatches">
+          {HUE_SWATCHES.map((h) => (
+            <button
+              key={h}
+              className={`set-swatch${Math.round(hue) === h ? ' on' : ''}`}
+              style={{ background: `hsl(${h}, 92%, 60%)` }}
+              onClick={() => changeHue(h)}
+              aria-label={`Accent hue ${h}`}
+            />
+          ))}
+        </div>
+        <input
+          type="range"
+          min="0"
+          max="359"
+          value={Math.round(hue)}
+          className="set-hue"
+          onChange={(e) => changeHue(Number(e.target.value))}
+          style={{ accentColor: `hsl(${hue}, 92%, 60%)` }}
+        />
+        <div className="set-hotkey" style={{ marginTop: 6 }}>
+          <kbd className="hk-combo" style={{ color: `hsl(${hue}, 92%, 66%)` }}>
+            hue {Math.round(hue)}°
+          </kbd>
+          <button onClick={resetHue}>Reset</button>
+        </div>
+      </section>
+
+      <section className="set-section">
         <div className="set-title">Wake-up shortcut</div>
         <p className="set-note">Press this from anywhere to summon Ghost-Prime and jump straight to the input.</p>
         <div className="set-hotkey">
@@ -280,6 +339,28 @@ export default function SettingsPanel({ onClose, mirror, onMirrorChange, onChats
         )}
         <div className="set-sub">Blocked sites</div>
         <DomainList list="block" value={blockInput} onValue={setBlockInput} />
+      </section>
+
+      <section className="set-section">
+        <div className="set-title">Memory{memCount ? ` (${memCount})` : ''}</div>
+        <p className="set-note">Everything Ghost has remembered about you across chats. Delete anything you don’t want kept.</p>
+        {memList === null ? (
+          <button onClick={loadMemories}>Show what Ghost remembers</button>
+        ) : memList.length === 0 ? (
+          <p className="set-empty">Nothing remembered yet.</p>
+        ) : (
+          <div className="set-memlist">
+            {memList.map((m) => (
+              <div className="set-memrow" key={m.id}>
+                <span className="set-memtype">{m.type}</span>
+                <span className="set-memtext">{m.content}</span>
+                <button className="set-memdel" onClick={() => deleteOneMemory(m.id)} aria-label="Delete this memory">
+                  ×
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
       </section>
 
       <section className="set-section set-danger">

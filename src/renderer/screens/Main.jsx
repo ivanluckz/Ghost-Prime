@@ -6,11 +6,20 @@ import SettingsPanel from '../components/SettingsPanel.jsx'
 import ActivityPanel from '../components/ActivityPanel.jsx'
 import TerminalPanel from '../components/TerminalPanel.jsx'
 import { playActivate, isMuted, toggleMuted, onMuteChange } from '../audio.js'
+import { initAccent } from '../theme.js'
 
 // Build identity, injected by electron.vite.config.js — shown in the topbar so it's obvious which
 // build is live (the stamp changes every rebuild). typeof guard keeps it safe if not defined.
 const GHOST_VERSION = typeof __GHOST_VERSION__ !== 'undefined' ? __GHOST_VERSION__ : '0.0.0'
 const GHOST_BUILD = typeof __GHOST_BUILD__ !== 'undefined' ? __GHOST_BUILD__ : ''
+
+const pick = (a) => a[Math.floor(Math.random() * a.length)]
+
+// Files you can drop into the chat. Text-like files are inlined into the message (works with any
+// brain); images are sent to the vision model. Others are declined with a note.
+const TEXT_EXT = /\.(txt|md|markdown|json|jsonl|csv|tsv|log|ya?ml|xml|html?|css|scss|js|jsx|ts|tsx|mjs|cjs|py|rb|go|rs|java|kt|c|h|cpp|cc|hpp|cs|php|sh|bash|zsh|sql|toml|ini|cfg|conf|env|gitignore|dockerfile|makefile|svg|vue|svelte|astro)$/i
+const MAX_TEXT_BYTES = 120 * 1024 // 120 KB of inlined text per file
+const MAX_IMG_BYTES = 6 * 1024 * 1024 // 6 MB per image
 
 // Autonomy modes, cycled with Shift+Tab (like Claude Code).
 const MODES = [
@@ -39,12 +48,30 @@ export default function Main() {
   const [muted, setMutedState] = useState(isMuted()) // master sound mute (intro sting + sfx)
   const [shellSessions, setShellSessions] = useState([]) // live terminals (shared with the agent)
   const [termOpen, setTermOpen] = useState(false) // terminal dock visible
+  const [attachments, setAttachments] = useState([]) // dropped files pending on the next message
+  const [dragOver, setDragOver] = useState(false) // show the drop overlay while a file is over the window
+  const [dropNote, setDropNote] = useState('') // transient message about a rejected/too-big drop
   const prevShellCount = useRef(0)
   const voiceOutRef = useRef(false)
   const sendRef = useRef(null) // latest send(), so externally-pushed tasks avoid a stale closure
+  const ackedRef = useRef(new Set()) // reqIds we've already spoken an instant "on it" for
+
+  // A short, tool-aware "instant acknowledgment" spoken the moment a task reaches for a tool, so
+  // there's no silent wait while it works. The finished reply is spoken separately afterwards.
+  const ackFor = (name = '') => {
+    if (name.includes('browser')) return pick(['On it — checking that now.', 'Let me pull that up.', 'Looking now.'])
+    if (name.includes('shell')) return pick(['On it — running that.', 'Working on it.', 'Give me a second.'])
+    if (name.includes('file') || name.includes('undo')) return pick(['On it — handling those files.', 'Working on it.'])
+    if (name.includes('reminder')) return 'Setting that up.'
+    if (name.includes('memory')) return 'One sec.'
+    return pick(['On it.', 'Working on it.', 'Give me a moment.', 'Let me take care of that.'])
+  }
 
   const busy = Object.keys(running).length > 0
   const refreshSessions = () => window.ghost.recentSessions().then(setSessions).catch(() => {})
+
+  // Apply the saved accent theme as early as possible.
+  useEffect(() => initAccent(), [])
 
   // Initial load: TTS availability, past sessions, current session id.
   useEffect(() => {
@@ -95,6 +122,11 @@ export default function Main() {
 
     // Tool activity — tagged with its request so it sits in the right track.
     const offTool = window.ghost.onTool((ev) => {
+      // Instant acknowledgment: speak once, the first time a task uses a tool (if voice is on).
+      if (ev.kind === 'tool_use' && voiceOutRef.current && ev.requestId && !ackedRef.current.has(ev.requestId)) {
+        ackedRef.current.add(ev.requestId)
+        window.ghost.voice?.speak(ackFor(ev.name || ''))
+      }
       setMessages((prev) => {
         if (ev.kind === 'tool_use') {
           return [
@@ -121,6 +153,7 @@ export default function Main() {
     })
 
     const offDone = window.ghost.onDone(({ requestId }) => {
+      ackedRef.current.delete(requestId)
       setRunning((prev) => {
         const n = { ...prev }
         delete n[requestId]
@@ -147,6 +180,7 @@ export default function Main() {
         }
         return [...prev, { role: 'assistant', content: `⚠️ ${message}`, error: true, reqId: requestId }]
       })
+      ackedRef.current.delete(requestId)
       setRunning((prev) => {
         const n = { ...prev }
         delete n[requestId]
@@ -183,6 +217,26 @@ export default function Main() {
 
   // Right-click "Ask Ghost about this" in Chrome pushes a task up here — run it.
   useEffect(() => window.ghost.onExternalTask?.(({ prompt }) => prompt && sendRef.current?.(prompt)), [])
+
+  // Proactive lines (morning briefing / idle check-ins) and reminders pushed from main — drop them
+  // into the chat as they arrive, and speak them if voice output is on.
+  useEffect(() => {
+    const offP = window.ghost.onProactive?.(({ text, kind }) => {
+      if (!text) return
+      setMessages((prev) => [...prev, { role: 'assistant', content: text, proactive: kind || 'checkin', reqId: `proactive_${Date.now()}` }])
+      if (voiceOutRef.current) window.ghost.voice?.speak(text)
+    })
+    const offR = window.ghost.onReminder?.(({ text }) => {
+      if (!text) return
+      playActivate()
+      setMessages((prev) => [...prev, { role: 'system', content: `⏰ Reminder: ${text}` }])
+      if (voiceOutRef.current) window.ghost.voice?.speak(`Reminder: ${text}`)
+    })
+    return () => {
+      offP?.()
+      offR?.()
+    }
+  }, [])
 
   // Mirror the transcript into Chrome's side panel while mirroring is on. Throttled so a fast
   // token stream doesn't flood the bridge — the panel just needs to keep up, not be frame-perfect.
@@ -387,25 +441,90 @@ export default function Main() {
 
   // Send a prompt to the agent NOW. History is the conversation so far (each task runs sequentially,
   // so by the time we dispatch, prior replies are already in `messages` as context).
-  function dispatch(t) {
+  // --- Dropped-file attachments ------------------------------------------
+  const readText = (file) =>
+    new Promise((resolve) => {
+      const r = new FileReader()
+      r.onload = () => resolve(String(r.result || '').slice(0, MAX_TEXT_BYTES))
+      r.onerror = () => resolve('')
+      r.readAsText(file)
+    })
+  const readDataUrl = (file) =>
+    new Promise((resolve) => {
+      const r = new FileReader()
+      r.onload = () => resolve(String(r.result || ''))
+      r.onerror = () => resolve('')
+      r.readAsDataURL(file)
+    })
+
+  async function addFiles(fileList) {
+    const files = Array.from(fileList || [])
+    if (!files.length) return
+    const added = []
+    let rejected = 0
+    for (const f of files) {
+      const isImg = f.type.startsWith('image/')
+      const isText = f.type.startsWith('text/') || TEXT_EXT.test(f.name)
+      if (isImg) {
+        if (f.size > MAX_IMG_BYTES) { rejected++; continue }
+        added.push({ id: `att_${Date.now()}_${added.length}`, kind: 'image', name: f.name, size: f.size, dataUrl: await readDataUrl(f) })
+      } else if (isText) {
+        added.push({ id: `att_${Date.now()}_${added.length}`, kind: 'text', name: f.name, size: f.size, text: await readText(f) })
+      } else {
+        rejected++
+      }
+    }
+    if (added.length) setAttachments((prev) => [...prev, ...added])
+    if (rejected) {
+      setDropNote(`${rejected} file(s) skipped — only text/code files and images are supported.`)
+      setTimeout(() => setDropNote(''), 4000)
+    }
+  }
+  const removeAttachment = (id) => setAttachments((prev) => prev.filter((a) => a.id !== id))
+  function onDrop(e) {
+    e.preventDefault()
+    setDragOver(false)
+    if (e.dataTransfer?.files?.length) addFiles(e.dataTransfer.files)
+  }
+
+  function dispatch(t, modelContent) {
     playActivate() // swell as the Core powers up for this task
     window.ghost.voice?.stopSpeaking()
     const history = messages
       .filter((m) => m.role === 'user' || m.role === 'assistant')
-      .map(({ role, content }) => ({ role, content }))
-    history.push({ role: 'user', content: t })
+      .map(({ role, content }) => ({ role, content: typeof content === 'string' ? content : String(content) }))
+    history.push({ role: 'user', content: modelContent ?? t }) // model may receive rich (array) content
     const reqId = window.ghost.sendMessage(history, mode, agent)
-    setMessages((prev) => [...prev, { role: 'user', content: t, reqId }])
+    setMessages((prev) => [...prev, { role: 'user', content: t, reqId }]) // chat shows the display string
     setRunning({ [reqId]: { prompt: t, startedAt: Date.now() } }) // exactly one task at a time
   }
 
   // One task runs at a time. If something's already running (or queued), this message waits its turn.
   function send(text) {
-    const t = text.trim()
-    if (!t) return
-    if (runCommand(t)) return // a "/" command — handled locally, nothing goes to the agent
-    if (Object.keys(running).length > 0 || queue.length > 0) setQueue((q) => [...q, t])
-    else dispatch(t)
+    const t = (text || '').trim()
+    if (!t && attachments.length === 0) return
+    if (t && runCommand(t)) return // a "/" command — handled locally, nothing goes to the agent
+
+    const textFiles = attachments.filter((a) => a.kind === 'text')
+    const imgs = attachments.filter((a) => a.kind === 'image')
+    // Text files are inlined so any brain can read them; images ride along as vision content.
+    let modelText = t
+    for (const f of textFiles) modelText += `\n\n[Attached file: ${f.name}]\n\`\`\`\n${f.text}\n\`\`\``
+    const display = t + (attachments.length ? (t ? '\n' : '') + attachments.map((a) => `📎 ${a.name}`).join('   ') : '')
+    setAttachments([])
+
+    const busy = Object.keys(running).length > 0 || queue.length > 0
+    if (imgs.length && !busy) {
+      const modelContent = [
+        { type: 'text', text: modelText || 'Look at the attached image(s).' },
+        ...imgs.map((a) => ({ type: 'image_url', image_url: { url: a.dataUrl } }))
+      ]
+      dispatch(display, modelContent)
+    } else if (busy) {
+      setQueue((q) => [...q, modelText + (imgs.length ? '\n(note: dropped images weren’t queued — resend when idle)' : '')])
+    } else {
+      dispatch(display || modelText, modelText)
+    }
   }
   sendRef.current = send
 
@@ -422,7 +541,24 @@ export default function Main() {
   const tools = messages.filter((m) => m.role === 'tool') // fed to the Mission Control activity panel
 
   return (
-    <div className="main fade-in">
+    <div
+      className="main fade-in"
+      onDragOver={(e) => {
+        if (e.dataTransfer?.types?.includes('Files')) {
+          e.preventDefault()
+          setDragOver(true)
+        }
+      }}
+      onDragLeave={(e) => {
+        if (e.currentTarget === e.target) setDragOver(false)
+      }}
+      onDrop={onDrop}
+    >
+      {dragOver && (
+        <div className="drop-overlay">
+          <div className="drop-overlay-inner">⬇ Drop files to attach — text &amp; code inline, images sent to vision</div>
+        </div>
+      )}
       <SessionSidebar
         sessions={sessions}
         activeId={activeId}
@@ -562,6 +698,24 @@ export default function Main() {
         )}
         <MessageList messages={messages} onExample={send} runningIds={runningIds} />
         {termOpen && <TerminalPanel sessions={shellSessions} onClose={() => setTermOpen(false)} />}
+        {dropNote && <div className="drop-note">{dropNote}</div>}
+        {attachments.length > 0 && (
+          <div className="attach-row">
+            {attachments.map((a) => (
+              <span className={`attach-chip ${a.kind}`} key={a.id} title={a.name}>
+                {a.kind === 'image' ? (
+                  <img className="attach-thumb" src={a.dataUrl} alt="" />
+                ) : (
+                  <span className="attach-ico">📄</span>
+                )}
+                <span className="attach-name">{a.name}</span>
+                <button className="attach-del" onClick={() => removeAttachment(a.id)} aria-label={`Remove ${a.name}`}>
+                  ×
+                </button>
+              </span>
+            ))}
+          </div>
+        )}
         <ChatInput onSend={send} busy={busy} />
       </div>
       {activityOpen && (

@@ -2630,3 +2630,161 @@ html.native-frame .sidebar-head {
   background: var(--mint);
   box-shadow: 0 0 7px var(--mint);
 }
+
+/* --- Settings: accent theming + memory panel (MARK-inspired) --------------- */
+.set-swatches {
+  display: flex;
+  gap: 8px;
+  margin: 8px 0 10px;
+  flex-wrap: wrap;
+}
+.set-swatch {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  border: 2px solid transparent;
+  cursor: pointer;
+  padding: 0;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+  transition: transform 0.12s var(--ease-out), border-color 0.12s;
+}
+.set-swatch:hover {
+  transform: scale(1.12);
+}
+.set-swatch.on {
+  border-color: var(--ink);
+}
+.set-hue {
+  width: 100%;
+  cursor: pointer;
+}
+.set-memlist {
+  margin-top: 8px;
+  max-height: 220px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  scrollbar-width: thin;
+}
+.set-memrow {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 7px 9px;
+  border-radius: var(--r-sm);
+  background: var(--glass-soft);
+  border: 1px solid var(--hairline);
+}
+.set-memtype {
+  flex: 0 0 auto;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--accent);
+  padding-top: 2px;
+  opacity: 0.85;
+}
+.set-memtext {
+  flex: 1;
+  font-size: 12.5px;
+  line-height: 1.4;
+  color: var(--ink-dim);
+  word-break: break-word;
+}
+.set-memdel {
+  flex: 0 0 auto;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  border: none;
+  cursor: pointer;
+  background: rgba(255, 93, 122, 0.14);
+  color: var(--error);
+  line-height: 1;
+  font-size: 14px;
+}
+.set-memdel:hover {
+  background: rgba(255, 93, 122, 0.28);
+}
+
+/* --- Drag & drop files into the chat --------------------------------------- */
+.drop-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 60;
+  display: grid;
+  place-items: center;
+  background: rgba(3, 5, 12, 0.6);
+  backdrop-filter: var(--blur-soft);
+  border-radius: 26px;
+  pointer-events: none;
+  animation: fadeIn 0.12s var(--ease-out);
+}
+.drop-overlay-inner {
+  padding: 22px 30px;
+  border-radius: var(--r-lg);
+  border: 2px dashed var(--accent);
+  background: var(--glass);
+  color: var(--ink);
+  font-size: 15px;
+  box-shadow: var(--glow-cyan);
+}
+.drop-note {
+  margin: 0 14px 6px;
+  padding: 6px 10px;
+  border-radius: var(--r-sm);
+  font-size: 12px;
+  color: var(--ink-dim);
+  background: var(--glass-soft);
+  border: 1px solid var(--hairline);
+}
+.attach-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 0 14px 8px;
+}
+.attach-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  max-width: 220px;
+  padding: 5px 8px 5px 6px;
+  border-radius: var(--r-sm);
+  background: var(--glass-soft);
+  border: 1px solid var(--hairline);
+  font-size: 12px;
+  color: var(--ink-dim);
+}
+.attach-thumb {
+  width: 26px;
+  height: 26px;
+  border-radius: 6px;
+  object-fit: cover;
+  flex: 0 0 auto;
+}
+.attach-ico {
+  font-size: 15px;
+}
+.attach-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.attach-del {
+  flex: 0 0 auto;
+  width: 18px;
+  height: 18px;
+  border: none;
+  border-radius: 50%;
+  cursor: pointer;
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--ink-dim);
+  line-height: 1;
+  font-size: 13px;
+}
+.attach-del:hover {
+  background: rgba(255, 93, 122, 0.24);
+  color: var(--error);
+}
