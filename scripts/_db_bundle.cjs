@@ -29,15 +29,22 @@ var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: tru
 // src/main/memory/db.js
 var db_exports = {};
 __export(db_exports, {
+  addReminder: () => addReminder,
   allMemories: () => allMemories,
+  cancelReminder: () => cancelReminder,
   clearAllMemory: () => clearAllMemory,
   deleteAllSessions: () => deleteAllSessions,
+  deleteMemory: () => deleteMemory,
   deleteSession: () => deleteSession,
+  dueReminders: () => dueReminders,
+  getPref: () => getPref,
   getSessionId: () => getSessionId,
   initDb: () => initDb,
+  markReminderFired: () => markReminderFired,
   markSessionSummarized: () => markSessionSummarized,
   memoryDigest: () => memoryDigest,
   newSession: () => newSession,
+  pendingReminders: () => pendingReminders,
   recallMemories: () => recallMemories,
   recentSessions: () => recentSessions,
   saveMemory: () => saveMemory,
@@ -46,6 +53,7 @@ __export(db_exports, {
   sessionSummaryMemories: () => sessionSummaryMemories,
   sessionSummaryState: () => sessionSummaryState,
   setActiveSession: () => setActiveSession,
+  setPref: () => setPref,
   startSession: () => startSession
 });
 module.exports = __toCommonJS(db_exports);
@@ -70,6 +78,12 @@ function initDb(appRoot = import_electron.app.getAppPath()) {
   if (!hasCol("memories", "expires_at")) db.exec("ALTER TABLE memories ADD COLUMN expires_at INTEGER");
   if (!hasCol("sessions", "summarized_at")) db.exec("ALTER TABLE sessions ADD COLUMN summarized_at INTEGER");
   if (!hasCol("sessions", "summary_count")) db.exec("ALTER TABLE sessions ADD COLUMN summary_count INTEGER");
+  db.exec(
+    `CREATE TABLE IF NOT EXISTS reminders (
+       id TEXT PRIMARY KEY, text TEXT NOT NULL, due_at INTEGER NOT NULL,
+       created_at INTEGER NOT NULL, fired INTEGER DEFAULT 0
+     )`
+  );
   db.prepare("DELETE FROM memories WHERE expires_at IS NOT NULL AND expires_at < ?").run(Date.now());
   return db;
 }
@@ -230,17 +244,66 @@ function clearAllMemory() {
   if (!db) return 0;
   return db.prepare("DELETE FROM memories").run().changes;
 }
+function getPref(key, fallback = null) {
+  if (!db) return fallback;
+  const row = db.prepare("SELECT value FROM preferences WHERE key = ?").get(key);
+  return row ? row.value : fallback;
+}
+function setPref(key, value) {
+  if (!db) return;
+  db.prepare(
+    "INSERT INTO preferences (key, value, updated_at) VALUES (?, ?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at"
+  ).run(key, String(value), Date.now());
+}
+function deleteMemory(id) {
+  if (!db || !id) return false;
+  return db.prepare("DELETE FROM memories WHERE id = ?").run(id).changes > 0;
+}
+function addReminder(text, dueAt) {
+  if (!db || !text || !dueAt) return null;
+  const id = (0, import_node_crypto.randomUUID)();
+  db.prepare("INSERT INTO reminders (id, text, due_at, created_at, fired) VALUES (?, ?, ?, ?, 0)").run(
+    id,
+    String(text),
+    dueAt,
+    Date.now()
+  );
+  return id;
+}
+function dueReminders(now = Date.now()) {
+  if (!db) return [];
+  return db.prepare("SELECT id, text, due_at FROM reminders WHERE fired = 0 AND due_at <= ? ORDER BY due_at ASC").all(now);
+}
+function pendingReminders() {
+  if (!db) return [];
+  return db.prepare("SELECT id, text, due_at FROM reminders WHERE fired = 0 ORDER BY due_at ASC").all();
+}
+function markReminderFired(id) {
+  if (!db || !id) return;
+  db.prepare("UPDATE reminders SET fired = 1 WHERE id = ?").run(id);
+}
+function cancelReminder(id) {
+  if (!db || !id) return false;
+  return db.prepare("DELETE FROM reminders WHERE id = ?").run(id).changes > 0;
+}
 // Annotate the CommonJS export names for ESM import in node:
 0 && (module.exports = {
+  addReminder,
   allMemories,
+  cancelReminder,
   clearAllMemory,
   deleteAllSessions,
+  deleteMemory,
   deleteSession,
+  dueReminders,
+  getPref,
   getSessionId,
   initDb,
+  markReminderFired,
   markSessionSummarized,
   memoryDigest,
   newSession,
+  pendingReminders,
   recallMemories,
   recentSessions,
   saveMemory,
@@ -249,5 +312,6 @@ function clearAllMemory() {
   sessionSummaryMemories,
   sessionSummaryState,
   setActiveSession,
+  setPref,
   startSession
 });

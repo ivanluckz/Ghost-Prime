@@ -61,8 +61,26 @@ contextBridge.exposeInMainWorld('ghost', {
   memoryCount() {
     return ipcRenderer.invoke('db:memory-count')
   },
+  allMemories() {
+    return ipcRenderer.invoke('db:all-memories')
+  },
+  deleteMemory(id) {
+    return ipcRenderer.invoke('db:delete-memory', id)
+  },
   clearMemory() {
     return ipcRenderer.invoke('db:clear-memory')
+  },
+  // Proactive lines (morning briefing / idle check-ins) pushed from main.
+  onProactive(cb) {
+    const listener = (_e, payload) => cb(payload)
+    ipcRenderer.on('proactive-message', listener)
+    return () => ipcRenderer.removeListener('proactive-message', listener)
+  },
+  // A scheduled reminder came due.
+  onReminder(cb) {
+    const listener = (_e, payload) => cb(payload)
+    ipcRenderer.on('reminder-fired', listener)
+    return () => ipcRenderer.removeListener('reminder-fired', listener)
   },
   onFocusInput(cb) {
     const listener = () => cb()

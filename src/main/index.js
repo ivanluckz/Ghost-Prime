@@ -1,10 +1,12 @@
 import { join } from 'node:path'
 import { writeFileSync } from 'node:fs'
-import { app, BrowserWindow, ipcMain, globalShortcut } from 'electron'
+import { app, BrowserWindow, ipcMain, globalShortcut, Notification } from 'electron'
 import dotenv from 'dotenv'
 import { initDb, startSession, getSessionId } from './memory/db.js'
 import { registerIpc } from './ipc.js'
 import { maybeSummarizeSession } from './memory/auto-summary.js'
+import { initReminders, stopReminders } from './tools/reminders.js'
+import { initProactive, stopProactive } from './proactive.js'
 import { startBridge, onBridgeTask, watchExtensionForReload } from './tools/browser-bridge.js'
 import { initHotkey } from './hotkey.js'
 import { killAll as killAllShells } from './tools/shell-sessions.js'
@@ -144,6 +146,21 @@ app.whenReady().then(() => {
   registerIpc()
   startBridge() // local HTTP bridge for the Chrome extension (drives your real browser)
   startDiscord() // Discord relay — only live while Ghost-Prime runs; no-op unless DISCORD_BOT_TOKEN is set
+
+  // Reminders: fire a desktop notification + tell the renderer (which speaks it if voice is on).
+  initReminders({
+    onFire: (r) => {
+      try {
+        if (Notification.isSupported()) new Notification({ title: 'Ghost-Prime · Reminder', body: r.text }).show()
+      } catch {}
+      mainWindow?.webContents?.send('reminder-fired', { text: r.text })
+      if (mainWindow?.isMinimized()) mainWindow.restore()
+    }
+  })
+  // Proactive: morning briefing + idle check-ins pushed into the chat as assistant lines.
+  initProactive({
+    onMessage: (text, meta) => mainWindow?.webContents?.send('proactive-message', { text, ...(meta || {}) })
+  })
   // Tasks pushed up from the extension (right-click "Ask Ghost about this") → summon + run.
   onBridgeTask((prompt) => {
     if (!mainWindow) return
@@ -198,6 +215,8 @@ app.on('will-quit', () => {
   globalShortcut.unregisterAll()
   killAllShells() // terminate any live PTY shells so they don't orphan
   stopDiscord() // take the bot offline with the app
+  stopReminders()
+  stopProactive()
 })
 
 app.on('window-all-closed', () => {

@@ -10,8 +10,10 @@ import {
   deleteSession,
   deleteAllSessions,
   clearAllMemory,
-  allMemories
+  allMemories,
+  deleteMemory
 } from './memory/db.js'
+import { noteActivity } from './proactive.js'
 import * as voice from './voice/index.js'
 import { getActiveTabMode, setActiveTabMode } from './tools/browser.js'
 import { getPolicy, setPolicy } from './tools/site-policy.js'
@@ -23,6 +25,17 @@ import { maybeSummarizeSession } from './memory/auto-summary.js'
 // requestId -> AbortController, so the renderer can cancel an in-flight stream.
 const controllers = new Map()
 
+// A user message may be rich content (text + image parts) when files are dropped in. The DB stores
+// plain text, so flatten it — keep the text, note any images.
+function contentToText(content) {
+  if (typeof content === 'string') return content
+  if (Array.isArray(content)) {
+    const parts = content.map((p) => (p?.type === 'text' ? p.text : p?.type === 'image_url' ? '[image]' : ''))
+    return parts.filter(Boolean).join(' ')
+  }
+  return String(content ?? '')
+}
+
 export function registerIpc() {
   ipcMain.handle('chat:send', async (event, { requestId, messages, mode, settings }) => {
     const controller = new AbortController()
@@ -31,7 +44,8 @@ export function registerIpc() {
 
     // Persist the new user message (the last item in the history).
     const lastUser = messages[messages.length - 1]
-    if (lastUser?.role === 'user') saveMessage('user', lastUser.content)
+    if (lastUser?.role === 'user') saveMessage('user', contentToText(lastUser.content))
+    noteActivity() // reset the proactive-idle timer — the user is here
 
     try {
       const full = await streamChat({
@@ -84,6 +98,8 @@ export function registerIpc() {
   ipcMain.handle('db:delete-session', (_event, sessionId) => deleteSession(sessionId))
   ipcMain.handle('db:delete-all-sessions', () => deleteAllSessions())
   ipcMain.handle('db:memory-count', () => allMemories(100000).length)
+  ipcMain.handle('db:all-memories', () => allMemories(500))
+  ipcMain.handle('db:delete-memory', (_event, id) => deleteMemory(id))
   ipcMain.handle('db:clear-memory', () => clearAllMemory())
 
   // --- Voice ---

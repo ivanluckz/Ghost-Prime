@@ -635,6 +635,36 @@ export async function browserClickAt({ x, y } = {}) {
   return { ok: true, url: p.url() }
 }
 
+// Drag-and-drop. Two modes:
+//   • element → element: pass { fromSelector, toSelector } (standard CSS).
+//   • point → point:     pass { from:{x,y}, to:{x,y} } as viewport fractions (0..1) or pixels —
+//     the vision-grounded mode (locate the handle in a screenshot, drag it to the target point).
+// Playwright backend only for now (the active backend when dev-mode extensions are blocked).
+export async function browserDrag({ fromSelector, toSelector, from, to } = {}) {
+  if ((await ensureBrowserBackend()) === 'extension')
+    throw new Error('browser_drag runs on the Playwright backend — set GHOST_BROWSER_BACKEND=playwright.')
+  const p = await ensurePage()
+  if (fromSelector && toSelector) {
+    await p.locator(fromSelector).first().dragTo(p.locator(toSelector).first())
+    return { ok: true, url: p.url(), mode: 'element' }
+  }
+  if (from && to && from.x != null && to.x != null) {
+    const { w, h } = await p.evaluate(() => ({ w: window.innerWidth, h: window.innerHeight }))
+    const toPx = (v, span) => (Number(v) <= 1 ? Number(v) * span : Number(v))
+    const fx = toPx(from.x, w)
+    const fy = toPx(from.y, h)
+    const tx = toPx(to.x, w)
+    const ty = toPx(to.y, h)
+    await p.mouse.move(fx, fy)
+    await p.mouse.down()
+    await p.mouse.move((fx + tx) / 2, (fy + ty) / 2, { steps: 6 }) // move in steps so DnD libs register it
+    await p.mouse.move(tx, ty, { steps: 12 })
+    await p.mouse.up()
+    return { ok: true, url: p.url(), mode: 'point' }
+  }
+  throw new Error('browser_drag needs { fromSelector, toSelector } or { from:{x,y}, to:{x,y} }')
+}
+
 // Scroll the page (or a specific scrollable element) to reveal off-screen content / load more.
 export async function browserScroll({ direction = 'down', amount, selector } = {}) {
   if ((await ensureBrowserBackend()) === 'extension') return bridge.sendCommand('scroll', { direction, amount, selector, ...meta() })

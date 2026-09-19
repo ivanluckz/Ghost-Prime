@@ -4,6 +4,8 @@ import * as files from './files.js'
 import * as web from './web.js'
 import * as jarvis from './jarvis.js'
 import * as screen from './screen.js'
+import * as fileUndo from './file-undo.js'
+import * as reminders from './reminders.js'
 import { saveMemory, recallMemories } from '../memory/db.js'
 import electron from 'electron'
 const { clipboard, Notification } = electron || {}
@@ -552,6 +554,73 @@ export const toolSpecs = [
       description: 'Capture a full desktop screenshot (useful for observing Linux apps outside the browser).',
       parameters: { type: 'object', properties: {} }
     }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'file_move',
+      description: 'Move or rename a file, REVERSIBLY (undo_last puts it back). Prefer this over shell mv for anything the user might undo.',
+      parameters: {
+        type: 'object',
+        properties: { from: { type: 'string', description: 'Source path.' }, to: { type: 'string', description: 'Destination path.' } },
+        required: ['from', 'to']
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'file_delete',
+      description: 'Delete a file, REVERSIBLY — it is snapshotted first so undo_last restores it. Files only.',
+      parameters: { type: 'object', properties: { path: { type: 'string', description: 'File to delete.' } }, required: ['path'] }
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'file_create',
+      description: 'Create a NEW file reversibly (errors if it exists; use file_write to overwrite). undo_last removes it.',
+      parameters: {
+        type: 'object',
+        properties: { path: { type: 'string', description: 'New file path.' }, content: { type: 'string', description: 'Initial content.' } },
+        required: ['path']
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'undo_last',
+      description: 'Take back the most recent reversible file change (move/delete/create/reversible-write). Use when the user says "undo that", "revert", "put it back".',
+      parameters: { type: 'object', properties: {} }
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'undo_list',
+      description: 'Show the stack of file changes that can still be undone (newest first).',
+      parameters: { type: 'object', properties: {} }
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'browser_drag',
+      description:
+        'Drag-and-drop on the page. Element mode: { fromSelector, toSelector } (CSS). Point mode: ' +
+        '{ from:{x,y}, to:{x,y} } as viewport fractions 0..1 (locate the handle in a screenshot, then drag). ' +
+        'Use for sliders, reordering lists, Kanban cards, drag-to-upload zones.',
+      parameters: {
+        type: 'object',
+        properties: {
+          fromSelector: { type: 'string', description: 'CSS selector of the element to drag.' },
+          toSelector: { type: 'string', description: 'CSS selector of the drop target.' },
+          from: { type: 'object', description: 'Start point {x,y} (0..1 fractions or pixels).' },
+          to: { type: 'object', description: 'End point {x,y} (0..1 fractions or pixels).' }
+        }
+      }
+    }
   }
 ]
 
@@ -598,6 +667,10 @@ export async function executeTool(name, args = {}) {
       case 'browser_click_at': {
         const r = await browser.browserClickAt({ x: args.x, y: args.y })
         return { output: `Clicked at (${args.x}, ${args.y}) — now at ${r.url}` }
+      }
+      case 'browser_drag': {
+        const r = await browser.browserDrag(args)
+        return { output: `Dragged (${r.mode}) — now at ${r.url}` }
       }
       case 'browser_fill': {
         await browser.browserFill({ selector: args.selector, label: args.label, value: args.value })
@@ -696,6 +769,18 @@ export async function executeTool(name, args = {}) {
         return { output: res.error || res.matches, isError: !!res.error }
       }
 
+      // Reversible file ops + undo (src/main/tools/file-undo.js) — clear errors bubble to the outer catch.
+      case 'file_move':
+        return { output: await fileUndo.moveFile(args.from, args.to) }
+      case 'file_delete':
+        return { output: await fileUndo.deleteFile(args.path) }
+      case 'file_create':
+        return { output: await fileUndo.createFile(args.path, args.content || '') }
+      case 'undo_last':
+        return { output: await fileUndo.undoLast() }
+      case 'undo_list':
+        return { output: fileUndo.undoList() }
+
       // Web
       case 'web_search': {
         const res = await web.webSearch(args)
@@ -750,17 +835,26 @@ export async function executeTool(name, args = {}) {
         const res = await jarvis.weatherGet(args)
         return { output: JSON.stringify(res, null, 2), isError: !!res.error }
       }
+      // Reminders — DB-backed + fired by the shared scheduler (survive restart; spoken if voice is on).
       case 'reminder_set': {
-        const res = jarvis.reminderSet(args)
-        return { output: res.message || JSON.stringify(res) }
+        try {
+          const { dueAt } = reminders.setReminder({ text: args.text, at: args.at_time, inSeconds: args.delay_seconds })
+          return { output: `Reminder set for ${new Date(dueAt).toLocaleString()}: "${args.text}"` }
+        } catch (e) {
+          return { output: `Could not set reminder: ${e.message}`, isError: true }
+        }
       }
       case 'reminder_list': {
-        const res = jarvis.reminderList()
-        return { output: JSON.stringify(res, null, 2) }
+        const list = reminders.listReminders()
+        return {
+          output: list.length
+            ? list.map((r) => `- ${new Date(r.dueAt).toLocaleString()} — ${r.text}  (id: ${r.id})`).join('\n')
+            : 'No pending reminders.'
+        }
       }
       case 'reminder_cancel': {
-        const res = jarvis.reminderCancel(args)
-        return { output: res.message || res.error, isError: !!res.error }
+        const ok = reminders.cancelReminderById(args.id)
+        return { output: ok ? 'Reminder cancelled.' : 'No such reminder.', isError: !ok }
       }
       case 'youtube_play': {
         const res = await jarvis.youtubePlay(args)

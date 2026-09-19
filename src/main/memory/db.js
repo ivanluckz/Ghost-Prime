@@ -29,6 +29,13 @@ export function initDb(appRoot = app.getAppPath()) {
   // message count — so we only re-summarize a chat once it has grown enough new messages.
   if (!hasCol('sessions', 'summarized_at')) db.exec('ALTER TABLE sessions ADD COLUMN summarized_at INTEGER')
   if (!hasCol('sessions', 'summary_count')) db.exec('ALTER TABLE sessions ADD COLUMN summary_count INTEGER')
+  // Scheduled reminders (fired by the in-process scheduler; survive restarts).
+  db.exec(
+    `CREATE TABLE IF NOT EXISTS reminders (
+       id TEXT PRIMARY KEY, text TEXT NOT NULL, due_at INTEGER NOT NULL,
+       created_at INTEGER NOT NULL, fired INTEGER DEFAULT 0
+     )`
+  )
 
   // Drop memories that have expired since last run.
   db.prepare('DELETE FROM memories WHERE expires_at IS NOT NULL AND expires_at < ?').run(Date.now())
@@ -249,4 +256,53 @@ export function allMemories(limit = 200) {
 export function clearAllMemory() {
   if (!db) return 0
   return db.prepare('DELETE FROM memories').run().changes
+}
+
+// --- Preferences (small key/value store) ---------------------------------
+export function getPref(key, fallback = null) {
+  if (!db) return fallback
+  const row = db.prepare('SELECT value FROM preferences WHERE key = ?').get(key)
+  return row ? row.value : fallback
+}
+export function setPref(key, value) {
+  if (!db) return
+  db.prepare(
+    'INSERT INTO preferences (key, value, updated_at) VALUES (?, ?, ?) ' +
+      'ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at'
+  ).run(key, String(value), Date.now())
+}
+
+// --- Delete a single remembered fact (for the memory panel) ---------------
+export function deleteMemory(id) {
+  if (!db || !id) return false
+  return db.prepare('DELETE FROM memories WHERE id = ?').run(id).changes > 0
+}
+
+// --- Reminders -----------------------------------------------------------
+export function addReminder(text, dueAt) {
+  if (!db || !text || !dueAt) return null
+  const id = randomUUID()
+  db.prepare('INSERT INTO reminders (id, text, due_at, created_at, fired) VALUES (?, ?, ?, ?, 0)').run(
+    id,
+    String(text),
+    dueAt,
+    Date.now()
+  )
+  return id
+}
+export function dueReminders(now = Date.now()) {
+  if (!db) return []
+  return db.prepare('SELECT id, text, due_at FROM reminders WHERE fired = 0 AND due_at <= ? ORDER BY due_at ASC').all(now)
+}
+export function pendingReminders() {
+  if (!db) return []
+  return db.prepare('SELECT id, text, due_at FROM reminders WHERE fired = 0 ORDER BY due_at ASC').all()
+}
+export function markReminderFired(id) {
+  if (!db || !id) return
+  db.prepare('UPDATE reminders SET fired = 1 WHERE id = ?').run(id)
+}
+export function cancelReminder(id) {
+  if (!db || !id) return false
+  return db.prepare('DELETE FROM reminders WHERE id = ?').run(id).changes > 0
 }

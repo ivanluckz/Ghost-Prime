@@ -4,6 +4,8 @@ import OpenAI from 'openai'
 import * as browser from '../tools/browser.js'
 import * as screen from '../tools/screen.js'
 import * as shell from '../tools/shell-sessions.js'
+import * as reminders from '../tools/reminders.js'
+import * as fileUndo from '../tools/file-undo.js'
 import { saveMemory, recallMemories, memoryDigest } from '../memory/db.js'
 import { toolSpecs, executeTool } from '../tools/index.js'
 
@@ -60,6 +62,7 @@ const BROWSER_TOOL_NAMES = [
   'browser_screenshot',
   'browser_read_pages',
   'browser_click_at',
+  'browser_drag',
   'browser_scroll',
   'browser_press_key',
   'browser_list_tabs',
@@ -71,6 +74,18 @@ const BROWSER_TOOL_NAMES = [
 // Our cross-session memory, exposed to the agent as an in-process SDK MCP server.
 const MEMORY_SERVER = 'ghost-memory'
 const MEMORY_TOOL_NAMES = ['memory_save', 'memory_recall'].map((n) => `mcp__${MEMORY_SERVER}__${n}`)
+
+// Reversible file operations (moves/renames/creates/deletes/writes) + an undo stack.
+const FILES_SERVER = 'ghost-files'
+const FILES_TOOL_NAMES = ['file_write', 'file_create', 'file_move', 'file_delete', 'undo_last', 'undo_list'].map(
+  (n) => `mcp__${FILES_SERVER}__${n}`
+)
+
+// Scheduled reminders (fired by the in-process scheduler in src/main/tools/reminders.js).
+const REMINDER_SERVER = 'ghost-reminders'
+const REMINDER_TOOL_NAMES = ['reminder_set', 'reminder_list', 'reminder_cancel'].map(
+  (n) => `mcp__${REMINDER_SERVER}__${n}`
+)
 
 // Local-machine conveniences: read/write the system clipboard, push a desktop notification.
 const SYSTEM_SERVER = 'ghost-system'
@@ -134,6 +149,8 @@ YOUR TOOLS — all loaded and directly callable this turn:
 - file_read / file_write / file_edit / file_search / file_grep — inspect, create, edit, search, and grep local files.
 - web_search / web_fetch — perform live web searches and fetch readable page text.
 - memory_save / memory_recall — your long-term memory across sessions (backed by SQLite).
+- file_write / file_create / file_move / file_delete — REVERSIBLE file changes. When the user might want to undo a change (moving/renaming/deleting/rewriting a file), prefer these over the plain Write tool so undo_last can restore it. undo_last / undo_list — take back the last such change, or show what's undoable. (Use the Edit tool for surgical in-place code edits.)
+- reminder_set / reminder_list / reminder_cancel — schedule a desktop notification for later ("remind me at 5 to…"). Resolve vague times to an absolute time or minutes-from-now yourself.
 - system_volume — get or set volume percentage (0-100), mute, unmute, volume up/down via PulseAudio/pactl.
 - system_brightness — inspect or adjust display screen brightness.
 - system_power — battery status/health/percentage, screen lock, or suspend.
@@ -228,7 +245,8 @@ async function streamChatGeminiAgent({ messages, signal, onDelta, onEvent, model
     systemMessage,
     ...messages.map((m) => ({
       role: m.role === 'user' ? 'user' : 'assistant',
-      content: String(m.content || '')
+      // Pass rich content (array of text + image_url parts) straight through for vision; else a string.
+      content: typeof m.content === 'string' ? m.content : Array.isArray(m.content) ? m.content : String(m.content || '')
     }))
   ]
 
@@ -535,6 +553,22 @@ async function getBrowserMcpServer() {
         }
       ),
       tool(
+        'browser_drag',
+        'Drag-and-drop on the page. Element mode: { fromSelector, toSelector } (standard CSS). Point ' +
+          'mode: { from:{x,y}, to:{x,y} } as viewport fractions 0..1 — screenshot first, find the handle ' +
+          'and target visually, then drag. For sliders, reordering, Kanban cards, drag-to-upload.',
+        {
+          fromSelector: z.string().optional(),
+          toSelector: z.string().optional(),
+          from: z.object({ x: z.number(), y: z.number() }).optional(),
+          to: z.object({ x: z.number(), y: z.number() }).optional()
+        },
+        async ({ fromSelector, toSelector, from, to }) => {
+          const r = await browser.browserDrag({ fromSelector, toSelector, from, to })
+          return { content: [{ type: 'text', text: `Dragged (${r.mode}) — now at ${r.url}` }] }
+        }
+      ),
+      tool(
         'browser_scroll',
         'Scroll the page to reveal content below/above the fold, or to load more (infinite scroll, ' +
           'chat history). Pass { direction: "down" | "up" | "top" | "bottom" }; optionally { amount } in ' +
@@ -711,6 +745,114 @@ async function getMemoryMcpServer() {
     ]
   })
   return memoryMcpServer
+}
+
+// ---------------------------------------------------------------------------
+// Files MCP server — reversible file ops + undo (src/main/tools/file-undo.js).
+// ---------------------------------------------------------------------------
+let filesMcpServer = null
+async function getFilesMcpServer() {
+  if (filesMcpServer) return filesMcpServer
+  const { createSdkMcpServer, tool } = await import('@anthropic-ai/claude-agent-sdk')
+  const { z } = await import('zod')
+  const ok = (text) => ({ content: [{ type: 'text', text }] })
+  const guard = (fn) => async (a) => {
+    try {
+      return ok(await fn(a))
+    } catch (e) {
+      return ok(`Error: ${e?.message || e}`)
+    }
+  }
+  filesMcpServer = createSdkMcpServer({
+    name: FILES_SERVER,
+    version: '1.0.0',
+    tools: [
+      tool(
+        'file_write',
+        'Write/overwrite a file, REVERSIBLY — the previous version is snapshotted so "undo" restores ' +
+          'it. Prefer this over the plain Write tool when the user might want to take the change back. ' +
+          'Use the Edit tool for surgical in-place code edits; use this for whole-file writes.',
+        { path: z.string(), content: z.string() },
+        guard(({ path, content }) => fileUndo.writeFile(path, content))
+      ),
+      tool(
+        'file_create',
+        'Create a NEW file reversibly (errors if it already exists — use file_write to overwrite). ' +
+          'Undo removes it.',
+        { path: z.string(), content: z.string().optional() },
+        guard(({ path, content }) => fileUndo.createFile(path, content || ''))
+      ),
+      tool(
+        'file_move',
+        'Move or rename a file reversibly. Undo puts it back where it was.',
+        { from: z.string(), to: z.string() },
+        guard(({ from, to }) => fileUndo.moveFile(from, to))
+      ),
+      tool(
+        'file_delete',
+        'Delete a file reversibly — it is snapshotted first, so undo restores it. Files only, not folders.',
+        { path: z.string() },
+        guard(({ path }) => fileUndo.deleteFile(path))
+      ),
+      tool(
+        'undo_last',
+        'Take back the most recent reversible file operation (write/create/move/delete). Use when the ' +
+          'user says "undo that", "revert", "put it back", etc.',
+        {},
+        guard(() => fileUndo.undoLast())
+      ),
+      tool('undo_list', 'Show the stack of file operations that can still be undone (newest first).', {}, guard(() => fileUndo.undoList()))
+    ]
+  })
+  return filesMcpServer
+}
+
+// ---------------------------------------------------------------------------
+// Reminders MCP server — schedule notifications (src/main/tools/reminders.js).
+// ---------------------------------------------------------------------------
+let remindersMcpServer = null
+async function getRemindersMcpServer() {
+  if (remindersMcpServer) return remindersMcpServer
+  const { createSdkMcpServer, tool } = await import('@anthropic-ai/claude-agent-sdk')
+  const { z } = await import('zod')
+  const fmt = (ms) => new Date(ms).toLocaleString(undefined, { weekday: 'short', hour: 'numeric', minute: '2-digit' })
+  remindersMcpServer = createSdkMcpServer({
+    name: REMINDER_SERVER,
+    version: '1.0.0',
+    tools: [
+      tool(
+        'reminder_set',
+        'Schedule a reminder that will pop a desktop notification (and speak, if voice is on) at a ' +
+          'time. Give EITHER an absolute `at` (ISO 8601, e.g. "2026-09-19T17:00:00") OR a relative ' +
+          '`in_minutes`. Resolve vague times ("at 5", "in half an hour") yourself before calling.',
+        { text: z.string(), at: z.string().optional(), in_minutes: z.number().positive().optional() },
+        async ({ text, at, in_minutes }) => {
+          try {
+            const { dueAt } = reminders.setReminder({ text, at, inMinutes: in_minutes })
+            return { content: [{ type: 'text', text: `Reminder set for ${fmt(dueAt)}: "${text}"` }] }
+          } catch (e) {
+            return { content: [{ type: 'text', text: `Could not set reminder: ${e?.message || e}` }] }
+          }
+        }
+      ),
+      tool('reminder_list', 'List all pending reminders with their ids and times.', {}, async () => {
+        const list = reminders.listReminders()
+        const text = list.length
+          ? list.map((r) => `- ${fmt(r.dueAt)} — ${r.text}  (id: ${r.id})`).join('\n')
+          : 'No pending reminders.'
+        return { content: [{ type: 'text', text }] }
+      }),
+      tool(
+        'reminder_cancel',
+        'Cancel a pending reminder by its id (get ids from reminder_list).',
+        { id: z.string() },
+        async ({ id }) => ({
+          content: [{ type: 'text', text: reminders.cancelReminderById(id) ? 'Reminder cancelled.' : 'No such reminder.' }]
+        })
+      )
+    ]
+  })
+  return remindersMcpServer
 }
 
 // ---------------------------------------------------------------------------
@@ -934,8 +1076,16 @@ async function streamChatClaudeAgent({ messages, signal, onDelta, onEvent, model
   const effortVal = effort || process.env.CLAUDE_AGENT_EFFORT || 'low'
   const supportsEffort = !/haiku/i.test(useModel)
   const thinkingOff = (thinking || process.env.CLAUDE_AGENT_THINKING || '').toLowerCase() === 'off'
+  // Flatten any rich (image) content to text — the Agent SDK prompt is a string, so images dropped
+  // into the chat are noted but not shown on the Claude brain (they DO work on the Gemini brain).
+  const flat = (c) =>
+    typeof c === 'string'
+      ? c
+      : Array.isArray(c)
+        ? c.map((p) => (p?.type === 'text' ? p.text : p?.type === 'image_url' ? '[image attached]' : '')).filter(Boolean).join(' ')
+        : String(c ?? '')
   const transcript = messages
-    .map((m) => `${m.role === 'user' ? 'User' : 'Assistant'}: ${m.content}`)
+    .map((m) => `${m.role === 'user' ? 'User' : 'Assistant'}: ${flat(m.content)}`)
     .join('\n\n')
 
   const abortController = new AbortController()
@@ -948,6 +1098,8 @@ async function streamChatClaudeAgent({ messages, signal, onDelta, onEvent, model
   const memoryServer = await getMemoryMcpServer()
   const shellServer = await getShellMcpServer()
   const systemServer = await getSystemMcpServer()
+  const filesServer = await getFilesMcpServer()
+  const remindersServer = await getRemindersMcpServer()
   const screenServer = SCREEN_ENABLED ? await getScreenMcpServer() : null
 
   // Auto-inject the highest-signal memories so Claude "remembers" without being asked.
@@ -994,6 +1146,8 @@ async function streamChatClaudeAgent({ messages, signal, onDelta, onEvent, model
         ...BROWSER_TOOL_NAMES,
         ...MEMORY_TOOL_NAMES,
         ...SYSTEM_TOOL_NAMES,
+        ...FILES_TOOL_NAMES,
+        ...REMINDER_TOOL_NAMES,
         ...(CANVA_ENABLED ? [`mcp__${CANVA_SERVER}`] : []), // allow all Canva tools
         ...(screenServer ? SCREEN_TOOL_NAMES : [])
       ],
@@ -1002,6 +1156,8 @@ async function streamChatClaudeAgent({ messages, signal, onDelta, onEvent, model
         [MEMORY_SERVER]: memoryServer,
         [SHELL_SERVER]: shellServer,
         [SYSTEM_SERVER]: systemServer,
+        [FILES_SERVER]: filesServer,
+        [REMINDER_SERVER]: remindersServer,
         // External stdio server (the @canva/cli MCP). Tools are deferred behind tool-search by
         // default, so this adds little per-turn cost until the agent actually reaches for Canva.
         ...(CANVA_ENABLED
@@ -1212,5 +1368,24 @@ export async function summarizeConversation(messages, { signal, known = [] } = {
   } catch (e) {
     if (process.env.GHOST_DEBUG) console.warn('[auto-summary] summarize failed:', e?.message || e)
     return []
+  }
+}
+
+// A cheap one-shot generation (Haiku, no tools) used by the proactive engine for briefings and
+// check-ins. Never throws — returns '' on any failure so background timers can't crash.
+export async function generateShort(systemPrompt, prompt) {
+  try {
+    if (PROVIDER === 'claude-agent') {
+      try {
+        return (await summarizeViaClaude(systemPrompt, prompt)).trim()
+      } catch (e) {
+        if (isClaudeUnavailable(e) && fallbackReady()) return (await summarizeViaOpenAI(systemPrompt, prompt, undefined, FALLBACK_PROVIDER)).trim()
+        throw e
+      }
+    }
+    return (await summarizeViaOpenAI(systemPrompt, prompt, undefined, PROVIDER)).trim()
+  } catch (e) {
+    if (process.env.GHOST_DEBUG) console.warn('[proactive] generate failed:', e?.message || e)
+    return ''
   }
 }
