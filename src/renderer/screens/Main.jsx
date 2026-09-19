@@ -51,6 +51,7 @@ export default function Main() {
   const [attachments, setAttachments] = useState([]) // dropped files pending on the next message
   const [dragOver, setDragOver] = useState(false) // show the drop overlay while a file is over the window
   const [dropNote, setDropNote] = useState('') // transient message about a rejected/too-big drop
+  const [brainByReq, setBrainByReq] = useState({}) // reqId -> 'gemini' | 'claude' (which brain answered)
   const prevShellCount = useRef(0)
   const voiceOutRef = useRef(false)
   const sendRef = useRef(null) // latest send(), so externally-pushed tasks avoid a stale closure
@@ -122,6 +123,11 @@ export default function Main() {
 
     // Tool activity — tagged with its request so it sits in the right track.
     const offTool = window.ghost.onTool((ev) => {
+      // Router telling us which brain is handling this turn — record it, render nothing.
+      if (ev.kind === 'brain') {
+        if (ev.requestId) setBrainByReq((prev) => ({ ...prev, [ev.requestId]: ev.brain }))
+        return
+      }
       // Instant acknowledgment: speak once, the first time a task uses a tool (if voice is on).
       if (ev.kind === 'tool_use' && voiceOutRef.current && ev.requestId && !ackedRef.current.has(ev.requestId)) {
         ackedRef.current.add(ev.requestId)
@@ -358,6 +364,11 @@ export default function Main() {
         if (!arg) note(`Model is ${agent.model || 'sonnet (default)'}. Usage: /model sonnet | opus | haiku`)
         else { setAgent((a) => ({ ...a, model: arg })); note(`✓ Model → ${arg}`) }
         return true
+      case 'brain':
+        if (!['auto', 'gemini', 'claude'].includes(arg))
+          note(`Brain is ${agent.brain || 'auto'}. Usage: /brain auto | gemini | claude  (auto = cheap Gemini for simple asks, Claude for hard/long ones)`)
+        else { setAgent((a) => ({ ...a, brain: arg })); note(`✓ Brain → ${arg}${arg === 'auto' ? ' (routing by task)' : ''}`) }
+        return true
       case 'effort':
         if (!EFFORTS.includes(arg)) note('Usage: /effort low | medium | high | xhigh | max')
         else { setAgent((a) => ({ ...a, effort: arg })); note(`✓ Effort → ${arg}`) }
@@ -431,7 +442,7 @@ export default function Main() {
         note(`model ${agent.model || 'sonnet'} · effort ${agent.effort || 'low'} · thinking ${agent.thinking || 'adaptive'} · mode ${mode}`)
         return true
       case 'help':
-        note('/model · /effort low…max · /thinking off|adaptive · /fast · /smart · /mode plan|auto|full · /voice on|off · /tab own|current · /mirror on|off · /site … · /hotkey · /settings · /status · /new')
+        note('/model · /brain auto|gemini|claude · /effort low…max · /thinking off|adaptive · /fast · /smart · /mode plan|auto|full · /voice on|off · /tab own|current · /mirror on|off · /site … · /hotkey · /settings · /status · /new')
         return true
       default:
         note(`Unknown command "/${c}". Try /help`)
@@ -696,7 +707,7 @@ export default function Main() {
             onChatsCleared={clearAllChats}
           />
         )}
-        <MessageList messages={messages} onExample={send} runningIds={runningIds} />
+        <MessageList messages={messages} onExample={send} runningIds={runningIds} brainByReq={brainByReq} />
         {termOpen && <TerminalPanel sessions={shellSessions} onClose={() => setTermOpen(false)} />}
         {dropNote && <div className="drop-note">{dropNote}</div>}
         {attachments.length > 0 && (

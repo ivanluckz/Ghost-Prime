@@ -22,6 +22,7 @@ const histories = new Map() // channelId -> [{role, content}]
 const chains = new Map() // channelId -> Promise (serialize agent runs per channel)
 const running = new Map() // channelId -> AbortController (in-flight run, so !stop can cancel it)
 const modes = new Map() // channelId -> 'plan' | 'auto' | 'full' (per-channel autonomy override)
+const brains = new Map() // channelId -> 'auto' | 'gemini' | 'claude' (per-channel brain override)
 
 const MAX_HISTORY = 20 // messages kept per channel for context
 const DISCORD_LIMIT = 1900 // stay under Discord's 2000-char message cap
@@ -45,10 +46,11 @@ const HELP = [
   '`!reset` — forget this conversation’s history',
   '`!stop` — cancel what I’m doing right now',
   '`!mode [plan|auto|full]` — show or set autonomy (`full` skips permission checks — careful)',
+  '`!brain [auto|gemini|claude]` — which brain answers (auto routes by task)',
   '`!status` — show brain, mode, and history size'
 ].join('\n')
 
-const COMMANDS = new Set(['help', 'commands', 'reset', 'clear', 'stop', 'cancel', 'mode', 'status', 'ping'])
+const COMMANDS = new Set(['help', 'commands', 'reset', 'clear', 'stop', 'cancel', 'mode', 'brain', 'status', 'ping'])
 
 function allowedIds() {
   return (process.env.DISCORD_ALLOWED_USER_IDS || '')
@@ -245,10 +247,19 @@ function handleCommand(msg, typed) {
       modes.set(channelId, m)
       msg.reply(`Mode set to **${m}**.${m === 'full' ? ' ⚠️ I’ll skip permission checks in this channel.' : ''}`).catch(() => {})
     }
+  } else if (cmd === 'brain') {
+    if (!arg) {
+      msg.reply(`Brain is **${brains.get(channelId) || 'auto'}**. Set it with \`!brain auto|gemini|claude\` (auto routes cheap asks to Gemini, hard ones to Claude).`).catch(() => {})
+    } else if (!['auto', 'gemini', 'claude'].includes(arg.toLowerCase())) {
+      msg.reply('Brain must be `auto`, `gemini`, or `claude`.').catch(() => {})
+    } else {
+      brains.set(channelId, arg.toLowerCase())
+      msg.reply(`Brain set to **${arg.toLowerCase()}**.`).catch(() => {})
+    }
   } else if (cmd === 'status' || cmd === 'ping') {
     const m = modes.get(channelId) || DEFAULT_MODE()
     const h = histories.get(channelId)?.length || 0
-    const brain = process.env.GHOST_PROVIDER || 'claude-agent'
+    const brain = brains.get(channelId) || 'auto'
     msg
       .reply(`🟢 Online · brain: \`${brain}\` · mode: **${m}** · history: ${h} msg${h === 1 ? '' : 's'}${running.has(channelId) ? ' · (working…)' : ''}`)
       .catch(() => {})
@@ -352,6 +363,7 @@ async function respond(msg, content) {
     reply = await streamChat({
       messages,
       mode, // plan | auto | full (full = no permission checks — careful)
+      brain: brains.get(channelId) || 'auto', // per-channel router override (!brain)
       signal: ac.signal,
       onDelta: (t) => {
         liveText += t

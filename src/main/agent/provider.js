@@ -1248,30 +1248,61 @@ function fallbackReady() {
   return !!(cfg && process.env[cfg.apiKeyEnv])
 }
 
-export async function streamChat(opts) {
-  // If provider is Gemini or OpenRouter, run our autonomous tool-capable agent!
-  if (PROVIDER === 'gemini' || PROVIDER === 'openrouter') {
-    return streamChatGeminiAgent({ ...opts, provider: PROVIDER })
-  }
+// --- Brain router --------------------------------------------------------
+// Pick per turn: Gemini (cheap/fast, and the only vision path today) vs Claude (hard/long/agentic
+// reasoning, on the Pro login — no API bill). Zero-cost heuristic, overridable with /brain or
+// GHOST_BRAIN_MODE. Applies to every entry point (chat UI and the Discord bot).
+function contentHasImage(c) {
+  return Array.isArray(c) && c.some((p) => p?.type === 'image_url')
+}
+function contentToPlain(c) {
+  if (typeof c === 'string') return c
+  if (Array.isArray(c)) return c.map((p) => (p?.type === 'text' ? p.text : '')).join(' ')
+  return String(c ?? '')
+}
+// Signals that a turn deserves the stronger brain.
+function isHardTask(text) {
+  const t = String(text || '')
+  if (t.length > 600) return true
+  if (/```/.test(t)) return true
+  if (/\[Attached file:/.test(t) && t.length > 300) return true
+  return /\b(refactor|debug|implement|architect(?:ure)?|design|plan(?: out| this)?|multi-?step|step[- ]by[- ]step|analy[sz]e|optimi[sz]e|migrate|algorithm|derive|prove|reason (?:through|about)|think (?:through|hard|carefully|deeply)|write (?:a |the |some )?(?:code|function|script|module|class|test|program|app)|codebase|whole file|entire file|end[- ]to[- ]end|complex|thorough)\b/i.test(t)
+}
+// Returns 'gemini' | 'claude'. Order: explicit per-turn override → GHOST_BRAIN_MODE → heuristic.
+export function pickBrain(opts = {}) {
+  const ov = String(opts.brain || '').toLowerCase()
+  if (ov === 'gemini' || ov === 'claude') return ov
+  const mode = String(process.env.GHOST_BRAIN_MODE || 'auto').toLowerCase()
+  if (mode === 'gemini' || mode === 'claude') return mode
+  const lastUser = [...(opts.messages || [])].reverse().find((m) => m.role === 'user')
+  const c = lastUser?.content
+  if (contentHasImage(c)) return 'gemini' // vision only works on the Gemini path today
+  return isHardTask(contentToPlain(c)) ? 'claude' : 'gemini'
+}
 
-  // Default path: real Claude. Auto-fall back to Gemini Agent for this turn if Claude is
-  // out of credits / rate-limited / unauthenticated.
+function runBrain(opts, brain) {
+  return brain === 'claude' ? streamChatClaudeAgent(opts) : streamChatGeminiAgent({ ...opts, provider: 'gemini' })
+}
+
+export async function streamChat(opts) {
+  const brain = pickBrain(opts)
+  opts.onEvent?.({ kind: 'brain', brain }) // tell the UI which brain is answering
   let streamedAny = false
   const onDelta = (t) => {
     streamedAny = true
     opts.onDelta?.(t)
   }
   try {
-    return await streamChatClaudeAgent({ ...opts, onDelta })
+    return await runBrain({ ...opts, onDelta }, brain)
   } catch (err) {
-    // User aborted, or Claude already produced text → surface as-is (never double-answer).
-    if (opts.signal?.aborted || streamedAny) throw err
+    if (opts.signal?.aborted || streamedAny) throw err // never double-answer
+    if (!isClaudeUnavailable(err)) throw err // only availability errors fall over to the other brain
+    const other = brain === 'claude' ? 'gemini' : 'claude'
     const reason = (err?.message || String(err)).split('\n')[0].slice(0, 160)
-    console.warn(`[ghost] Claude unavailable → falling back to ${FALLBACK_PROVIDER} Agent: ${reason}`)
-    opts.onDelta?.(
-      `_⚡ Claude is unavailable right now (${reason}). Using the Gemini Agent brain with full tool capabilities._\n\n`
-    )
-    return await streamChatGeminiAgent({ ...opts, model: undefined, provider: FALLBACK_PROVIDER })
+    console.warn(`[ghost] ${brain} unavailable → ${other}: ${reason}`)
+    opts.onEvent?.({ kind: 'brain', brain: other, fallback: true })
+    opts.onDelta?.(`_⚡ ${brain} was unavailable (${reason}). Using ${other} for this reply._\n\n`)
+    return await runBrain({ ...opts, onDelta }, other)
   }
 }
 

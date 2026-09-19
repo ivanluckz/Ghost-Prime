@@ -10,7 +10,7 @@ const EXAMPLES = [
   { icon: '✦', text: 'Remember that I prefer concise answers' }
 ]
 
-export default function MessageList({ messages, onExample, runningIds, trackColor }) {
+export default function MessageList({ messages, onExample, runningIds, trackColor, brainByReq }) {
   const endRef = useRef(null)
 
   useEffect(() => {
@@ -63,7 +63,15 @@ export default function MessageList({ messages, onExample, runningIds, trackColo
             {m.content}
           </div>
         ) : (
-          <Message key={i} role={m.role} content={m.content} error={m.error} streaming={isLive(m)} accent={accent} />
+          <Message
+            key={i}
+            role={m.role}
+            content={m.content}
+            error={m.error}
+            streaming={isLive(m)}
+            accent={accent}
+            brain={m.role === 'assistant' && m.reqId ? brainByReq?.[m.reqId] : null}
+          />
         )
       })}
       <div ref={endRef} />

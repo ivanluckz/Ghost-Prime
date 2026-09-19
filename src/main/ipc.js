@@ -54,6 +54,7 @@ export function registerIpc() {
         model: settings?.model,
         effort: settings?.effort,
         thinking: settings?.thinking,
+        brain: settings?.brain, // 'gemini' | 'claude' | 'auto' — router override from /brain
         signal: controller.signal,
         onDelta: (text) => {
           if (!wc.isDestroyed()) wc.send('chat:delta', { requestId, text })

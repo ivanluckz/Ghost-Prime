@@ -2788,3 +2788,23 @@ html.native-frame .sidebar-head {
   background: rgba(255, 93, 122, 0.24);
   color: var(--error);
 }
+
+/* --- Brain router badge (which brain answered) ----------------------------- */
+.brain-tag {
+  margin-left: 7px;
+  padding: 1px 6px;
+  border-radius: 6px;
+  font-size: 9.5px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  vertical-align: middle;
+  border: 1px solid var(--hairline);
+}
+.brain-gemini {
+  color: #8ab4ff;
+  background: rgba(122, 162, 247, 0.12);
+}
+.brain-claude {
+  color: #ffb38a;
+  background: rgba(255, 150, 90, 0.12);
+}
