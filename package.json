@@ -13,6 +13,12 @@
     "postinstall": "electron-rebuild -f -o better-sqlite3,node-pty",
     "ext:deploy": "node scripts/deploy-extension.mjs",
     "bridge:smoke": "node scripts/bridge-smoke.mjs",
+    "db:bundle": "esbuild src/main/memory/db.js --bundle --platform=node --format=cjs --external:better-sqlite3 --external:electron --outfile=scripts/_db_bundle.cjs --log-level=warning",
+    "smoke:db": "npm run -s db:bundle && electron scripts/smoke-db.cjs",
+    "smoke:summary": "npm run -s db:bundle && electron scripts/smoke-summary.cjs",
+    "smoke:persistence": "npm run -s db:bundle && electron scripts/smoke-persistence.cjs",
+    "smoke:run-slot": "node --import ./scripts/lib/register-electron-stub.mjs scripts/smoke-run-slot.mjs",
+    "smoke:attachment-cap": "node scripts/smoke-attachment-cap.mjs",
     "jarvis:setup": "(python3 -m venv jarvis/.venv || { rm -rf jarvis/.venv; echo 'python3-venv missing: sudo apt install python3-venv'; exit 1; }) && jarvis/.venv/bin/pip install -r jarvis/requirements.txt"
   },
   "dependencies": {
@@ -34,6 +40,7 @@
     "@vitejs/plugin-react": "^4.3.4",
     "electron": "^33.3.1",
     "electron-vite": "^2.3.0",
+    "esbuild": "^0.21.5",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "vite": "^5.4.11"

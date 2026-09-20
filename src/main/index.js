@@ -1,5 +1,5 @@
 // Must be the very first import: loads .env before any module below reads process.env at top level.
-import './env.js'
+import { envBool } from './env.js'
 import { join } from 'node:path'
 import { writeFileSync } from 'node:fs'
 import { app, BrowserWindow, ipcMain, globalShortcut, Notification, shell } from 'electron'
@@ -25,32 +25,83 @@ app.commandLine.appendSwitch('disable-background-timer-throttling')
 app.commandLine.appendSwitch('disable-renderer-backgrounding')
 app.commandLine.appendSwitch('disable-backgrounding-occluded-windows')
 
+// Ozone backend (Linux). Default x11 — the backend the GPU path below is stable on under Crostini
+// (see the GPU notes). Wayland is opt-in (GHOST_OZONE=wayland): crisper fractional scaling, but
+// Chromium's Wayland/GBM path can't allocate scanout buffers on virtio-gpu, so it runs software-
+// rendered, and frameless Electron can drop mouse clicks on some Wayland compositors —
+// GHOST_NATIVE_FRAME=1 (OS title bar) is the escape for that. GHOST_OZONE=auto lets Electron pick.
+//
+// GHOST_OZONE (.env) is the single source of truth. Electron resolves the backend from
+// ELECTRON_OZONE_PLATFORM_HINT / --ozone-platform-hint during pre-early init — BEFORE this script
+// runs — so `app.commandLine.appendSwitch('ozone-platform-hint', …)` here would be inert (verified:
+// it only adds the hint switch; --ozone-platform stays whatever the env decided). The launchers
+// (bin/ghost-prime, ghost-prime.sh) therefore export the hint from GHOST_OZONE up front. When the
+// app is started some other way (`npx electron .`, a stray .desktop entry) with GHOST_OZONE set but
+// no hint in the environment, relaunch once with the hint exported so the .env value still wins.
+// Not under electron-vite dev though: the dev server exits with the first instance
+// (`ps.on('close', process.exit)`), so a relaunch there would load a dead ELECTRON_RENDERER_URL —
+// the `dev` script sets the hint itself instead.
+const USE_NATIVE_FRAME =
+  process.platform === 'linux' && envBool('GHOST_NATIVE_FRAME', false)
+const OZONE_HINT = process.env.ELECTRON_OZONE_PLATFORM_HINT || ''
+const OZONE_WANT = (process.env.GHOST_OZONE || '').trim().toLowerCase()
+const OZONE_VALID = ['wayland', 'x11', 'auto']
+const IS_VITE_DEV = !!process.env.ELECTRON_RENDERER_URL
+// What Electron actually picked (empty switch = Chromium's default, x11).
+const ozoneEffective = () => app.commandLine.getSwitchValue('ozone-platform') || 'x11'
+let ozoneRelaunch = false
+if (process.platform === 'linux' && OZONE_WANT) {
+  if (!OZONE_VALID.includes(OZONE_WANT)) {
+    console.warn(`[ghost] ignoring GHOST_OZONE='${OZONE_WANT}' (expected ${OZONE_VALID.join(' | ')})`)
+  } else if (
+    !OZONE_HINT && // a launcher (or the user) already decided — respect it
+    !app.commandLine.hasSwitch('ozone-platform') && // explicit CLI override — respect it
+    !envBool('GHOST_OZONE_RELAUNCHED', false) && // never loop, even if the env somehow isn't inherited
+    OZONE_WANT !== ozoneEffective() // already what we want (x11 is the default) → nothing to do
+  ) {
+    if (IS_VITE_DEV) {
+      console.log(
+        `[ghost] ozone: not relaunching under electron-vite dev (GHOST_OZONE=${OZONE_WANT}) — set ELECTRON_OZONE_PLATFORM_HINT in the dev script`
+      )
+    } else {
+      process.env.ELECTRON_OZONE_PLATFORM_HINT = OZONE_WANT
+      process.env.GHOST_OZONE_RELAUNCHED = '1'
+      console.log(`[ghost] ozone: relaunching with ELECTRON_OZONE_PLATFORM_HINT=${OZONE_WANT} (from GHOST_OZONE)`)
+      app.relaunch()
+      app.exit(0)
+      ozoneRelaunch = true
+    }
+  }
+}
+if (process.platform === 'linux' && !ozoneRelaunch) {
+  const src = OZONE_HINT ? `hint=${OZONE_HINT}` : 'no hint'
+  console.log(`[ghost] ozone: ${ozoneEffective()} (${src}${OZONE_WANT ? `, GHOST_OZONE=${OZONE_WANT}` : ''})`)
+}
+
 // GPU acceleration. Crostini's GPU is reachable once "GPU support" is on in chrome://flags, but
-// Chromium blocklists virtio-gpu and the Wayland/GBM path crash-loops (exit_code=8704). So we
-// force-allow the GPU and run GL through ANGLE on the X11 path (set below) — that combo is stable
-// on Crostini and makes the blur/glass/animations cheap (no more software-render lag). If the
-// window ever black-screens or crash-loops on launch, set GHOST_GPU=off to fall back to software.
-const GHOST_GPU = (process.env.GHOST_GPU || 'on').toLowerCase() !== 'off'
-if (GHOST_GPU) {
+// Chromium blocklists virtio-gpu and the Wayland/GBM path crash-loops (gbm_pixmap_wayland "Cannot
+// create bo … usage=SCANOUT" → "GPU process exited unexpectedly: exit_code=8704", three times,
+// before Chromium gives up and falls back to software anyway). So we force-allow the GPU and run
+// GL through ANGLE ONLY on the X11 backend — that combo is stable on Crostini and makes the
+// blur/glass/animations cheap (no more software-render lag). On Wayland (or auto, which resolves
+// to Wayland where a compositor is present) we go straight to software rendering instead of
+// crash-looping our way there. If the window ever black-screens or crash-loops on launch, set
+// GHOST_GPU=0 to force software.
+const GHOST_GPU = envBool('GHOST_GPU', true)
+const GPU_SAFE_BACKEND = process.platform !== 'linux' || (!ozoneRelaunch && ozoneEffective() === 'x11')
+if (GHOST_GPU && GPU_SAFE_BACKEND) {
   app.commandLine.appendSwitch('ignore-gpu-blocklist')
   app.commandLine.appendSwitch('enable-gpu-rasterization')
   app.commandLine.appendSwitch('enable-zero-copy')
   app.commandLine.appendSwitch('use-gl', 'angle')
   app.commandLine.appendSwitch('use-angle', 'gl')
 } else {
+  if (GHOST_GPU && !ozoneRelaunch) {
+    console.log(`[ghost] gpu: software rendering — hardware GL is only stable on ozone=x11 (running ${ozoneEffective()})`)
+  }
   app.disableHardwareAcceleration()
   app.commandLine.appendSwitch('disable-gpu')
   app.commandLine.appendSwitch('disable-gpu-compositing')
-}
-
-// Ozone backend (Linux). Default Wayland — crisper rendering and proper fractional scaling on
-// Crostini. Caveat: frameless Electron can drop mouse clicks on some Wayland compositors. If that
-// happens, you have two escapes: GHOST_OZONE=x11 (XWayland — the old behavior, frameless + clicks)
-// or GHOST_NATIVE_FRAME=1 (stay on Wayland but use the OS title bar). GHOST_OZONE=auto lets Electron pick.
-const USE_NATIVE_FRAME =
-  process.platform === 'linux' && process.env.GHOST_NATIVE_FRAME === '1'
-if (process.platform === 'linux') {
-  app.commandLine.appendSwitch('ozone-platform-hint', (process.env.GHOST_OZONE || 'wayland').toLowerCase())
 }
 
 let mainWindow = null
@@ -60,9 +111,14 @@ let mainWindow = null
 // with no listener is silently dropped, so buffer until the renderer says 'ui:ready', then flush.
 let uiReady = false
 const pending = []
+// Returns true when the push was sent or queued for the flush (i.e. it WILL be shown), false once the
+// window is gone for good — callers like the morning briefing use that to decide whether to count
+// a message as delivered.
 function sendToUi(channel, payload) {
-  if (uiReady && mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(channel, payload)
+  if (mainWindow?.isDestroyed()) return false
+  if (uiReady && mainWindow) mainWindow.webContents.send(channel, payload)
   else pending.push([channel, payload])
+  return true
 }
 ipcMain.on('ui:ready', () => {
   uiReady = true
@@ -183,9 +239,12 @@ function createWindow() {
 // The lock is keyed on userData, which the installed launcher, `npm run dev` and the GHOST_CAPTURE
 // headless-verification flow all share — so a capture run, or GHOST_SINGLE_INSTANCE=0, skips it
 // rather than exiting because the everyday app is already open.
-const singleInstance = !process.env.GHOST_CAPTURE && process.env.GHOST_SINGLE_INSTANCE !== '0'
+const singleInstance = !ozoneRelaunch && !process.env.GHOST_CAPTURE && envBool('GHOST_SINGLE_INSTANCE', true)
 const gotLock = singleInstance ? app.requestSingleInstanceLock() : true
-if (!gotLock) {
+if (ozoneRelaunch) {
+  // Exiting so the relaunched instance (with the Ozone hint exported) can take over — don't grab
+  // the single-instance lock or wire anything up on the way out.
+} else if (!gotLock) {
   // Another Ghost-Prime already owns the Discord bot / bridge port / hotkey — hand off to it.
   console.log('[ghost] another instance is running — summoning it and exiting')
   app.quit()
@@ -235,7 +294,7 @@ if (!gotLock) {
       sendToUi('external-task', { prompt })
     })
     // Dev: live-reload the loaded extension when its source changes (GHOST_EXT_AUTORELOAD=1).
-    if (process.env.GHOST_EXT_AUTORELOAD === '1')
+    if (envBool('GHOST_EXT_AUTORELOAD', false))
       watchExtensionForReload(join(app.getAppPath(), 'extension'), process.env.GHOST_EXT_DEPLOY || null)
     createWindow()
 

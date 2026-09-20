@@ -2,7 +2,7 @@
 // text in tool messages, so provider.js hands screenshots back as a user turn. This drives the same
 // shape against a local page whose content exists ONLY as pixels (a canvas) — if Gemini reads the
 // word, the image made it through. Also checks the tool specs are accepted (browser_click_at etc.).
-// Run: GHOST_BROWSER_HEADLESS=true GHOST_BROWSER_CHANNEL= GHOST_BROWSER_PROFILE=/tmp/ghost-pw GHOST_BROWSER_BACKEND=playwright \
+// Run: GHOST_BROWSER_HEADLESS=1 GHOST_BROWSER_CHANNEL= GHOST_BROWSER_PROFILE=/tmp/ghost-pw GHOST_BROWSER_BACKEND=playwright \
 //      node --import ./scripts/lib/register-electron-stub.mjs scripts/smoke-gemini-browser-vision.mjs
 import 'dotenv/config'
 import OpenAI from 'openai'

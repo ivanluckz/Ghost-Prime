@@ -5,9 +5,17 @@
 #   ghost-prime -f        start in the foreground (Ctrl+C to quit)
 #   ghost-prime stop      stop a running instance
 #   ghost-prime status    is it running?
+#
+# Display server: GHOST_OZONE is the single source of truth (shell env, else .env; default x11 —
+# the backend the GPU path in src/main/index.js is stable on under Crostini; wayland is opt-in and
+# runs software-rendered, see the GPU notes there). Electron picks its Ozone backend from
+# ELECTRON_OZONE_PLATFORM_HINT before the app's JS runs, so the launcher is where that translation
+# happens — the same rule for every launch path (ghost-prime.sh / the app-list icon delegate here).
 set -uo pipefail
 
-GHOST_DIR="/home/lol/Projects/Ghost-Prime"
+# Resolve the checkout from this script's real location (works through the ~/.local/bin symlink and
+# for any clone path — nothing is hard-coded).
+GHOST_DIR="$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)"
 LOG="${TMPDIR:-/tmp}/ghost-prime.log"
 ELECTRON="$GHOST_DIR/node_modules/electron/dist/electron"
 
@@ -17,6 +25,40 @@ cd "$GHOST_DIR" 2>/dev/null || {
 }
 
 is_running() { pgrep -f "$ELECTRON \\." >/dev/null 2>&1; }
+
+# GHOST_OZONE from .env (only that key — the app loads the rest itself). Tolerates quotes, CRLF,
+# `export` prefixes and trailing comments; the shell environment wins over the file.
+env_ozone() {
+  [ -f .env ] || return 0
+  grep -E '^[[:space:]]*(export[[:space:]]+)?GHOST_OZONE[[:space:]]*=' .env | tail -n 1 |
+    sed -E 's/^[^=]*=//; s/[[:space:]]+#.*$//; s/^[[:space:]]+//; s/[[:space:]]+$//' | tr -d '\r"'"'"
+}
+apply_ozone() {
+  local want="${GHOST_OZONE:-$(env_ozone)}"
+  want="$(printf '%s' "$want" | tr '[:upper:]' '[:lower:]')"
+  case "$want" in
+    wayland | x11 | auto) ;;
+    "") want=x11 ;; # documented default (README: GHOST_OZONE)
+    *)
+      echo "ghost-prime: ignoring GHOST_OZONE='$want' (expected wayland | x11 | auto)" >&2
+      want=x11
+      ;;
+  esac
+  export GHOST_OZONE="$want"
+  export ELECTRON_OZONE_PLATFORM_HINT="$want"
+}
+
+# Build on first run if needed (both foreground and detached starts). Calls electron-vite directly:
+# `npm run build` would also run the postbuild hook (scripts/push-after-build.mjs), which commits and
+# pushes the working tree — not something a launcher icon should do silently.
+ensure_built() {
+  [ -f out/main/index.js ] && return 0
+  echo "First run — building Ghost-Prime…"
+  npx electron-vite build >/dev/null 2>&1 || {
+    echo "Build failed. Run 'npx electron-vite build' in $GHOST_DIR to see why." >&2
+    exit 1
+  }
+}
 
 case "${1:-start}" in
   stop)
@@ -36,8 +78,10 @@ case "${1:-start}" in
     exit 0
     ;;
   -f | --foreground)
-    export ELECTRON_OZONE_PLATFORM_HINT=${GHOST_OZONE_PLATFORM:-x11}
-    exec "$ELECTRON" .
+    shift
+    ensure_built
+    apply_ozone
+    exec "$ELECTRON" . "$@"
     ;;
   start | "") ;;
   *)
@@ -46,21 +90,14 @@ case "${1:-start}" in
     ;;
 esac
 
-# Build on first run if needed.
-if [ ! -f out/main/index.js ]; then
-  echo "First run — building Ghost-Prime…"
-  npm run build >/dev/null 2>&1 || {
-    echo "Build failed. Run 'npm run build' in $GHOST_DIR to see why." >&2
-    exit 1
-  }
-fi
+ensure_built
 
 if is_running; then
   echo "Ghost-Prime is already running (pid $(pgrep -f "$ELECTRON \\." | head -1))."
   exit 0
 fi
 
-export ELECTRON_OZONE_PLATFORM_HINT=${GHOST_OZONE_PLATFORM:-x11}
+apply_ozone
 nohup "$ELECTRON" . >"$LOG" 2>&1 &
-echo "Ghost-Prime started (pid $!).  logs: $LOG"
+echo "Ghost-Prime started (pid $!).  display: $GHOST_OZONE  logs: $LOG"
 echo "stop with:  ghost-prime stop"

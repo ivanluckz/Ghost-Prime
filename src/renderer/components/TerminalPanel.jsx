@@ -34,17 +34,18 @@ const FONT = "ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, Consolas, 'Liber
 // toolbar / auto-open); this component owns the xterm instances and the live data stream.
 export default function TerminalPanel({ sessions = [], onClose }) {
   const [activeId, setActiveId] = useState(null)
+  const [err, setErr] = useState('') // why the last '+' failed (e.g. node-pty backend unavailable)
   const terms = useRef(new Map()) // id -> { term, fit, ready, buf }
   const containers = useRef(new Map()) // id -> DOM node
   const bodyRef = useRef(null)
 
   // Live output from the main process → the matching xterm (background terminals stay current too).
   useEffect(() => {
-    const off = window.ghost.shell?.onData(({ id, data }) => {
+    const off = window.ghost.shell?.onData(({ id, data, seq }) => {
       const t = terms.current.get(id)
       if (!t) return
       if (t.ready) t.term.write(data)
-      else t.buf.push(data)
+      else t.buf.push({ seq, data })
     })
     return off
   }, [])
@@ -79,15 +80,24 @@ export default function TerminalPanel({ sessions = [], onClose }) {
     // User keystrokes → the real shell.
     term.onData((d) => window.ghost.shell?.write(id, d))
 
-    // Replay history, then flush anything that streamed in during the async gap.
+    // Replay history, then flush anything that streamed in during the async gap. Main numbers every
+    // chunk and tells us the seq its scrollback text already covers, so chunks that were both
+    // broadcast (and buffered here) and folded into that text are skipped instead of written twice.
+    let covered = -1
     window.ghost.shell
       ?.scrollback(id)
       .then((sb) => {
-        if (sb) term.write(sb)
+        const text = typeof sb === 'string' ? sb : sb?.text || ''
+        if (typeof sb === 'object' && sb && Number.isFinite(sb.seq)) covered = sb.seq
+        if (text) term.write(text)
       })
+      .catch(() => {})
       .finally(() => {
         entry.ready = true
-        for (const d of entry.buf) term.write(d)
+        for (const { seq, data } of entry.buf) {
+          if (Number.isFinite(seq) && seq <= covered) continue
+          term.write(data)
+        }
         entry.buf = []
         requestAnimationFrame(() => fit(id))
       })
@@ -114,6 +124,12 @@ export default function TerminalPanel({ sessions = [], onClose }) {
     })
   }, [sessions])
 
+  // A live session arriving by any path (agent shell_run/shell_open, a later '+') proves the backend
+  // recovered, so drop a stale "couldn't open" banner instead of leaving it over the live xterm.
+  useEffect(() => {
+    if (sessions.some((s) => s.alive)) setErr('')
+  }, [sessions])
+
   // Fit whenever the active tab changes or the dock resizes.
   useEffect(() => {
     if (activeId) requestAnimationFrame(() => fit(activeId))
@@ -135,8 +151,16 @@ export default function TerminalPanel({ sessions = [], onClose }) {
 
   async function openTerminal() {
     const t = terms.current.get(activeId)
-    const r = await window.ghost.shell?.open({ cols: t?.term.cols || 80, rows: t?.term.rows || 24 })
-    if (r?.id) setActiveId(r.id)
+    try {
+      const r = await window.ghost.shell?.open({ cols: t?.term.cols || 80, rows: t?.term.rows || 24 })
+      if (r?.id) setActiveId(r.id)
+      setErr('')
+    } catch (e) {
+      // node-pty failed to load (ABI mismatch after an Electron upgrade) or the spawn failed —
+      // say so in the dock instead of a silent 'Uncaught (in promise)' in DevTools.
+      const msg = String(e?.message || e || 'Could not open a terminal').replace(/^Error invoking remote method '[^']*': (?:Error: )?/, '')
+      setErr(msg)
+    }
   }
 
   function closeTerminal(id, e) {
@@ -175,9 +199,37 @@ export default function TerminalPanel({ sessions = [], onClose }) {
         </button>
       </div>
       <div className="term-body" ref={bodyRef}>
-        {sessions.length === 0 && (
+        {sessions.length === 0 && !err && (
           <div className="term-empty">
             No terminal yet. Press <kbd>+</kbd> to open one — or just ask Ghost to run something.
+          </div>
+        )}
+        {err && (
+          <div
+            className={sessions.length === 0 ? 'term-empty term-error' : 'term-error term-error-bar'}
+            role="alert"
+            style={
+              sessions.length === 0
+                ? undefined
+                : { position: 'absolute', left: 0, right: 0, top: 0, zIndex: 2, padding: '6px 12px', fontSize: 12, background: 'rgba(255, 93, 122, 0.12)', borderBottom: '1px solid rgba(255, 93, 122, 0.35)' }
+            }
+          >
+            <div>
+              <strong>Couldn't open a terminal.</strong> <span className="term-error-detail">{err}</span>
+              {/terminal backend unavailable/i.test(err) && (
+                <div className="term-error-hint">
+                  Rebuild the native module: <kbd>npx electron-rebuild -f -o node-pty</kbd>, then restart Ghost-Prime.
+                </div>
+              )}
+              <button
+                type="button"
+                className="term-error-dismiss"
+                onClick={() => setErr('')}
+                style={{ marginLeft: 8, padding: '1px 8px', font: 'inherit', fontSize: 11, color: 'inherit', background: 'rgba(255, 255, 255, 0.06)', border: '1px solid rgba(255, 93, 122, 0.35)', borderRadius: 6, cursor: 'pointer' }}
+              >
+                Dismiss
+              </button>
+            </div>
           </div>
         )}
         {sessions.map((s) => (

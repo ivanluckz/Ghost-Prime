@@ -63,12 +63,28 @@ function sendJson(res, code, obj) {
 
 const deviceConnected = (d) => !!d && Date.now() - d.lastPollAt < STALE_MS
 
-// Public: is anything (or a specific device) connected and listening?
-export function bridgeConnected(deviceId) {
-  if (deviceId) return deviceConnected(devices.get(deviceId))
-  for (const d of devices.values()) if (deviceConnected(d)) return true
+// DEVICE KINDS: 'browser' (the Chrome extension) and 'phone' (the connector app). They speak
+// different command sets, so anything that routes a command should say which kind it wants — a
+// connected phone must never make the app think "Chrome is here" and ship browser_* commands to it.
+// `kind` is optional everywhere below; omitting it means "any device" (the old behaviour).
+export const KIND_BROWSER = 'browser'
+export const KIND_PHONE = 'phone'
+const deviceKind = (d) => d.kind || KIND_BROWSER
+const kindMatches = (d, kind) => !kind || deviceKind(d) === kind
+
+// Public: is anything (or a specific device, or any device of a given kind) connected and listening?
+export function bridgeConnected(deviceId, kind = null) {
+  if (deviceId) {
+    const d = devices.get(deviceId)
+    return deviceConnected(d) && kindMatches(d, kind)
+  }
+  for (const d of devices.values()) if (deviceConnected(d) && kindMatches(d, kind)) return true
   return false
 }
+
+// Kind-aware conveniences for the callers that care which hands they're using.
+export const browserConnected = (deviceId = null) => bridgeConnected(deviceId, KIND_BROWSER)
+export const phoneConnected = (deviceId = null) => bridgeConnected(deviceId, KIND_PHONE)
 
 // Deduplicated, display-ready device list (most-recently-seen first). Duplicate names (two Chromes)
 // get a numeric suffix so they're tellable apart.
@@ -104,13 +120,24 @@ export function selectDevice(id) {
 }
 
 // Where does a command go? explicit id → the selected device → the most-recently-active connected
-// one (which then becomes the selection). Null when nothing's connected.
-function pickTarget(deviceId) {
-  if (deviceId && deviceConnected(devices.get(deviceId))) return devices.get(deviceId)
-  if (deviceConnected(devices.get(selectedId))) return devices.get(selectedId)
+// one (which then becomes the selection). Null when nothing's connected. An explicit id is all or
+// nothing: if that device is unknown, stale or (with a `kind`) the wrong kind, the command is
+// refused rather than silently rerouted to some other device — a phone tap must never land on a
+// different phone. With a `kind`, only devices of that kind qualify at every step: a selected phone
+// is skipped for a browser command (and vice versa) without disturbing the user's selection, and the
+// fallback only claims the selection when nothing live is selected.
+function pickTarget(deviceId, kind = null) {
+  if (deviceId) {
+    const d = devices.get(deviceId)
+    return deviceConnected(d) && kindMatches(d, kind) ? d : null
+  }
+  const sel = devices.get(selectedId)
+  if (deviceConnected(sel) && kindMatches(sel, kind)) return sel
   let best = null
-  for (const d of devices.values()) if (deviceConnected(d) && (!best || d.lastPollAt > best.lastPollAt)) best = d
-  if (best) selectedId = best.id
+  for (const d of devices.values()) {
+    if (deviceConnected(d) && kindMatches(d, kind) && (!best || d.lastPollAt > best.lastPollAt)) best = d
+  }
+  if (best && !deviceConnected(sel)) selectedId = best.id
   return best
 }
 
@@ -120,6 +147,9 @@ function deliverNext(d) {
     const res = d.waiter
     d.waiter = null
     d.waiterTimer = null
+    // A device can't poll while it runs a command, so count delivery as liveness — otherwise a
+    // long command (readPages, waitFor) makes it look disconnected mid-flight.
+    d.lastPollAt = Date.now()
     sendJson(res, 200, d.queue.shift())
   }
 }
@@ -139,12 +169,26 @@ export function setChatState(messages, mirroring = true) {
 }
 
 // Queue a command for a device and resolve with its result. Targets the selected device unless a
-// deviceId is given. Rejects if nothing is connected, or on the device's error/timeout.
-export function sendCommand(cmd, args = {}, timeoutMs = 25000, deviceId = null) {
+// deviceId is given; with `kind` only a device of that kind is eligible (see pickTarget). Rejects if
+// nothing suitable is connected, or on the device's error/timeout.
+export function sendCommand(cmd, args = {}, timeoutMs = 25000, deviceId = null, kind = null) {
   return new Promise((resolve, reject) => {
-    const target = pickTarget(deviceId)
+    const target = pickTarget(deviceId, kind)
     if (!target) {
-      return reject(new Error('no Ghost-Prime device is connected (load the Chrome extension, or connect the phone app)'))
+      const hint =
+        kind === KIND_BROWSER
+          ? 'no Ghost-Prime browser is connected (load the Chrome extension)'
+          : kind === KIND_PHONE
+            ? 'no Ghost-Prime phone is connected (open the connector app)'
+            : 'no Ghost-Prime device is connected (load the Chrome extension, or connect the phone app)'
+      const named = deviceId && devices.get(deviceId)
+      const wrongKind = named && kind && deviceConnected(named) && !kindMatches(named, kind)
+      // An explicit device is refused even if others of the kind are live (no rerouting); only add
+      // the "nothing connected" hint when that's actually the case.
+      const tail = bridgeConnected(null, kind) ? '' : ` — ${hint}`
+      if (wrongKind) return reject(new Error(`device "${named.name || named.id}" is a ${deviceKind(named)}, not a ${kind}${tail}`))
+      if (deviceId) return reject(new Error(`device "${(named && named.name) || deviceId}" is not connected${tail}`))
+      return reject(new Error(hint))
     }
     const id = `c${++cmdSeq}`
     const timer = setTimeout(() => {
@@ -153,15 +197,23 @@ export function sendCommand(cmd, args = {}, timeoutMs = 25000, deviceId = null) 
       target.queue = target.queue.filter((c) => c.id !== id)
       reject(new Error(`device "${target.name || target.id}" did not respond to "${cmd}" in time`))
     }, timeoutMs)
-    pending.set(id, { resolve, reject, timer })
+    pending.set(id, { resolve, reject, timer, deviceId: target.id })
     target.queue.push({ id, cmd, args, ts: Date.now() })
     deliverNext(target)
   })
 }
 
-// Fire-and-forget to EVERY connected device (used for 'reload', which restarts the worker).
-function broadcast(cmd, args = {}) {
+// Browser-only / phone-only sends, so callers can't accidentally target the other kind of hands.
+export const sendBrowserCommand = (cmd, args = {}, timeoutMs = 25000, deviceId = null) =>
+  sendCommand(cmd, args, timeoutMs, deviceId, KIND_BROWSER)
+export const sendPhoneCommand = (cmd, args = {}, timeoutMs = 25000, deviceId = null) =>
+  sendCommand(cmd, args, timeoutMs, deviceId, KIND_PHONE)
+
+// Fire-and-forget to EVERY connected device of a kind (used for 'reload', which restarts the
+// extension worker — phones don't know that command, so they're skipped).
+function broadcast(cmd, args = {}, kind = null) {
   for (const d of devices.values()) {
+    if (!kindMatches(d, kind)) continue
     d.queue.push({ id: 'fire', cmd, args, ts: Date.now() })
     deliverNext(d)
   }
@@ -189,9 +241,9 @@ export function watchExtensionForReload(dir, deployDir = null) {
       clearTimeout(timer)
       timer = setTimeout(() => {
         mirror() // keep the shared copy in sync FIRST, then reload (Chrome re-reads where it loaded)
-        if (bridgeConnected()) {
+        if (bridgeConnected(null, KIND_BROWSER)) {
           console.log('[ghost] extension changed → reloading it in Chrome')
-          broadcast('reload')
+          broadcast('reload', {}, KIND_BROWSER)
         }
       }, 300)
     })
@@ -263,7 +315,10 @@ export function startBridge() {
       }
       const wasConnected = deviceConnected(d)
       d.lastPollAt = Date.now()
-      d.kind = url.searchParams.get('kind') || d.kind || 'browser'
+      // Normalise the kind so an unknown/capitalised value can't produce a device that is neither
+      // browser nor phone (invisible to every kind-aware route yet still "connected").
+      const k = String(url.searchParams.get('kind') || d.kind || KIND_BROWSER).trim().toLowerCase()
+      d.kind = k === KIND_PHONE ? KIND_PHONE : KIND_BROWSER
       d.brand = url.searchParams.get('brand') || d.brand || ''
       d.name = url.searchParams.get('name') || d.name || d.brand || (d.kind === 'phone' ? 'Phone' : 'Chrome')
       if (!deviceConnected(devices.get(selectedId))) selectedId = id // auto-select the first/only live device
@@ -308,6 +363,7 @@ export function startBridge() {
           if (p) {
             clearTimeout(p.timer)
             pending.delete(id)
+            if (p.deviceId && devices.has(p.deviceId)) devices.get(p.deviceId).lastPollAt = Date.now() // answered → alive
             ok ? p.resolve(data) : p.reject(new Error(error || 'device error'))
           }
           sendJson(res, 200, { ok: true })
@@ -352,7 +408,15 @@ export function startBridge() {
       return
     }
 
-    if (url.pathname === '/ping') return sendJson(res, 200, { ok: true, connected: bridgeConnected(), devices: listDevices() })
+    if (url.pathname === '/ping') {
+      return sendJson(res, 200, {
+        ok: true,
+        connected: bridgeConnected(),
+        browser: bridgeConnected(null, KIND_BROWSER),
+        phone: bridgeConnected(null, KIND_PHONE),
+        devices: listDevices()
+      })
+    }
     sendJson(res, 404, { error: 'not found' })
   })
   server.on('error', (e) => console.error('[bridge] error:', e.message))

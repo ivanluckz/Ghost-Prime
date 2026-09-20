@@ -29,13 +29,14 @@ export function initDb(appRoot = app.getAppPath()) {
   // message count — so we only re-summarize a chat once it has grown enough new messages.
   if (!hasCol('sessions', 'summarized_at')) db.exec('ALTER TABLE sessions ADD COLUMN summarized_at INTEGER')
   if (!hasCol('sessions', 'summary_count')) db.exec('ALTER TABLE sessions ADD COLUMN summary_count INTEGER')
-  // Scheduled reminders (fired by the in-process scheduler; survive restarts).
-  db.exec(
-    `CREATE TABLE IF NOT EXISTS reminders (
-       id TEXT PRIMARY KEY, text TEXT NOT NULL, due_at INTEGER NOT NULL,
-       created_at INTEGER NOT NULL, fired INTEGER DEFAULT 0
-     )`
-  )
+  // Reminders: where they were asked for (NULL = desktop, 'discord:<channelId>'), so a reminder set
+  // from Discord is delivered back to that channel when it fires. Fresh installs get it from
+  // migrations/003; databases created before that migration get it here.
+  if (!hasCol('reminders', 'origin')) db.exec('ALTER TABLE reminders ADD COLUMN origin TEXT')
+  // Messages: the model-facing form of a user turn when it differs from what the chat shows —
+  // dropped files are inlined / images attached for the brain, while the bubble shows a 📎 chip.
+  // JSON (a string or an OpenAI-style content-part array); NULL when identical to `content`.
+  if (!hasCol('messages', 'model_content')) db.exec('ALTER TABLE messages ADD COLUMN model_content TEXT')
 
   // Drop memories that have expired since last run.
   db.prepare('DELETE FROM memories WHERE expires_at IS NOT NULL AND expires_at < ?').run(Date.now())
@@ -56,6 +57,7 @@ function unwrapTags(s) {
 // --- Sessions ------------------------------------------------------------
 // parentId nests this chat under another as a "sub-chat" (shown indented in the sidebar).
 export function startSession(parentId = null) {
+  if (!db) return null // sqlite failed to open (see index.js boot try/catch): the app runs without history
   currentSessionId = randomUUID()
   db.prepare('INSERT INTO sessions (id, started_at, parent_id) VALUES (?, ?, ?)').run(
     currentSessionId,
@@ -80,6 +82,7 @@ export function getSessionId() {
 // any sub-chat (has a parent — shown even while empty, so a freshly-branched thread appears at
 // once), and the ancestors of those so the tree always has its parent rows to hang under.
 export function recentSessions(limit = 40) {
+  if (!db) return []
   const rows = db
     .prepare(
       `SELECT s.id,
@@ -150,18 +153,39 @@ export function deleteAllSessions() {
 }
 
 // --- Messages ------------------------------------------------------------
-export function saveMessage(role, content) {
-  if (!db || !currentSessionId || !content) return
+// content: what the chat displays (plain text). opts.modelContent: what the brain was given when
+// it differs (inlined text files, image parts) — persisted so follow-up turns and reloaded
+// sessions keep the attachment, not just the "📎 name" chip.
+// opts.sessionId: the chat this row belongs to. A turn's reply lands AFTER the request started —
+// by then the user may have switched chats / hit New chat (which flips currentSessionId), so
+// callers capture the session at request start and pass it here; the default is the active one.
+// A row for a session that has since been deleted is dropped (nothing to attach it to).
+export function saveMessage(role, content, opts = {}) {
+  const sessionId = opts.sessionId ?? currentSessionId
+  if (!db || !sessionId || !content) return false
+  if (!db.prepare('SELECT 1 FROM sessions WHERE id = ?').get(sessionId)) return false
+  const mc = opts.modelContent
+  const modelJson = mc != null && mc !== content ? JSON.stringify(mc) : null
   db.prepare(
-    'INSERT INTO messages (id, session_id, role, content, created_at) VALUES (?, ?, ?, ?, ?)'
-  ).run(randomUUID(), currentSessionId, role, content, Date.now())
+    'INSERT INTO messages (id, session_id, role, content, model_content, created_at) VALUES (?, ?, ?, ?, ?, ?)'
+  ).run(randomUUID(), sessionId, role, content, modelJson, Date.now())
+  return true
 }
 
+// Rows carry `modelContent` (parsed) only when a richer model-facing form was stored.
 export function sessionMessages(sessionId) {
   if (!db) return []
   return db
-    .prepare('SELECT role, content, created_at FROM messages WHERE session_id = ? ORDER BY created_at ASC')
+    .prepare('SELECT role, content, model_content, created_at FROM messages WHERE session_id = ? ORDER BY created_at ASC')
     .all(sessionId)
+    .map(({ model_content, ...row }) => {
+      if (model_content == null) return row
+      try {
+        return { ...row, modelContent: JSON.parse(model_content) }
+      } catch {
+        return row
+      }
+    })
 }
 
 // --- Session auto-summary bookkeeping ------------------------------------
@@ -278,29 +302,63 @@ export function deleteMemory(id) {
   return db.prepare('DELETE FROM memories WHERE id = ?').run(id).changes > 0
 }
 
+// --- Agent run context ----------------------------------------------------
+// Which surface the CURRENT agent run is serving: { surface: 'desktop' | 'discord', origin, notify }.
+// `origin` is stamped onto reminders created during the run ('discord:<channelId>') and `notify`
+// (optional) delivers notify_user text back to that surface. Set by provider.js for the duration
+// of each streamChat — valid as a single module-level value because agent runs are serialized
+// globally there (one at a time across the desktop UI and every Discord channel).
+let activeRunContext = null
+export function setRunContext(ctx) {
+  activeRunContext = ctx || null
+}
+export function getRunContext() {
+  return activeRunContext
+}
+
 // --- Reminders -----------------------------------------------------------
-export function addReminder(text, dueAt) {
+// origin: where the reminder was asked for (defaults to the active run's origin; NULL = desktop).
+export function addReminder(text, dueAt, origin = activeRunContext?.origin ?? null) {
   if (!db || !text || !dueAt) return null
   const id = randomUUID()
-  db.prepare('INSERT INTO reminders (id, text, due_at, created_at, fired) VALUES (?, ?, ?, ?, 0)').run(
+  db.prepare('INSERT INTO reminders (id, text, due_at, created_at, fired, origin) VALUES (?, ?, ?, ?, 0, ?)').run(
     id,
     String(text),
     dueAt,
-    Date.now()
+    Date.now(),
+    origin ? String(origin) : null
   )
   return id
 }
 export function dueReminders(now = Date.now()) {
   if (!db) return []
-  return db.prepare('SELECT id, text, due_at FROM reminders WHERE fired = 0 AND due_at <= ? ORDER BY due_at ASC').all(now)
+  return db.prepare('SELECT id, text, due_at, origin FROM reminders WHERE fired = 0 AND due_at <= ? ORDER BY due_at ASC').all(now)
 }
 export function pendingReminders() {
   if (!db) return []
-  return db.prepare('SELECT id, text, due_at FROM reminders WHERE fired = 0 ORDER BY due_at ASC').all()
+  return db.prepare('SELECT id, text, due_at, origin FROM reminders WHERE fired = 0 ORDER BY due_at ASC').all()
+}
+
+// Listeners told about every reminder as it fires ({ id, text, due_at, origin }). The scheduler
+// (tools/reminders.js) marks a reminder fired right before handing it to the desktop onFire
+// callback, so this is the one hook that sees every firing — the Discord relay uses it to deliver
+// reminders whose origin is a Discord channel back to that channel. Returns an unsubscribe fn.
+const reminderFiredListeners = new Set()
+export function onReminderFired(listener) {
+  if (typeof listener !== 'function') return () => {}
+  reminderFiredListeners.add(listener)
+  return () => reminderFiredListeners.delete(listener)
 }
 export function markReminderFired(id) {
   if (!db || !id) return
+  const row = db.prepare('SELECT id, text, due_at, origin FROM reminders WHERE id = ? AND fired = 0').get(id)
   db.prepare('UPDATE reminders SET fired = 1 WHERE id = ?').run(id)
+  if (!row) return // already fired (or unknown) — never notify twice
+  for (const fn of reminderFiredListeners) {
+    try {
+      fn(row)
+    } catch {}
+  }
 }
 export function cancelReminder(id) {
   if (!db || !id) return false

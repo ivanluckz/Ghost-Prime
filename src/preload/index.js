@@ -2,6 +2,11 @@ import { contextBridge, ipcRenderer } from 'electron'
 
 let reqCounter = 0
 
+// Local onError subscribers, so a chat:send whose invoke itself rejects (IPC failure, handler
+// missing, unserializable payload) still ends the request in the UI with a chat:error instead of
+// leaving it on "working…" forever — main can only emit chat:error once its handler runs.
+const localErrorCbs = new Set()
+
 // Main decides the frame (it has .env; the renderer env doesn't) and passes it via additionalArguments.
 const nativeFrame = process.argv.includes('--ghost-native-frame=1')
 
@@ -15,8 +20,16 @@ contextBridge.exposeInMainWorld('ghost', {
   uiReady: () => ipcRenderer.send('ui:ready'),
   sendMessage(messages, mode, settings) {
     const requestId = `req_${Date.now()}_${reqCounter++}`
-    // Driven via events (chat:delta/done/error); ignore the invoke promise.
-    ipcRenderer.invoke('chat:send', { requestId, messages, mode, settings }).catch(() => {})
+    // Driven via events (chat:delta/done/error); the invoke promise only matters if it REJECTS —
+    // then main never got to emit chat:error, so synthesize one for the UI.
+    ipcRenderer.invoke('chat:send', { requestId, messages, mode, settings }).catch((e) => {
+      const payload = { requestId, message: e?.message || String(e) }
+      for (const cb of localErrorCbs) {
+        try {
+          cb(payload)
+        } catch {}
+      }
+    })
     return requestId
   },
   abort(requestId) {
@@ -40,7 +53,11 @@ contextBridge.exposeInMainWorld('ghost', {
   onError(cb) {
     const listener = (_e, payload) => cb(payload)
     ipcRenderer.on('chat:error', listener)
-    return () => ipcRenderer.removeListener('chat:error', listener)
+    localErrorCbs.add(cb)
+    return () => {
+      ipcRenderer.removeListener('chat:error', listener)
+      localErrorCbs.delete(cb)
+    }
   },
   recentSessions() {
     return ipcRenderer.invoke('db:recent-sessions')

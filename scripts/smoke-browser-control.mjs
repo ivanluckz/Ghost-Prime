@@ -2,7 +2,7 @@
 // element refs (across iframes), clicking/filling/hovering by ref, stale-ref detection, annotated
 // (Set-of-Mark) screenshots, click-triggered navigation settling, popup following, dialog +
 // download reporting, checkbox/select/contenteditable fill, find, cross-frame wait, tab switching.
-// Run: GHOST_BROWSER_HEADLESS=true GHOST_BROWSER_CHANNEL= GHOST_BROWSER_PROFILE=/tmp/ghost-pw GHOST_BROWSER_BACKEND=playwright node scripts/smoke-browser-control.mjs
+// Run: GHOST_BROWSER_HEADLESS=1 GHOST_BROWSER_CHANNEL= GHOST_BROWSER_PROFILE=/tmp/ghost-pw GHOST_BROWSER_BACKEND=playwright node scripts/smoke-browser-control.mjs
 import { createServer } from 'node:http'
 import { existsSync, unlinkSync } from 'node:fs'
 import * as browser from '../src/main/tools/browser.js'

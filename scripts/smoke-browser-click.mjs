@@ -1,7 +1,7 @@
 // Verify browser_click on the tricky real-world cases: clicks by visible text, ignores
 // hidden/zero-size duplicates, reaches buttons inside iframes, accepts standard CSS, repairs a
 // stray jQuery :contains(), and on a miss returns the page's clickable elements (not a bare
-// timeout). Run: GHOST_BROWSER_BACKEND=playwright GHOST_BROWSER_HEADLESS=true GHOST_BROWSER_CHANNEL=chromium GHOST_BROWSER_PROFILE=isolated node scripts/smoke-browser-click.mjs
+// timeout). Run: GHOST_BROWSER_BACKEND=playwright GHOST_BROWSER_HEADLESS=1 GHOST_BROWSER_CHANNEL=chromium GHOST_BROWSER_PROFILE=isolated node scripts/smoke-browser-click.mjs
 import './lib/force-playwright.mjs' // must come before browser.js (hoisted imports)
 import * as browser from '../src/main/tools/browser.js'
 

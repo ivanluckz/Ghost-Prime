@@ -1,63 +1,9 @@
 import { useEffect, useState } from 'react'
 import GhostCore from './GhostCore'
 
-// Glyph + kind per tool — kind drives the left-rail accent color (mirrors ToolCard.jsx).
-const TOOL_META = {
-  Bash: { glyph: '❯', kind: 'terminal' },
-  Read: { glyph: '▤', kind: 'file' },
-  Write: { glyph: '✎', kind: 'file' },
-  Edit: { glyph: '✎', kind: 'file' },
-  Glob: { glyph: '⌕', kind: 'search' },
-  Grep: { glyph: '⌕', kind: 'search' },
-  WebFetch: { glyph: '⤓', kind: 'web' },
-  WebSearch: { glyph: '⌕', kind: 'web' },
-  browser_navigate: { glyph: '◉', kind: 'browser' },
-  browser_get_page: { glyph: '◎', kind: 'browser' },
-  browser_get_text: { glyph: '▤', kind: 'browser' },
-  browser_click: { glyph: '⊙', kind: 'browser' },
-  browser_fill: { glyph: '✎', kind: 'browser' },
-  browser_screenshot: { glyph: '◉', kind: 'browser' },
-  browser_scroll: { glyph: '↕', kind: 'browser' },
-  browser_press_key: { glyph: '⌨', kind: 'browser' },
-  browser_wait_for: { glyph: '◷', kind: 'browser' }
-}
+// Tool glyphs/kinds are shared with ToolCard so the rail and the cards never drift apart.
+import { TOOL_META, summarizeInput } from './tools/ToolCard'
 
-// Strip SDK MCP prefixes (mcp__ghost-browser__browser_navigate → browser_navigate).
-const cleanName = (n) => (typeof n === 'string' && n.startsWith('mcp__') ? n.split('__').pop() : n)
-
-function summarize(input) {
-  if (!input || typeof input !== 'object') return ''
-  if (input.command) return input.command
-  if (input.file_path) return input.file_path
-  if (input.url) return input.url
-  if (input.selector) return input.value ? `${input.selector} ← ${input.value}` : input.selector
-  if (input.pattern) return input.pattern
-  if (input.query) return input.query
-  if (input.text) return input.text
-  try {
-    return JSON.stringify(input).slice(0, 80)
-  } catch {
-    return ''
-  }
-}
-
-const fmtDur = (ms) => (ms == null ? '' : ms < 1000 ? `${ms}ms` : `${(ms / 1000).toFixed(1)}s`)
-
-// Live-ticking elapsed time for the in-flight task. Isolated so only this label re-renders.
-function Elapsed({ since }) {
-  const [, tick] = useState(0)
-  useEffect(() => {
-    const id = setInterval(() => tick((n) => n + 1), 500)
-    return () => clearInterval(id)
-  }, [])
-  if (!since) return null
-  const s = Math.max(0, Math.floor((Date.now() - since) / 1000))
-  return <span className="act-elapsed">{s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${s % 60}s`}</span>
-}
-
-// Mission Control — the right-hand operational HUD. Everything it shows is derived from state that
-// already lives in Main (the in-flight task, the queue, and tool events) plus the browser target;
-// it's presentational and never drives the agent loop.
 export default function ActivityPanel({
   running,
   queue,
@@ -75,7 +21,7 @@ export default function ActivityPanel({
   const feed = (tools || []).slice(-14).reverse() // newest action first
   const browserActive = (tools || []).some((t) => t.status === 'running' && /browser/.test(t.name || ''))
   const lastNav = [...(tools || [])].reverse().find((t) => cleanName(t.name) === 'browser_navigate')
-  const lastUrl = lastNav ? summarize(lastNav.input) : ''
+  const lastUrl = lastNav ? summarizeInput(lastNav.input) : ''
   const targetLabel = browserTarget === 'active' ? 'your current tab' : "Ghost's own tab"
 
   return (
@@ -165,7 +111,7 @@ export default function ActivityPanel({
               {feed.map((t, i) => {
                 const name = cleanName(t.name)
                 const meta = TOOL_META[name] || { glyph: '∎', kind: 'tool' }
-                const arg = summarize(t.input)
+                const arg = summarizeInput(t.input)
                 return (
                   <div className={`act-tool tool-${meta.kind} ${t.status}${t.isError ? ' err' : ''}`} key={t.id || i}>
                     <span className="act-tool-status">

@@ -199,16 +199,34 @@ function siteCheck(policy, url) {
   return { ok: true }
 }
 
-function waitComplete(tabId, timeout = 30000) {
+// When each tab last started a navigation — so waitForNavigation right after a click that already
+// finished loading still reports navigated:true (mirrors the Playwright path's 3s "recent" window).
+const lastNavAt = new Map()
+chrome.tabs.onUpdated.addListener((tabId, info) => {
+  if (info.status === 'loading' || info.url) lastNavAt.set(tabId, Date.now())
+})
+chrome.tabs.onRemoved?.addListener((tabId) => lastNavAt.delete(tabId))
+
+// ---- Time budgets ----
+// The bridge counts this device as gone once ~30s pass without a poll, and we can't poll while a
+// command runs — so every command must finish (or be cut off by the watchdog, commandBudget) well
+// inside that window, and inside the app's own per-command timeout (browser.js sendCommand).
+const NAV_WAIT_MS = 24000 // navigate / back / forward / reload: how long to wait for 'complete'
+const READ_WAIT_MS = 22000 // readPages: per-page load wait (pages load in parallel)
+const WAIT_CAP_MS = 24000 // waitFor / waitForNavigation: the most a caller's timeoutMs can buy
+
+// Resolves true once the tab reports status 'complete', false if `timeout` passes first (a slow
+// page — still usable, just reported as partial — or a renderer frozen by a load-time dialog).
+function waitComplete(tabId, timeout = NAV_WAIT_MS) {
   return new Promise((resolve) => {
-    const done = () => {
+    const done = (complete) => {
       clearTimeout(to)
       chrome.tabs.onUpdated.removeListener(listener)
-      resolve()
+      resolve(complete)
     }
-    const to = setTimeout(done, timeout)
+    const to = setTimeout(() => done(false), timeout)
     const listener = (id, info) => {
-      if (id === tabId && info.status === 'complete') done()
+      if (id === tabId && info.status === 'complete') done(true)
     }
     chrome.tabs.onUpdated.addListener(listener)
   })
@@ -301,6 +319,163 @@ function cdpSend(target, method, params) {
   })
 }
 
+// ---- JavaScript dialogs ----
+// A page's alert()/confirm()/prompt() is a MODAL that freezes the renderer: chrome.scripting and
+// CDP calls into that tab never return until someone dismisses it — and on Ghost's background tab
+// nobody even sees it. Three layers keep the agent moving, mirroring the Playwright backend:
+//   1. Before every action that can trigger one (click/fill/clickAt/pressKey/hover) a MAIN-world
+//      guard replaces window.alert/confirm/prompt with auto-answering versions that record what was
+//      asked (installDialogGuardInPage). Covers the common case with no debugger banner at all.
+//   2. While the debugger is attached (keyboard, screenshots), Page.javascriptDialogOpening is
+//      answered over CDP (dialogs raised from a load or a timer, where the guard isn't installed yet).
+//   3. A per-command watchdog (runGuarded) so a wedged tab times out with a clear error instead of
+//      stalling the poll loop — and tries Page.handleJavaScriptDialog to unblock it.
+// Policy comes from the app (args.dialogs = GHOST_BROWSER_DIALOGS): 'accept' (default — the agent
+// triggered the action on purpose, so confirm() gets OK and prompt() its default) or 'dismiss'.
+// alert() is always acknowledged. Every answered dialog is reported in the action result's events.
+let dialogPolicy = 'accept'
+let pendingDialogs = [] // dialogs answered over CDP since the last action result
+
+function noteDialog(ev) {
+  pendingDialogs.push(ev)
+  if (pendingDialogs.length > 20) pendingDialogs.shift()
+}
+
+// Injected in the page's MAIN world (all frames): install (or re-policy) the dialog guard.
+// The guard is TEMPORARY: it wraps the page's alert/confirm/prompt only around Ghost's own action
+// and hands them back afterwards — collectEvents() restores them right after the action's dialogs
+// are drained, and as a safety net the guard restores itself GUARD_TTL_MS after it was armed. In
+// active-tab mode this is the tab the user is looking at, so a permanent hijack would silently
+// answer the user's own "Delete account?" confirm() and swallow alerts they should see.
+function installDialogGuardInPage({ accept, ttlMs }) {
+  const w = window
+  let g = w.__ghostDialogGuard
+  if (g && g.installed) {
+    g.accept = !!accept
+    clearTimeout(g.timer)
+    g.timer = setTimeout(g.restore, ttlMs)
+    return true
+  }
+  if (!g) {
+    g = { accept: !!accept, events: [], installed: false, native: null, timer: null, restore: null }
+    try {
+      Object.defineProperty(w, '__ghostDialogGuard', { value: g, configurable: true, enumerable: false })
+    } catch {
+      return false
+    }
+  }
+  g.accept = !!accept
+  const rec = (type, message, action, value) => {
+    g.events.push({ kind: 'dialog', type, message: String(message ?? '').slice(0, 500), action })
+    if (g.events.length > 20) g.events.shift()
+    return value
+  }
+  try {
+    g.native = { alert: w.alert, confirm: w.confirm, prompt: w.prompt }
+    w.alert = (m) => rec('alert', m, 'accepted', undefined)
+    w.confirm = (m) => rec('confirm', m, g.accept ? 'accepted' : 'dismissed', g.accept)
+    w.prompt = (m, d) => rec('prompt', m, g.accept ? 'accepted' : 'dismissed', g.accept ? String(d ?? '') : null)
+  } catch {
+    return false
+  }
+  g.installed = true
+  g.restore = () => {
+    if (!g.installed) return
+    g.installed = false
+    clearTimeout(g.timer)
+    g.timer = null
+    try {
+      w.alert = g.native.alert
+      w.confirm = g.native.confirm
+      w.prompt = g.native.prompt
+    } catch {}
+    g.native = null
+  }
+  g.timer = setTimeout(g.restore, ttlMs)
+  return true
+}
+
+// Injected in the MAIN world: hand back (and clear) the dialogs the guard answered, then give the
+// page its own alert/confirm/prompt back (the action that armed the guard is over). Recorded
+// events survive a self-expired guard, so nothing is lost if the drain comes after the TTL.
+function drainDialogsInPage() {
+  const w = window
+  const g = w.__ghostDialogGuard
+  if (!g) return []
+  const events = g.events.length ? g.events.splice(0) : []
+  try {
+    if (g.restore) g.restore()
+    delete w.__ghostDialogGuard
+  } catch {}
+  return events
+}
+
+// Injected in the MAIN world: restore the page's dialogs without reporting anything (used when a
+// command bails out before its events are collected).
+function uninstallDialogGuardInPage() {
+  const w = window
+  const g = w.__ghostDialogGuard
+  if (!g) return false
+  try {
+    if (g.restore) g.restore()
+    if (!g.events.length) delete w.__ghostDialogGuard
+  } catch {}
+  return true
+}
+
+// How long an armed guard stays in place if nobody drains it (a command that threw or timed out).
+const GUARD_TTL_MS = 3000
+
+async function installDialogGuard(tabId) {
+  try {
+    await chrome.scripting.executeScript({
+      target: { tabId, allFrames: true },
+      world: 'MAIN',
+      func: installDialogGuardInPage,
+      args: [{ accept: dialogPolicy !== 'dismiss', ttlMs: GUARD_TTL_MS }]
+    })
+  } catch {
+    // chrome:// / store pages and the like refuse injection — the watchdog still covers those
+  }
+}
+
+// Restore the page's dialogs when a command fails/times out before collectEvents() ran. Raced so a
+// frozen renderer can't stall us; the in-page TTL restores them anyway shortly after.
+async function uninstallDialogGuard(tabId) {
+  if (tabId == null) return
+  try {
+    await Promise.race([
+      chrome.scripting.executeScript({ target: { tabId, allFrames: true }, world: 'MAIN', func: uninstallDialogGuardInPage }),
+      sleep(1000)
+    ])
+  } catch {}
+}
+
+// Everything notable since the last action result: guard-answered dialogs from every frame, then
+// the ones handled over CDP. Returned as `events` (the app formats them for the agent).
+async function collectEvents(tabId) {
+  const events = []
+  try {
+    const frames = await chrome.scripting.executeScript({ target: { tabId, allFrames: true }, world: 'MAIN', func: drainDialogsInPage })
+    for (const f of frames) for (const ev of f?.result || []) events.push(ev)
+  } catch {}
+  events.push(...pendingDialogs)
+  pendingDialogs = []
+  return events
+}
+
+// Layer 2: dialogs that open while the debugger is attached (Page.enable is on for every session).
+chrome.debugger.onEvent?.addListener((source, method, params) => {
+  if (method !== 'Page.javascriptDialogOpening' || !source || source.tabId == null) return
+  const type = (params && params.type) || 'alert'
+  const accept = type === 'alert' || type === 'beforeunload' || dialogPolicy !== 'dismiss'
+  const opts = { accept }
+  if (accept && type === 'prompt') opts.promptText = (params && params.defaultPrompt) || ''
+  cdpSend({ tabId: source.tabId }, 'Page.handleJavaScriptDialog', opts)
+    .then(() => noteDialog({ kind: 'dialog', type, message: String((params && params.message) || '').slice(0, 500), action: accept ? 'accepted' : 'dismissed' }))
+    .catch(() => noteDialog({ kind: 'dialog', type, message: String((params && params.message) || '').slice(0, 500), action: 'closed' }))
+})
+
 // Ctrl/Cmd + C/V/X → 'copy' | 'paste' | 'cut' | null. These go through the real system clipboard
 // (the app passes clipboardText in for paste and reads `copied` back out) — a synthetic Ctrl+V
 // won't make Chrome paste, and a synthetic Ctrl+C won't write the clipboard.
@@ -327,7 +502,9 @@ function getSelectionInPage() {
 // banner FLICKER on every keystroke and screenshot — so instead we attach once, keep the session
 // warm for a short idle window (so a burst of CDP ops reuses it), then auto-detach so the banner
 // clears once the agent pauses. Commands run one at a time, so no locking is needed.
-const dbg = { tabId: null, timer: null }
+// pinnedUntil: keep the session on this tab past the idle window (set after a wedge, so a retry's
+// load-time dialog is answered over CDP instead of freezing the tab again — see recoverWedgedTab).
+const dbg = { tabId: null, timer: null, pinnedUntil: 0 }
 
 function detachDebugger() {
   const id = dbg.tabId
@@ -336,8 +513,15 @@ function detachDebugger() {
     dbg.timer = null
   }
   dbg.tabId = null
+  dbg.pinnedUntil = 0
   if (id == null) return Promise.resolve()
   return new Promise((r) => chrome.debugger.detach({ tabId: id }, () => { void chrome.runtime.lastError; r() }))
+}
+
+// (Re)arm the idle auto-detach: the usual short warm window, or the pin's remainder if longer.
+function scheduleDetach() {
+  if (dbg.timer) clearTimeout(dbg.timer)
+  dbg.timer = setTimeout(detachDebugger, Math.max(1800, dbg.pinnedUntil - Date.now()))
 }
 
 // Chrome detached us (DevTools opened, or the tab navigated/closed) — drop our state so the next
@@ -347,6 +531,7 @@ chrome.debugger.onDetach?.addListener((source) => {
     if (dbg.timer) clearTimeout(dbg.timer)
     dbg.timer = null
     dbg.tabId = null
+    dbg.pinnedUntil = 0
   }
 })
 
@@ -364,11 +549,15 @@ async function withDebugger(tabId, fn) {
       })
     })
     dbg.tabId = tabId
+    // Page events on for the whole session so Page.javascriptDialogOpening reaches the handler above.
+    // Raced: a renderer frozen behind a modal dialog never answers, and the attach must still be
+    // usable for the Page.handleJavaScriptDialog that unfreezes it (recoverWedgedTab).
+    await Promise.race([cdpSend({ tabId }, 'Page.enable'), sleep(1500)]).catch(() => {})
   }
   try {
     return await fn({ tabId })
   } finally {
-    if (dbg.tabId === tabId) dbg.timer = setTimeout(detachDebugger, 1800) // keep warm, then auto-detach
+    if (dbg.tabId === tabId) scheduleDetach() // keep warm, then auto-detach
   }
 }
 
@@ -599,7 +788,67 @@ function pageSnapshotInPage(maxItems) {
     if (selects.length >= cap) break
   }
   const excerpt = (document.body?.innerText || '').replace(/\s+/g, ' ').trim().slice(0, 1200)
-  return { url: location.href, title: document.title, buttons, links, fields, selects, excerpt }
+  // Where this frame sits in the TOP document's viewport (walking up same-origin frameElements), so
+  // its element rects can be drawn on an annotated screenshot. null = cross-origin ancestor → the
+  // frame can't tell where it is; its elements still get refs, just no drawn mark.
+  let offset = { x: 0, y: 0 }
+  try {
+    for (let w = window; w !== w.parent; w = w.parent) {
+      const fe = w.frameElement
+      if (!fe) {
+        offset = null
+        break
+      }
+      const r = fe.getBoundingClientRect()
+      offset.x += r.left + fe.clientLeft
+      offset.y += r.top + fe.clientTop
+    }
+  } catch {
+    offset = null
+  }
+  return { url: location.href, title: document.title, buttons, links, fields, selects, excerpt, offset, viewport: { w: window.innerWidth, h: window.innerHeight } }
+}
+
+// Injected (top frame): draw every numbered element's ref onto the page (Set-of-Mark) so the
+// screenshot itself tells the model which number to click. Same overlay as browser.js
+// drawMarksInPage; removed right after the capture.
+function drawMarksInPage(marks) {
+  const old = document.getElementById('__ghost_som')
+  if (old) old.remove()
+  const root = document.createElement('div')
+  root.id = '__ghost_som'
+  root.style.cssText = 'position:fixed;inset:0;pointer-events:none;z-index:2147483647;font:bold 11px/1.2 system-ui,sans-serif'
+  for (const m of marks) {
+    const box = document.createElement('div')
+    box.style.cssText = `position:absolute;left:${m.x}px;top:${m.y}px;width:${m.w}px;height:${m.h}px;outline:2px solid #e6194b;outline-offset:-1px;box-sizing:border-box`
+    const tag = document.createElement('span')
+    tag.textContent = String(m.ref)
+    // Label sits just above the box; if the box touches the top edge, tuck it inside instead.
+    const inside = m.y < 14
+    tag.style.cssText =
+      `position:absolute;left:0;top:0;${inside ? '' : 'transform:translateY(-100%);'}` +
+      'background:#e6194b;color:#fff;padding:1px 4px;border-radius:2px;white-space:nowrap;line-height:1.2'
+    box.appendChild(tag)
+    root.appendChild(box)
+  }
+  ;(document.body || document.documentElement).appendChild(root)
+  // chrome.scripting awaits a returned promise: resolve only once the overlay has been PAINTED
+  // (two animation frames), so captureVisibleTab / Page.captureScreenshot can't grab the frame
+  // from just before it appeared. Falls through on a hidden/background tab (rAF doesn't fire there).
+  return new Promise((resolve) => {
+    let done = false
+    const finish = () => {
+      if (done) return
+      done = true
+      resolve(true)
+    }
+    requestAnimationFrame(() => requestAnimationFrame(finish))
+    setTimeout(finish, 300)
+  })
+}
+function removeMarksInPage() {
+  const el = document.getElementById('__ghost_som')
+  if (el) el.remove()
 }
 
 function clickAtInPage({ x, y }) {
@@ -892,7 +1141,7 @@ async function readOnePage(url, keepOpen) {
   try {
     tab = await chrome.tabs.create({ url, active: false })
     await addToGroup(tab.id) // multi-page reads also land in the Ghost-Prime group
-    await waitComplete(tab.id)
+    await waitComplete(tab.id, READ_WAIT_MS)
     await sleep(400) // let late-rendered content settle
     const [{ result }] = await chrome.scripting.executeScript({ target: { tabId: tab.id }, func: getTextInPage })
     const out = { url: (result && result.url) || url, title: (result && result.title) || '', text: (result && result.text) || '' }
@@ -906,7 +1155,101 @@ async function readOnePage(url, keepOpen) {
   }
 }
 
+const SNAP_KINDS = ['buttons', 'links', 'fields', 'selects']
+
+// Snapshot every frame of a tab and merge into ONE numbered list (refs 1..N across frames), each
+// item carrying a `[data-ghost-ref=…]` selector the app replays for { ref: N } actions. Subframe
+// rects are shifted into top-viewport coordinates when the frame could report its offset.
+async function snapshotTab(tabId, limit) {
+  const cap = Math.min(Number(limit) || 40, 60)
+  const frames = await injectAllFrames(tabId, pageSnapshotInPage, cap)
+  const top = frames.find((f) => f.frameId === 0) || frames[0]
+  const main = { ...(top?.result || {}) }
+  for (const f of frames) {
+    if (f === top || !f?.result) continue
+    const off = f.result.offset
+    for (const k of SNAP_KINDS) {
+      const items = (f.result[k] || []).map((it) => ({
+        ...it,
+        rect: off && it.rect ? { x: it.rect.x + off.x, y: it.rect.y + off.y, w: it.rect.w, h: it.rect.h } : null
+      }))
+      main[k] = [...(main[k] || []), ...items]
+    }
+  }
+  for (const k of SNAP_KINDS) main[k] = (main[k] || []).slice(0, cap)
+  // Number the merged list here (one sequence across frames); the app keeps ref → selector.
+  let n = 1
+  for (const k of SNAP_KINDS) {
+    for (const it of main[k]) {
+      it.ref = n++
+      if (it.refAttr) it.refSelector = `[data-ghost-ref="${it.refAttr}"]`
+    }
+  }
+  delete main.offset
+  return main
+}
+
+// The numbered elements of a snapshot that are actually on screen, clipped to the top viewport —
+// what an annotated screenshot draws.
+function marksOf(snap) {
+  const vw = snap.viewport?.w || 0
+  const vh = snap.viewport?.h || 0
+  const out = []
+  for (const k of SNAP_KINDS) {
+    for (const it of snap[k] || []) {
+      const r = it.rect
+      if (!r || it.ref == null) continue
+      if (r.x + r.w < 0 || r.y + r.h < 0 || (vw && r.x > vw) || (vh && r.y > vh)) continue
+      const x = Math.max(0, r.x)
+      const y = Math.max(0, r.y)
+      const w = (vw ? Math.min(r.x + r.w, vw) : r.x + r.w) - x
+      const h = (vh ? Math.min(r.y + r.h, vh) : r.y + r.h) - y
+      if (w > 2 && h > 2) out.push({ ref: it.ref, label: it.label || it.href || '', x, y, w, h })
+    }
+  }
+  return out
+}
+
+// PNG (base64) of a tab. Cheapest path first: a visible tab's viewport needs no debugger; a
+// background tab or a full-page capture goes over CDP (no banner flicker — the session is reused);
+// quiet mode / a blocked debugger brings the tab forward and captures the visible viewport.
+async function captureTab(tab, fullPage) {
+  if (!fullPage && tab.active) {
+    try {
+      const dataUrl = await chrome.tabs.captureVisibleTab(tab.windowId, { format: 'png' })
+      const b64 = String(dataUrl).split(',')[1] || ''
+      if (b64) return b64
+    } catch {}
+  }
+  if (!cfg.quietDebugger) {
+    try {
+      const shot = await withDebugger(tab.id, async (target) => {
+        const params = { format: 'png', captureBeyondViewport: fullPage }
+        if (fullPage) {
+          const m = await cdpSend(target, 'Page.getLayoutMetrics').catch(() => null)
+          const c = m && (m.cssContentSize || m.contentSize)
+          if (c) params.clip = { x: 0, y: 0, width: Math.ceil(c.width), height: Math.ceil(c.height), scale: 1 }
+        }
+        return cdpSend(target, 'Page.captureScreenshot', params)
+      })
+      if (shot && shot.data) return shot.data
+    } catch {}
+  }
+  await chrome.tabs.update(tab.id, { active: true }).catch(() => {})
+  await sleep(150)
+  const dataUrl = await chrome.tabs.captureVisibleTab(tab.windowId, { format: 'png' })
+  return String(dataUrl).split(',')[1] || ''
+}
+
+// The tab the command in flight targets — so the watchdog can try to unblock it (runGuarded).
+let currentTabId = null
+
 async function run(cmd, args) {
+  // Forget the previous command's tab first: readPages/listTabs/reload never resolve a tab, and
+  // the watchdog must not attach the debugger to whatever the LAST command touched (in active-tab
+  // mode, the tab the user is looking at) when one of those overruns.
+  currentTabId = null
+  if (typeof args.dialogs === 'string') dialogPolicy = args.dialogs.toLowerCase() === 'dismiss' ? 'dismiss' : 'accept'
   if (cmd === 'reload') {
     chrome.runtime.reload() // re-reads the unpacked files from disk → picks up edits live
     return { ok: true }
@@ -946,6 +1289,7 @@ async function run(cmd, args) {
     }
   }
   const tab = await resolveTab(cmd, args)
+  currentTabId = tab.id
   // Per-site permission gate: navigate is judged by where it's GOING; every other action by the
   // page it would act ON. Back/forward/close only LEAVE the page, so they're the way off a blocked one.
   if (cmd !== 'goBack' && cmd !== 'goForward' && cmd !== 'closeTab') {
@@ -955,13 +1299,20 @@ async function run(cmd, args) {
   // Visual "I'm acting here" glow (toggleable). Skip passive reads (getText/screenshot/waitFor) and
   // navigate (page is about to change — it glows once it has loaded, below).
   if (cmd === 'click' || cmd === 'fill' || cmd === 'clickAt' || cmd === 'scroll' || cmd === 'pressKey') maybeGlow(tab.id)
+  // Anything that can trigger alert()/confirm()/prompt() gets the auto-answering guard first, so a
+  // modal never freezes the tab under us (see the JavaScript dialogs section).
+  if (cmd === 'click' || cmd === 'fill' || cmd === 'clickAt' || cmd === 'pressKey' || cmd === 'hover') await installDialogGuard(tab.id)
   switch (cmd) {
     case 'navigate': {
       await chrome.tabs.update(tab.id, { url: args.url })
-      await waitComplete(tab.id)
+      const complete = await waitComplete(tab.id)
       const t = await chrome.tabs.get(tab.id)
       maybeGlow(tab.id)
-      return { url: t.url, title: t.title }
+      // Slow page: it's on screen but still loading when the wait ran out — hand it over anyway
+      // (partial, like the Playwright path) rather than failing the navigation.
+      const out = { url: t.url, title: t.title, events: await collectEvents(tab.id) }
+      if (!complete) out.partial = true
+      return out
     }
     case 'goBack':
     case 'goForward': {
@@ -974,36 +1325,17 @@ async function run(cmd, args) {
       await waitComplete(tab.id)
       const t = await chrome.tabs.get(tab.id)
       maybeGlow(tab.id)
-      return { url: t.url, title: t.title }
+      return { url: t.url, title: t.title, events: await collectEvents(tab.id) }
     }
     case 'reloadTab': {
       await chrome.tabs.reload(tab.id)
       await waitComplete(tab.id)
       const t = await chrome.tabs.get(tab.id)
       maybeGlow(tab.id)
-      return { url: t.url, title: t.title }
+      return { url: t.url, title: t.title, events: await collectEvents(tab.id) }
     }
-    case 'getPage': {
-      const frames = await injectAllFrames(tab.id, pageSnapshotInPage, args.limit || 40)
-      const main = { ...(frames.find((f) => f.frameId === 0)?.result || frames[0]?.result || {}) }
-      for (const f of frames) {
-        if (f.frameId === 0 || !f?.result) continue
-        for (const k of ['buttons', 'links', 'fields', 'selects']) {
-          main[k] = [...(main[k] || []), ...(f.result[k] || [])]
-        }
-      }
-      const cap = Math.min(Number(args.limit) || 40, 60)
-      for (const k of ['buttons', 'links', 'fields', 'selects']) main[k] = (main[k] || []).slice(0, cap)
-      // Number the merged list here (one sequence across frames); the app keeps ref → selector.
-      let n = 1
-      for (const k of ['buttons', 'links', 'fields', 'selects']) {
-        for (const it of main[k]) {
-          it.ref = n++
-          if (it.refAttr) it.refSelector = `[data-ghost-ref="${it.refAttr}"]`
-        }
-      }
-      return main
-    }
+    case 'getPage':
+      return snapshotTab(tab.id, args.limit || 40)
     case 'getText': {
       const offset = Math.max(0, Number(args.offset) || 0)
       const limit = Math.min(Number(args.limit) || 20000, 50000)
@@ -1021,44 +1353,36 @@ async function run(cmd, args) {
       return { url: main.url || tab.url, title: main.title || '', text, offset, nextOffset, totalChars: full.length }
     }
     case 'screenshot': {
-      const fullPage = !!args.fullPage
+      const annotate = !!args.annotate
+      const fullPage = !!args.fullPage && !annotate // marks are viewport-only, like the Playwright path
       // Clear the glow first so it never shows up inside the screenshot the agent looks at.
       await chrome.scripting.executeScript({ target: { tabId: tab.id }, func: removeGlowInPage }).catch(() => {})
-      // Cheap path (no debugger banner): a visible tab, viewport only — captureVisibleTab can't do
-      // full-page, so skip it when fullPage was asked for.
-      if (!fullPage && tab.active) {
-        try {
-          const dataUrl = await chrome.tabs.captureVisibleTab(tab.windowId, { format: 'png' })
-          return { base64: String(dataUrl).split(',')[1] || '', url: tab.url }
-        } catch {}
+      let marks = null
+      let refs = null
+      if (annotate) {
+        // Fresh snapshot so the numbers on the image are exactly what browser_click { ref } acts on;
+        // the app records `refs` the same way it does for getPage.
+        const snap = await snapshotTab(tab.id, 60)
+        marks = marksOf(snap)
+        refs = SNAP_KINDS.flatMap((k) => (snap[k] || []).map((it) => ({ ref: it.ref, label: it.label || it.href || '', selector: it.refSelector || it.selector || '', kind: k })))
+        await chrome.scripting.executeScript({ target: { tabId: tab.id }, func: drawMarksInPage, args: [marks] }).catch(() => {})
       }
-      // CDP path: screenshots a background tab WITHOUT bringing it forward, and is the ONLY way to
-      // capture the full scrollable page (captureBeyondViewport). Needs the debugger, so quiet mode
-      // skips it and falls through to a visible-viewport capture instead.
-      if (!cfg.quietDebugger) {
-        try {
-          const shot = await withDebugger(tab.id, async (target) => {
-            await cdpSend(target, 'Page.enable').catch(() => {})
-            const params = { format: 'png', captureBeyondViewport: fullPage }
-            if (fullPage) {
-              const m = await cdpSend(target, 'Page.getLayoutMetrics').catch(() => null)
-              const c = m && (m.cssContentSize || m.contentSize)
-              if (c) params.clip = { x: 0, y: 0, width: Math.ceil(c.width), height: Math.ceil(c.height), scale: 1 }
-            }
-            return cdpSend(target, 'Page.captureScreenshot', params)
-          })
-          if (shot && shot.data) return { base64: shot.data, url: tab.url }
-        } catch {}
+      let base64
+      try {
+        base64 = await captureTab(tab, fullPage)
+      } finally {
+        if (annotate) await chrome.scripting.executeScript({ target: { tabId: tab.id }, func: removeMarksInPage }).catch(() => {})
       }
-      // Quiet mode, or debugger blocked/failed: bring it forward and capture the visible viewport.
-      await chrome.tabs.update(tab.id, { active: true }).catch(() => {})
-      await sleep(150)
-      const dataUrl = await chrome.tabs.captureVisibleTab(tab.windowId, { format: 'png' })
-      return { base64: String(dataUrl).split(',')[1] || '', url: tab.url }
+      const out = { base64, url: tab.url }
+      if (annotate) {
+        out.marks = marks.map((m) => ({ ref: m.ref, label: m.label }))
+        out.refs = refs
+      }
+      return out
     }
     case 'click': {
       const { frames, result } = await actInOneFrame(tab.id, clickInPage, args)
-      if (result?.ok) return { ok: true, url: tab.url }
+      if (result?.ok) return { ok: true, url: tab.url, events: await collectEvents(tab.id) }
       if (frames.some((f) => f?.result?.invalid)) {
         throw new Error(
           `Invalid CSS selector ${JSON.stringify(args.selector)}. Use a standard CSS selector, or click by visible text with { text: "..." }.`
@@ -1071,7 +1395,7 @@ async function run(cmd, args) {
     }
     case 'fill': {
       const { frames, result } = await actInOneFrame(tab.id, fillInPage, args)
-      if (result?.ok) return { ok: true }
+      if (result?.ok) return { ok: true, url: tab.url, events: await collectEvents(tab.id) }
       const opts = [...new Set(frames.flatMap((f) => f?.result?.options || []))]
       if (opts.length) {
         throw new Error(`Couldn't match "${args.value}" to a dropdown option. Choose one of: ${opts.map((o) => `"${o}"`).join(', ')}.`)
@@ -1126,11 +1450,11 @@ async function run(cmd, args) {
           args: [hit.result]
         }).catch(() => {})
       }
-      return { ok: true, url: tab.url }
+      return { ok: true, url: tab.url, events: await collectEvents(tab.id) }
     }
     case 'clickAt': {
       const [{ result }] = await chrome.scripting.executeScript({ target: { tabId: tab.id }, func: clickAtInPage, args: [args] })
-      if (result && result.ok) return { ok: true, url: tab.url }
+      if (result && result.ok) return { ok: true, url: tab.url, events: await collectEvents(tab.id) }
       throw new Error('no clickable element at that point')
     }
     case 'scroll': {
@@ -1138,7 +1462,7 @@ async function run(cmd, args) {
       return result || { ok: true }
     }
     case 'waitFor': {
-      const timeoutMs = Math.min(Number(args.timeoutMs) || 10000, 30000)
+      const timeoutMs = Math.min(Number(args.timeoutMs) || 10000, WAIT_CAP_MS)
       const [{ result }] = await chrome.scripting.executeScript({
         target: { tabId: tab.id },
         func: waitInPage,
@@ -1164,7 +1488,7 @@ async function run(cmd, args) {
           func: typeInPage,
           args: [{ text: args.text, keys: args.keys, clipboardText: args.clipboardText }]
         })
-        return { ok: true, url: tab.url, copied: result?.copied ?? null }
+        return { ok: true, url: tab.url, copied: result?.copied ?? null, events: await collectEvents(tab.id) }
       }
       const keys = args.keys == null ? [] : Array.isArray(args.keys) ? args.keys : [args.keys]
       const ops = []
@@ -1210,7 +1534,7 @@ async function run(cmd, args) {
 
       if (needsDebugger) await withDebugger(tab.id, runOps)
       else await runOps(null)
-      return { ok: true, url: tab.url, copied }
+      return { ok: true, url: tab.url, copied, events: await collectEvents(tab.id) }
     }
     case 'closeTab': {
       try {
@@ -1234,9 +1558,10 @@ async function run(cmd, args) {
       // as "started"; then wait (up to timeoutMs) for it to complete. If nothing starts, return
       // early instead of stalling for the whole timeout — mirrors the Playwright path.
       try {
-        const total = Number(args.timeoutMs) || 30000
+        const total = Math.min(Number(args.timeoutMs) || 30000, WAIT_CAP_MS)
         const t0 = Date.now()
-        let started = tab.status === 'loading'
+        const recent = t0 - (lastNavAt.get(tab.id) || 0) < 3000 // one just happened — don't wait for another
+        let started = tab.status === 'loading' || recent
         await new Promise((resolve) => {
           let startTimer = null
           let hardTimer = null
@@ -1285,6 +1610,115 @@ async function run(cmd, args) {
 // alarm from ever restarting it, so the bridge would silently stop until Chrome killed the worker.
 const POLL_TIMEOUT = 35000
 
+// ---- Command watchdog ----
+// How long a command may run before we give up on it: budget + the recovery below (≤ RECOVER_MS)
+// stays UNDER the app's sendCommand timeout for that command (browser.js), so the app receives our
+// clear "wedged tab" error rather than a generic "did not respond" — and under the bridge's ~30s
+// no-poll staleness window, so a slow command never makes the app think Chrome went away (and
+// auto-launch another one). A command that never returns (renderer frozen by a modal dialog or a
+// hung script) would otherwise block this loop forever.
+const RECOVER_MS = 2500
+const PIN_MS = 90000 // how long the debugger stays on a wedged tab so a retry's load-time dialog is caught
+function commandBudget(cmd, args) {
+  const ms = Number(args && args.timeoutMs) || 0
+  switch (cmd) {
+    case 'readPages':
+      return READ_WAIT_MS + 4000 // app: 60s
+    case 'waitFor':
+      return Math.min(ms || 10000, WAIT_CAP_MS) + 2000 // app: timeoutMs + 6s
+    case 'waitForNavigation':
+      return Math.min(ms || 30000, WAIT_CAP_MS) + 2000 // app: timeoutMs + 6s
+    case 'navigate':
+    case 'goBack':
+    case 'goForward':
+    case 'reloadTab':
+      return NAV_WAIT_MS + 3000 // app: 35s
+    case 'pressKey':
+      return 26000 // app: 30s
+    case 'listTabs':
+    case 'closeTab':
+      return 12000 // app: 15s
+    default:
+      return 21000 // click / fill / getPage / getText / screenshot / scroll / find / hover / clickAt — app: 25s
+  }
+}
+
+class WedgedError extends Error {}
+
+// A command that overran its budget: if the tab is stuck behind a modal dialog, close it over CDP
+// (layers 1–2 didn't get the chance — e.g. an alert() fired on load) so the NEXT command works,
+// and tell the agent exactly what happened either way.
+async function recoverWedgedTab(cmd, budget) {
+  const secs = Math.round(budget / 1000)
+  const tabId = currentTabId
+  // No single tab behind this command (readPages fans out over its own tabs; listTabs touches
+  // none): there's nothing to unblock, so just say what happened.
+  if (tabId == null) {
+    if (cmd === 'readPages') {
+      return `"readPages" timed out after ${secs}s — some of the pages took too long to load. Retry with fewer urls (or read the slow ones one at a time with browser_navigate + browser_get_text).`
+    }
+    return `"${cmd}" timed out after ${secs}s — Chrome didn't answer in time. Try again in a moment.`
+  }
+  // The guard only wraps the page's dialogs around our action — hand them back (best-effort, raced:
+  // the tab may be the thing that's wedged).
+  await uninstallDialogGuard(tabId)
+  if (!cfg.quietDebugger) {
+    try {
+      const accept = dialogPolicy !== 'dismiss'
+      // Raced: the attach + handleJavaScriptDialog must answer inside RECOVER_MS or the app's own
+      // timeout wins and the agent gets a bare "did not respond" — a frozen renderer can't stall us.
+      const closed = await Promise.race([
+        withDebugger(tabId, (target) => cdpSend(target, 'Page.handleJavaScriptDialog', { accept })).then(() => true),
+        sleep(RECOVER_MS).then(() => false)
+      ])
+      if (!closed) throw new Error('recovery timed out')
+      return (
+        `"${cmd}" timed out after ${secs}s because the page had a blocking JavaScript dialog open — ` +
+        `I ${accept ? 'accepted' : 'dismissed'} it, so the tab is responsive again. Re-check the page (browser_get_page) and retry.`
+      )
+    } catch {
+      // Either nothing was showing (frozen script / dead renderer), or the dialog opened BEFORE we
+      // attached — CDP can only close dialogs its own session saw open ("No dialog is showing"), the
+      // load-time alert() case. Keep the session pinned on this tab for a while so a retry
+      // (browser_reload / navigate again) raises Page.javascriptDialogOpening to the handler above,
+      // which answers it — then the page loads and the dialog is reported like any other.
+      if (dbg.tabId === tabId) {
+        dbg.pinnedUntil = Date.now() + PIN_MS
+        scheduleDetach()
+        return (
+          `"${cmd}" timed out after ${secs}s — the tab isn't responding (most likely a dialog the page opened while ` +
+          "loading, which I couldn't reach in time; otherwise a frozen page script or a crashed renderer). " +
+          "I'm now watching that tab and will answer any dialog it puts up, so try browser_reload (or open the page again) " +
+          'and then re-check it with browser_get_page.'
+        )
+      }
+    }
+  }
+  return (
+    `"${cmd}" timed out after ${secs}s — the tab isn't responding (a frozen page script, a modal the page put up, ` +
+    'or a crashed renderer). Try browser_reload, or browser_close_tab and open the page again.'
+  )
+}
+
+async function runGuarded(cmd, args) {
+  const budget = commandBudget(cmd, args)
+  let timer = null
+  const watchdog = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new WedgedError()), budget)
+  })
+  try {
+    return await Promise.race([run(cmd, args), watchdog])
+  } catch (e) {
+    if (!(e instanceof WedgedError)) {
+      await uninstallDialogGuard(currentTabId) // the action threw before its events were collected
+      throw e
+    }
+    throw new Error(await recoverWedgedTab(cmd, budget))
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
 async function pollOnce() {
   const ctrl = new AbortController()
   const to = setTimeout(() => ctrl.abort(), POLL_TIMEOUT)
@@ -1305,7 +1739,7 @@ async function pollOnce() {
   }
   let result
   try {
-    result = { id: job.id, ok: true, data: await run(job.cmd, job.args || {}) }
+    result = { id: job.id, ok: true, data: await runGuarded(job.cmd, job.args || {}) }
   } catch (e) {
     result = { id: job.id, ok: false, error: String((e && e.message) || e) }
   }

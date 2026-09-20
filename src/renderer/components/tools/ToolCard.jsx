@@ -1,15 +1,24 @@
 import { useState } from 'react'
 
-const TOOL_META = {
+export const TOOL_META = {
   Bash: { glyph: '❯', kind: 'terminal' },
   terminal_run: { glyph: '❯', kind: 'terminal' },
   shell_run: { glyph: '❯', kind: 'terminal' },
+  shell_open: { glyph: '❯', kind: 'terminal' },
+  shell_read: { glyph: '❯', kind: 'terminal' },
+  shell_list: { glyph: '❯', kind: 'terminal' },
+  shell_kill: { glyph: '❯', kind: 'terminal' },
   Read: { glyph: '▤', kind: 'file' },
   file_read: { glyph: '▤', kind: 'file' },
   Write: { glyph: '✎', kind: 'file' },
   file_write: { glyph: '✎', kind: 'file' },
   Edit: { glyph: '✎', kind: 'file' },
   file_edit: { glyph: '✎', kind: 'file' },
+  file_create: { glyph: '＋', kind: 'file' },
+  file_move: { glyph: '⇄', kind: 'file' },
+  file_delete: { glyph: '✕', kind: 'file' },
+  undo_last: { glyph: '↶', kind: 'file' },
+  undo_list: { glyph: '↶', kind: 'file' },
   Glob: { glyph: '⌕', kind: 'search' },
   file_search: { glyph: '⌕', kind: 'search' },
   Grep: { glyph: '⌕', kind: 'search' },
@@ -33,6 +42,9 @@ const TOOL_META = {
   browser_click: { glyph: '⊙', kind: 'browser' },
   browser_fill: { glyph: '✎', kind: 'browser' },
   browser_screenshot: { glyph: '◉', kind: 'browser' },
+  browser_hover: { glyph: '☝', kind: 'browser' },
+  browser_find: { glyph: '⌕', kind: 'browser' },
+  browser_drag: { glyph: '⇢', kind: 'browser' },
   browser_read_pages: { glyph: '▤', kind: 'browser' },
   browser_scroll: { glyph: '↕', kind: 'browser' },
   browser_press_key: { glyph: '⌨', kind: 'browser' },
@@ -56,7 +68,7 @@ const TOOL_META = {
   screen_screenshot: { glyph: '🖥', kind: 'system' }
 }
 
-function summarizeInput(input) {
+export function summarizeInput(input) {
   if (!input || typeof input !== 'object') return ''
   if (input.command) return input.command
   if (input.path) return input.path

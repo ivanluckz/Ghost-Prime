@@ -7,6 +7,7 @@ import * as screen from './screen.js'
 import * as fileUndo from './file-undo.js'
 import * as reminders from './reminders.js'
 import { saveMemory, recallMemories } from '../memory/db.js'
+import { envBool } from '../env.js'
 import electron from 'electron'
 const { clipboard, Notification } = electron || {}
 
@@ -52,7 +53,7 @@ const ALL_TOOL_SPECS = [
       description:
         'Structured snapshot of the current page: every visible button, link, input field and dropdown, each numbered [N], plus a short excerpt. ' +
         'Call this BEFORE acting, then use browser_click / browser_fill with { ref: N } — the most reliable way to hit the right element. ' +
-        'Ref numbering is fully supported on the Playwright backend; on the Chrome-extension backend fall back to { text } / browser_click_at { x, y } if a ref is unknown.',
+        'Refs work on both backends (Playwright and the Chrome extension); if a result says a ref is unknown or stale, call this again or fall back to { text } / browser_click_at { x, y }.',
       parameters: {
         type: 'object',
         properties: { limit: { type: 'integer', description: 'Max items per category (default 40, max 60).' } }
@@ -166,7 +167,7 @@ const ALL_TOOL_SPECS = [
       description:
         'Take a screenshot of the browser page so you can SEE it. Pass annotate:true to draw each clickable element\'s number [N] on the image — then click by { ref: N }. ' +
         'Pass fullPage:true for the whole scrollable page (not combinable with annotate). ' +
-        'Ref numbering and annotate are fully supported on the Playwright backend; on the Chrome-extension backend fall back to { text } / browser_click_at { x, y } if a ref is unknown.',
+        'Annotate works on both backends (Playwright and the Chrome extension); if a result says a ref is unknown or stale, re-take it or fall back to { text } / browser_click_at { x, y }.',
       parameters: {
         type: 'object',
         properties: {
@@ -717,7 +718,7 @@ const ALL_TOOL_SPECS = [
 // GHOST_SCREEN_TOOLS=1 on the Claude path — apply the same gate here. Read at call time so a
 // late dotenv load still counts.
 export function getToolSpecs() {
-  return process.env.GHOST_SCREEN_TOOLS === '1' ? ALL_TOOL_SPECS : ALL_TOOL_SPECS.filter((t) => t.function.name !== 'screen_screenshot')
+  return envBool('GHOST_SCREEN_TOOLS', false) ? ALL_TOOL_SPECS : ALL_TOOL_SPECS.filter((t) => t.function.name !== 'screen_screenshot')
 }
 // Load-time snapshot for scripts that import the list directly (they load dotenv first).
 export const toolSpecs = getToolSpecs()
@@ -852,7 +853,10 @@ export async function executeTool(name, args = {}, { signal } = {}) {
       }
       case 'browser_wait_for_navigation': {
         const r = await browser.browserWaitForNavigation({ timeoutMs: args.timeoutMs })
-        return { output: browser.formatActionResult(r.navigated ? 'Navigation complete' : 'No navigation happened', { ...r, navigated: false }) }
+        // navigated: true/false from either backend; an older extension build omits it — then the wait
+        // ended on a load, so say that rather than "nothing happened". A real navigation stales refs.
+        const lead = r.navigated ? 'Navigation complete' : r.navigated === false ? 'No navigation happened' : 'Page finished loading'
+        return { output: browser.formatActionResult(lead, { ...r, navigated: !!r.navigated }) }
       }
       case 'browser_close_tab': {
         const r = await browser.browserCloseTab()

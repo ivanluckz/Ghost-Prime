@@ -1288,6 +1288,23 @@ html.native-frame .sidebar-head {
 .toolcard.tool-browser {
   border-left-color: #2ee6a6;
 }
+.toolcard.tool-system,
+.toolcard.tool-jarvis {
+  border-left-color: #ffb454;
+}
+.toolcard.tool-memory {
+  border-left-color: #bb9af7;
+}
+.toolcard.tool-reminder,
+.toolcard.tool-weather {
+  border-left-color: #e0af68;
+}
+.toolcard.tool-media {
+  border-left-color: #ff45c0;
+}
+.toolcard.tool-tool {
+  border-left-color: #8a93a6;
+}
 .toolcard.tool-error {
   border-left-color: var(--error);
 }
@@ -2362,6 +2379,11 @@ html.native-frame .sidebar-head {
 .act-tool.tool-search { border-left-color: var(--violet); }
 .act-tool.tool-web { border-left-color: var(--magenta); }
 .act-tool.tool-browser { border-left-color: var(--cyan); }
+.act-tool.tool-system, .act-tool.tool-jarvis { border-left-color: #ffb454; }
+.act-tool.tool-memory { border-left-color: var(--violet); }
+.act-tool.tool-reminder, .act-tool.tool-weather { border-left-color: #e0af68; }
+.act-tool.tool-media { border-left-color: var(--magenta); }
+.act-tool.tool-tool { border-left-color: #8a93a6; }
 .act-tool-status {
   flex: 0 0 auto;
   display: grid;

@@ -1,4 +1,5 @@
-import { streamChat } from '../agent/provider.js'
+import { streamChat, currentRun, runQueueDepth, abortCurrentRun } from '../agent/provider.js'
+import { onReminderFired } from '../memory/db.js'
 
 // Discord relay for Ghost-Prime. Runs INSIDE the Electron main process, so the bot is online only
 // while Ghost-Prime is running — message it from Discord and it talks to the same agent (tools and
@@ -12,6 +13,12 @@ import { streamChat } from '../agent/provider.js'
 //   • Sends very long answers back as a single .txt attachment instead of a wall of chunks.
 //   • Control commands: !help · !reset · !stop · !mode · !status.
 //   • In servers it answers in the configured channel OR whenever you @mention it.
+//   • Reminders set from a channel fire back INTO that channel (the reminder row carries
+//     origin 'discord:<channelId>'), and notify_user posts to the channel that started the run —
+//     so a user driving Ghost from their phone is actually told, not just the desktop.
+//   • Agent runs are serialized globally in provider.js (one at a time across the desktop UI and
+//     every channel — they share one browser and one set of terminals); a message that has to wait
+//     shows a "⏳ queued" status instead of interleaving with the running task.
 //
 // SAFETY: this agent can run shell + drive the browser, so the bot ONLY obeys user IDs on
 // DISCORD_ALLOWED_USER_IDS. With no allowlist it logs in but refuses every message.
@@ -19,7 +26,10 @@ import { streamChat } from '../agent/provider.js'
 let client = null
 let AttachmentBuilder = null // captured from discord.js on startup, used for long-reply .txt files
 const histories = new Map() // channelId -> [{role, content}]
-const chains = new Map() // channelId -> Promise (serialize agent runs per channel)
+// channelId -> Promise: keeps ONE channel's messages in arrival order with a single cancellable run.
+// Cross-channel / cross-surface ordering is the global run slot in provider.js's streamChat.
+const chains = new Map()
+let offReminders = null // unsubscribe from db.onReminderFired while the bot is up
 const running = new Map() // channelId -> AbortController (in-flight run, so !stop can cancel it)
 const modes = new Map() // channelId -> 'plan' | 'auto' | 'full' (per-channel autonomy override)
 const brains = new Map() // channelId -> 'auto' | 'gemini' | 'claude' (per-channel brain override)
@@ -48,8 +58,8 @@ const HELP = [
   '**Commands**',
   '`!help` — this message',
   '`!reset` — forget this conversation’s history',
-  '`!stop` — cancel what I’m doing right now',
-  '`!mode [plan|auto|full]` — show or set autonomy (`full` skips permission checks — careful)',
+  '`!stop` — cancel what I’m doing right now (`!stop all` also cancels a task running on the desktop or in another channel)',
+  '`!mode [plan|auto|full]` — show or set autonomy. `plan` is read-only (no state-changing tools). `auto` and `full` both run tools without asking on the Gemini brain; on the Claude brain `auto` has a permission classifier and `full` skips it — careful.',
   '`!brain [auto|gemini|claude]` — which brain answers (auto routes by task)',
   '`!status` — show brain, mode, and history size'
 ].join('\n')
@@ -227,6 +237,15 @@ export async function startDiscord({ onStatus } = {}) {
       try {
         c.user.setActivity('Ghost-Prime', { type: ActivityType.Listening })
       } catch {}
+      // Reminders asked for from a Discord channel come back to that channel when they fire (the
+      // desktop notification still shows too). Origins are 'discord:<channelId>' — see
+      // db.addReminder. Subscribed only once a client is connected, so a bot that never logged in
+      // (bad token, disallowed intents) doesn't log "not connected" on every firing.
+      offReminders?.()
+      offReminders = onReminderFired((r) => {
+        const target = channelFromOrigin(r?.origin)
+        if (target) notifyDiscord(target, `⏰ **Reminder:** ${r.text}`).catch((e) => console.warn('[discord] reminder delivery failed:', e?.message || e))
+      })
     })
     c.on('error', (e) => console.error('[discord] client error:', e?.message || e))
     c.on('messageCreate', (msg) => handleMessage(msg).catch((e) => console.error('[discord]', e?.message || e)))
@@ -253,6 +272,8 @@ export async function startDiscord({ onStatus } = {}) {
 
 export function stopDiscord() {
   stopped = true
+  offReminders?.()
+  offReminders = null
   if (retryTimer) {
     clearTimeout(retryTimer)
     retryTimer = null
@@ -271,6 +292,24 @@ export function stopDiscord() {
   client = null
 }
 
+// 'discord:<channelId>' → channelId (null for anything else, e.g. a desktop-originated reminder).
+export const originFor = (channelId) => `discord:${channelId}`
+export function channelFromOrigin(origin) {
+  const m = /^discord:(\d+)$/.exec(String(origin || ''))
+  return m ? m[1] : null
+}
+
+// Post a message to a channel by id — used for reminders / notify_user that were asked for from
+// Discord. Resolves the channel through the client cache or a fetch (DM channels are not cached
+// after a restart). Long text is chunked like any other reply. Rejects when the bot is offline.
+export async function notifyDiscord(channelId, text) {
+  if (!client) throw new Error('Discord bot is not connected')
+  const channel = client.channels.cache.get(channelId) || (await client.channels.fetch(channelId))
+  if (!channel || typeof channel.send !== 'function') throw new Error(`channel ${channelId} is not sendable`)
+  const parts = balanceFences(chunk(String(text || ''), DISCORD_LIMIT - FENCE_PAD)).filter((p) => p.trim())
+  for (const part of parts) await channel.send(part)
+}
+
 // Handle the !commands. Returns true if the message WAS a command (and was handled), so the caller
 // stops. Run OUTSIDE the per-channel chain so !stop works while a run is in flight.
 function handleCommand(msg, typed) {
@@ -287,13 +326,27 @@ function handleCommand(msg, typed) {
     histories.delete(channelId)
     msg.reply('🧹 Cleared this conversation’s history.').catch(() => {})
   } else if (cmd === 'stop' || cmd === 'cancel') {
+    // `!stop` cancels this channel's run. When this channel has nothing running (or on `!stop all`)
+    // it cancels whatever holds the shared run slot instead — the desktop, or another channel — so
+    // a stuck desktop task that has every channel "⏳ queued" can be cleared from the phone.
     const ac = running.get(channelId)
+    const all = /^all$/i.test(arg)
+    const run = currentRun()
+    const holdsSlot = !!run && run.origin === originFor(channelId)
+    const lines = []
     if (ac) {
       ac.abort()
-      msg.reply('🛑 Stopping…').catch(() => {})
-    } else {
-      msg.reply('Nothing is running right now.').catch(() => {})
+      lines.push('🛑 Stopping…')
     }
+    if (run && !holdsSlot && (all || !ac)) {
+      const where = run.surface === 'discord' ? 'another channel' : 'the desktop'
+      lines.push(
+        abortCurrentRun()
+          ? `🛑 Stopping the task from ${where}…`
+          : `A task from ${where} is running but can’t be cancelled from here — stop it on the desktop.`
+      )
+    }
+    msg.reply(lines.join('\n') || 'Nothing is running right now.').catch(() => {})
   } else if (cmd === 'mode') {
     if (!arg) {
       msg.reply(`Mode is **${modes.get(channelId) || DEFAULT_MODE()}**. Set it with \`!mode plan|auto|full\`.`).catch(() => {})
@@ -302,7 +355,13 @@ function handleCommand(msg, typed) {
     } else {
       const m = arg.toLowerCase()
       modes.set(channelId, m)
-      msg.reply(`Mode set to **${m}**.${m === 'full' ? ' ⚠️ I’ll skip permission checks in this channel.' : ''}`).catch(() => {})
+      const warn =
+        m === 'full'
+          ? ' ⚠️ No permission checks in this channel.'
+          : m === 'auto'
+            ? ' Tools run without asking on the Gemini brain (Claude uses a permission classifier).'
+            : ' Read-only — I’ll plan but not act.'
+      msg.reply(`Mode set to **${m}**.${warn}`).catch(() => {})
     }
   } else if (cmd === 'brain') {
     if (!arg) {
@@ -317,8 +376,16 @@ function handleCommand(msg, typed) {
     const m = modes.get(channelId) || DEFAULT_MODE()
     const h = histories.get(channelId)?.length || 0
     const brain = brains.get(channelId) || 'auto'
+    // The shared run slot: who holds it (this channel / another channel / the desktop) and how many
+    // runs are waiting — so a "why is it slow" from the phone gets a real answer.
+    const run = currentRun()
+    const waiting = Math.max(0, runQueueDepth() - (run ? 1 : 0))
+    let busy = ''
+    if (running.has(channelId)) busy = run?.origin === originFor(channelId) ? ' · (working…)' : ' · (queued — waiting for another task)'
+    else if (run) busy = ` · busy: ${run.surface === 'discord' ? 'another channel' : 'the desktop'} is running a task`
+    if (waiting) busy += ` · ${waiting} waiting`
     msg
-      .reply(`🟢 Online · brain: \`${brain}\` · mode: **${m}** · history: ${h} msg${h === 1 ? '' : 's'}${running.has(channelId) ? ' · (working…)' : ''}`)
+      .reply(`🟢 Online · brain: \`${brain}\` · mode: **${m}** · history: ${h} msg${h === 1 ? '' : 's'}${busy}`)
       .catch(() => {})
   }
   return true
@@ -362,7 +429,8 @@ async function handleMessage(msg) {
   // Fold any attached files into the prompt so the agent sees them as part of the message.
   const content = [typed, ...fileBlocks].filter(Boolean).join('\n\n')
 
-  // Serialize per channel so concurrent messages don't interleave their agent runs.
+  // Serialize per channel (arrival order, one !stop target); provider.js's global run slot then
+  // serializes across channels and the desktop, so no two agent loops ever share the browser.
   const prev = chains.get(msg.channelId) || Promise.resolve()
   const next = prev.then(() => respond(msg, content)).catch((e) => console.error('[discord]', e?.message || e))
   chains.set(msg.channelId, next)
@@ -398,6 +466,9 @@ async function respond(msg, content) {
     }
     return statusLine(activity)
   }
+  // The channel's own notifications (notify_user from the agent) — separate messages, so they
+  // survive the placeholder being edited into the final reply.
+  const notify = (text) => notifyDiscord(channelId, text)
   const pump = () => {
     if (closing || timer || !placeholder) return
     const wait = Math.max(0, EDIT_INTERVAL - (Date.now() - lastEditAt))
@@ -420,13 +491,24 @@ async function respond(msg, content) {
       messages,
       mode, // plan | auto | full (full = no permission checks — careful)
       brain: brains.get(channelId) || 'auto', // per-channel router override (!brain)
+      surface: 'discord',
+      origin: originFor(channelId), // stamped on reminders set during this run → they fire back here
+      notify,
       signal: ac.signal,
+      abort: () => ac.abort(), // lets `!stop all` from another channel (or the desktop) cancel this run
       onDelta: (t) => {
         liveText += t
         pump()
       },
       onEvent: (ev) => {
-        if (ev?.kind === 'tool_use') {
+        if (ev?.kind === 'queued') {
+          // Another run (desktop, or another channel) holds the shared browser/terminals — we wait.
+          activity = ['⏳', ev.behind === 'desktop' ? 'queued — the desktop is busy' : 'queued behind another task']
+          if (!liveText) pump()
+        } else if (ev?.kind === 'brain') {
+          activity = ['🧠', 'thinking']
+          if (!liveText) pump()
+        } else if (ev?.kind === 'tool_use') {
           activity = activityFor(ev.name)
           if (!liveText) pump() // only drive the status line until real text starts streaming
         }

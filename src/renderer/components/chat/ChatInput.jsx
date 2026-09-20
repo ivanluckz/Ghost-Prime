@@ -4,6 +4,7 @@ const COMMANDS = [
   ['/fast', 'snappiest — effort low, no thinking'],
   ['/smart', 'most thorough — effort high + thinking'],
   ['/model', 'sonnet | opus | haiku'],
+  ['/brain', 'auto | gemini | claude — which brain answers'],
   ['/effort', 'low | medium | high | xhigh | max'],
   ['/thinking', 'off | adaptive'],
   ['/mode', 'plan | auto | full'],
@@ -13,12 +14,14 @@ const COMMANDS = [
   ['/site', 'open|strict · allow|block <domain> · list'],
   ['/settings', 'open the settings panel'],
   ['/status', 'show current settings'],
+  ['/hotkey', 'show the wake-up shortcut'],
   ['/new', 'start a new chat'],
   ['/help', 'list commands']
 ]
-const NEEDS_ARG = ['/model', '/effort', '/thinking', '/mode', '/voice', '/tab', '/mirror', '/site']
+const NEEDS_ARG = ['/model', '/brain', '/effort', '/thinking', '/mode', '/voice', '/tab', '/mirror', '/site']
 
-export default function ChatInput({ onSend, busy }) {
+// `hasAttachments` lets an attachment-only message go out (Main.send substitutes a default prompt).
+export default function ChatInput({ onSend, busy, hasAttachments = false }) {
   const [value, setValue] = useState('')
   const [voiceState, setVoiceState] = useState('idle') // idle | listening | transcribing
   const taRef = useRef(null)
@@ -26,10 +29,12 @@ export default function ChatInput({ onSend, busy }) {
   // Global hotkey (Ctrl/Cmd+Shift+G) summons the window and lands the cursor right here.
   useEffect(() => window.ghost.onFocusInput?.(() => taRef.current?.focus()), [])
 
+  const canSend = !!value.trim() || hasAttachments
+
   // Send is never blocked: a message sent while a task is running is queued and runs next.
   function submit(e) {
     e.preventDefault()
-    if (!value.trim()) return
+    if (!canSend) return
     onSend(value)
     setValue('')
   }
@@ -104,12 +109,13 @@ export default function ChatInput({ onSend, busy }) {
         value={value}
         onChange={(e) => setValue(e.target.value)}
         onKeyDown={(e) => {
-          if (e.key === 'Enter' && !e.shiftKey) submit(e)
+          // Enter during IME composition (CJK, dead keys) confirms the candidate — never sends.
+          if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent?.isComposing && e.keyCode !== 229) submit(e)
         }}
         placeholder={placeholder}
         rows={1}
       />
-      <button type="submit" className="btn btn-send" disabled={!value.trim()}>
+      <button type="submit" className="btn btn-send" disabled={!canSend}>
         Send
       </button>
     </form>

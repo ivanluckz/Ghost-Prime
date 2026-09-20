@@ -38,12 +38,14 @@ __export(db_exports, {
   deleteSession: () => deleteSession,
   dueReminders: () => dueReminders,
   getPref: () => getPref,
+  getRunContext: () => getRunContext,
   getSessionId: () => getSessionId,
   initDb: () => initDb,
   markReminderFired: () => markReminderFired,
   markSessionSummarized: () => markSessionSummarized,
   memoryDigest: () => memoryDigest,
   newSession: () => newSession,
+  onReminderFired: () => onReminderFired,
   pendingReminders: () => pendingReminders,
   recallMemories: () => recallMemories,
   recentSessions: () => recentSessions,
@@ -54,6 +56,7 @@ __export(db_exports, {
   sessionSummaryState: () => sessionSummaryState,
   setActiveSession: () => setActiveSession,
   setPref: () => setPref,
+  setRunContext: () => setRunContext,
   startSession: () => startSession
 });
 module.exports = __toCommonJS(db_exports);
@@ -78,12 +81,8 @@ function initDb(appRoot = import_electron.app.getAppPath()) {
   if (!hasCol("memories", "expires_at")) db.exec("ALTER TABLE memories ADD COLUMN expires_at INTEGER");
   if (!hasCol("sessions", "summarized_at")) db.exec("ALTER TABLE sessions ADD COLUMN summarized_at INTEGER");
   if (!hasCol("sessions", "summary_count")) db.exec("ALTER TABLE sessions ADD COLUMN summary_count INTEGER");
-  db.exec(
-    `CREATE TABLE IF NOT EXISTS reminders (
-       id TEXT PRIMARY KEY, text TEXT NOT NULL, due_at INTEGER NOT NULL,
-       created_at INTEGER NOT NULL, fired INTEGER DEFAULT 0
-     )`
-  );
+  if (!hasCol("reminders", "origin")) db.exec("ALTER TABLE reminders ADD COLUMN origin TEXT");
+  if (!hasCol("messages", "model_content")) db.exec("ALTER TABLE messages ADD COLUMN model_content TEXT");
   db.prepare("DELETE FROM memories WHERE expires_at IS NOT NULL AND expires_at < ?").run(Date.now());
   return db;
 }
@@ -97,6 +96,7 @@ function unwrapTags(s) {
   return s ? s.split(",").filter(Boolean) : [];
 }
 function startSession(parentId = null) {
+  if (!db) return null;
   currentSessionId = (0, import_node_crypto.randomUUID)();
   db.prepare("INSERT INTO sessions (id, started_at, parent_id) VALUES (?, ?, ?)").run(
     currentSessionId,
@@ -114,6 +114,7 @@ function getSessionId() {
   return currentSessionId;
 }
 function recentSessions(limit = 40) {
+  if (!db) return [];
   const rows = db.prepare(
     `SELECT s.id,
               s.started_at,
@@ -172,15 +173,27 @@ function deleteAllSessions() {
   currentSessionId = null;
   return startSession();
 }
-function saveMessage(role, content) {
-  if (!db || !currentSessionId || !content) return;
+function saveMessage(role, content, opts = {}) {
+  const sessionId = opts.sessionId ?? currentSessionId;
+  if (!db || !sessionId || !content) return false;
+  if (!db.prepare("SELECT 1 FROM sessions WHERE id = ?").get(sessionId)) return false;
+  const mc = opts.modelContent;
+  const modelJson = mc != null && mc !== content ? JSON.stringify(mc) : null;
   db.prepare(
-    "INSERT INTO messages (id, session_id, role, content, created_at) VALUES (?, ?, ?, ?, ?)"
-  ).run((0, import_node_crypto.randomUUID)(), currentSessionId, role, content, Date.now());
+    "INSERT INTO messages (id, session_id, role, content, model_content, created_at) VALUES (?, ?, ?, ?, ?, ?)"
+  ).run((0, import_node_crypto.randomUUID)(), sessionId, role, content, modelJson, Date.now());
+  return true;
 }
 function sessionMessages(sessionId) {
   if (!db) return [];
-  return db.prepare("SELECT role, content, created_at FROM messages WHERE session_id = ? ORDER BY created_at ASC").all(sessionId);
+  return db.prepare("SELECT role, content, model_content, created_at FROM messages WHERE session_id = ? ORDER BY created_at ASC").all(sessionId).map(({ model_content, ...row }) => {
+    if (model_content == null) return row;
+    try {
+      return { ...row, modelContent: JSON.parse(model_content) };
+    } catch {
+      return row;
+    }
+  });
 }
 function sessionSummaryState(sessionId) {
   if (!db || !sessionId) return { messageCount: 0, summarizedAt: null, summaryCount: 0 };
@@ -259,28 +272,51 @@ function deleteMemory(id) {
   if (!db || !id) return false;
   return db.prepare("DELETE FROM memories WHERE id = ?").run(id).changes > 0;
 }
-function addReminder(text, dueAt) {
+var activeRunContext = null;
+function setRunContext(ctx) {
+  activeRunContext = ctx || null;
+}
+function getRunContext() {
+  return activeRunContext;
+}
+function addReminder(text, dueAt, origin = activeRunContext?.origin ?? null) {
   if (!db || !text || !dueAt) return null;
   const id = (0, import_node_crypto.randomUUID)();
-  db.prepare("INSERT INTO reminders (id, text, due_at, created_at, fired) VALUES (?, ?, ?, ?, 0)").run(
+  db.prepare("INSERT INTO reminders (id, text, due_at, created_at, fired, origin) VALUES (?, ?, ?, ?, 0, ?)").run(
     id,
     String(text),
     dueAt,
-    Date.now()
+    Date.now(),
+    origin ? String(origin) : null
   );
   return id;
 }
 function dueReminders(now = Date.now()) {
   if (!db) return [];
-  return db.prepare("SELECT id, text, due_at FROM reminders WHERE fired = 0 AND due_at <= ? ORDER BY due_at ASC").all(now);
+  return db.prepare("SELECT id, text, due_at, origin FROM reminders WHERE fired = 0 AND due_at <= ? ORDER BY due_at ASC").all(now);
 }
 function pendingReminders() {
   if (!db) return [];
-  return db.prepare("SELECT id, text, due_at FROM reminders WHERE fired = 0 ORDER BY due_at ASC").all();
+  return db.prepare("SELECT id, text, due_at, origin FROM reminders WHERE fired = 0 ORDER BY due_at ASC").all();
+}
+var reminderFiredListeners = /* @__PURE__ */ new Set();
+function onReminderFired(listener) {
+  if (typeof listener !== "function") return () => {
+  };
+  reminderFiredListeners.add(listener);
+  return () => reminderFiredListeners.delete(listener);
 }
 function markReminderFired(id) {
   if (!db || !id) return;
+  const row = db.prepare("SELECT id, text, due_at, origin FROM reminders WHERE id = ? AND fired = 0").get(id);
   db.prepare("UPDATE reminders SET fired = 1 WHERE id = ?").run(id);
+  if (!row) return;
+  for (const fn of reminderFiredListeners) {
+    try {
+      fn(row);
+    } catch {
+    }
+  }
 }
 function cancelReminder(id) {
   if (!db || !id) return false;
@@ -297,12 +333,14 @@ function cancelReminder(id) {
   deleteSession,
   dueReminders,
   getPref,
+  getRunContext,
   getSessionId,
   initDb,
   markReminderFired,
   markSessionSummarized,
   memoryDigest,
   newSession,
+  onReminderFired,
   pendingReminders,
   recallMemories,
   recentSessions,
@@ -313,5 +351,6 @@ function cancelReminder(id) {
   sessionSummaryState,
   setActiveSession,
   setPref,
+  setRunContext,
   startSession
 });

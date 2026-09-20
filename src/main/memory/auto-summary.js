@@ -12,8 +12,9 @@ import {
   saveMemory
 } from './db.js'
 import { summarizeConversation } from '../agent/provider.js'
+import { envBool } from '../env.js'
 
-const enabled = () => process.env.GHOST_AUTO_SUMMARIZE !== '0'
+const enabled = () => envBool('GHOST_AUTO_SUMMARIZE', true)
 const MIN_USER_TURNS = 2 // need a real back-and-forth, not a one-line ask
 const MIN_CHARS = 400 // …with some substance to it
 const MIN_NEW_MESSAGES = 4 // re-summarize a grown chat only after this many new messages
@@ -65,10 +66,10 @@ export async function maybeSummarizeSession(sessionId) {
     }
     // Mark even when nothing durable surfaced, so we don't retry until the chat grows further.
     markSessionSummarized(sessionId, msgs.length)
-    if (process.env.GHOST_DEBUG) console.log(`[auto-summary] ${sessionId.slice(0, 8)}: +${saved} fact(s)`)
+    if (envBool('GHOST_DEBUG', false)) console.log(`[auto-summary] ${sessionId.slice(0, 8)}: +${saved} fact(s)`)
   } catch (e) {
     lastFailureAt = Date.now()
-    if (process.env.GHOST_DEBUG) console.warn('[auto-summary] failed:', e?.message || e)
+    if (envBool('GHOST_DEBUG', false)) console.warn('[auto-summary] failed:', e?.message || e)
   } finally {
     inFlight.delete(sessionId)
   }

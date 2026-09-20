@@ -101,7 +101,9 @@ export default function GhostCore({ active = false, height = 150, quality = 'aut
 
     if (isHigh) {
       pmrem = new THREE.PMREMGenerator(renderer)
-      envTex = pmrem.fromScene(new RoomEnvironment(), 0.04).texture
+      const room = new RoomEnvironment() // only needed to bake the env map — free its geometry/materials right away
+      envTex = pmrem.fromScene(room, 0.04).texture
+      room.dispose?.()
       scene.environment = envTex
 
       scene.add(new THREE.HemisphereLight(0xffffff, 0x2a3550, 0.5))
@@ -370,6 +372,12 @@ export default function GhostCore({ active = false, height = 150, quality = 'aut
       composer?.dispose?.()
       envTex?.dispose?.()
       pmrem?.dispose?.()
+      // Release the GL context now rather than when the detached canvas is GC'd: the hero core remounts
+      // on every new chat, and Chromium evicts the OLDEST context (the long-lived panel indicator)
+      // once too many are alive.
+      try {
+        renderer.forceContextLoss()
+      } catch {}
       renderer.dispose()
       renderer.domElement.remove()
     }

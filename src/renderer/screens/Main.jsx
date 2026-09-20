@@ -135,6 +135,13 @@ export default function Main() {
         if (ev.requestId) setBrainByReq((prev) => ({ ...prev, [ev.requestId]: ev.brain }))
         return
       }
+      // Agent runs are serialized globally (one at a time across the desktop and Discord). Say so
+      // when this task has to wait for one that came in from elsewhere, e.g. a phone message.
+      if (ev.kind === 'queued') {
+        const who = ev.behind === 'discord' ? 'a task from Discord' : 'another task'
+        setMessages((prev) => [...prev, { role: 'system', content: `⏳ Waiting — ${who} is running; this starts when it finishes.`, reqId: ev.requestId }])
+        return
+      }
       // Instant acknowledgment: speak once, the first time a task uses a tool (if voice is on).
       if (ev.kind === 'tool_use' && voiceOutRef.current && ev.requestId && !ackedRef.current.has(ev.requestId)) {
         ackedRef.current.add(ev.requestId)
@@ -330,7 +337,9 @@ export default function Main() {
   async function newChat() {
     stopAll()
     window.ghost.voice?.stopSpeaking()
-    const id = await window.ghost.newSession()
+    // If sqlite failed to open, newSession resolves null / rejects — still clear the pane so
+    // Ctrl+N / New chat always gives a fresh screen.
+    const id = await window.ghost.newSession().catch(() => null)
     setActiveId(id)
     setMessages([])
     refreshSessions()
@@ -340,7 +349,7 @@ export default function Main() {
   async function newSubChat(parentId) {
     stopAll()
     window.ghost.voice?.stopSpeaking()
-    const id = await window.ghost.newSession(parentId)
+    const id = await window.ghost.newSession(parentId).catch(() => null) // no-DB: still clear the pane
     setActiveId(id)
     setMessages([])
     refreshSessions()
@@ -351,14 +360,16 @@ export default function Main() {
     window.ghost.voice?.stopSpeaking()
     await window.ghost.setActiveSession(id)
     const msgs = await window.ghost.sessionMessages(id)
-    setMessages(msgs.map((m) => ({ role: m.role, content: m.content })))
+    // Rows carry `modelContent` when a turn had attachments: the bubble shows the display text,
+    // the brain keeps getting the inlined file / image on every later turn, exactly as live.
+    setMessages(msgs.map((m) => ({ role: m.role, content: m.content, ...(m.modelContent != null ? { modelContent: m.modelContent } : {}) })))
     setActiveId(id)
   }
 
   async function clearAllChats() {
     stopAll()
     window.ghost.voice?.stopSpeaking()
-    const newId = await window.ghost.deleteAllSessions()
+    const newId = await window.ghost.deleteAllSessions().catch(() => null) // no-DB: still clear the pane
     setActiveId(newId)
     setMessages([])
     refreshSessions()
@@ -535,14 +546,22 @@ export default function Main() {
     if (e.dataTransfer?.files?.length) addFiles(e.dataTransfer.files)
   }
 
+  // t = what the chat shows (text + 📎 chips); modelContent = what the brain gets (inlined text
+  // files / image parts), kept on the message so EVERY later turn's history still carries the
+  // attachment — both brains are stateless per turn and rebuild context from this list.
   function dispatch(t, modelContent) {
     playActivate() // swell as the Core powers up for this task
     const history = messages
       .filter((m) => m.role === 'user' || m.role === 'assistant')
-      .map(({ role, content }) => ({ role, content: typeof content === 'string' ? content : String(content) }))
-    history.push({ role: 'user', content: modelContent ?? t }) // model may receive rich (array) content
+      .map(({ role, content, modelContent: mc }) => ({
+        role,
+        content: typeof content === 'string' ? content : String(content),
+        ...(mc != null && mc !== content ? { modelContent: mc } : {})
+      }))
+    const rich = modelContent != null && modelContent !== t
+    history.push({ role: 'user', content: t, ...(rich ? { modelContent } : {}) }) // model may receive rich (array) content
     const reqId = window.ghost.sendMessage(history, mode, agent)
-    setMessages((prev) => [...prev, { role: 'user', content: t, reqId }]) // chat shows the display string
+    setMessages((prev) => [...prev, { role: 'user', content: t, reqId, ...(rich ? { modelContent } : {}) }]) // chat shows the display string
     setRunning({ [reqId]: { prompt: t, startedAt: Date.now() } }) // exactly one task at a time
   }
 
@@ -770,7 +789,7 @@ export default function Main() {
             ))}
           </div>
         )}
-        <ChatInput onSend={send} busy={busy} />
+        <ChatInput onSend={send} busy={busy} hasAttachments={attachments.length > 0} />
       </div>
       {activityOpen && (
         <ActivityPanel

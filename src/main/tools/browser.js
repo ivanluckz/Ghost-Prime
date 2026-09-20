@@ -1,6 +1,6 @@
 import { homedir } from 'node:os'
 import { join, basename, extname } from 'node:path'
-import { existsSync, mkdirSync } from 'node:fs'
+import { existsSync, lstatSync, mkdirSync } from 'node:fs'
 import { spawn, spawnSync } from 'node:child_process'
 import electron from 'electron'
 const clipboard =
@@ -13,9 +13,10 @@ const clipboard =
 import { chromium } from 'playwright'
 import * as bridge from './browser-bridge.js'
 import { policySnapshot, checkUrl } from './site-policy.js'
+import { envBool } from '../env.js'
 
 // Which tab the extension acts on. true (default) = the tab you're actually looking at (auto-synced)
-let ACTIVE_TAB_MODE = process.env.GHOST_BROWSER_ACTIVE_TAB !== '0'
+let ACTIVE_TAB_MODE = envBool('GHOST_BROWSER_ACTIVE_TAB', true)
 export function setActiveTabMode(on) {
 
   ACTIVE_TAB_MODE = !!on
@@ -45,7 +46,8 @@ function meta() {
     target: ACTIVE_TAB_MODE ? 'active' : 'group',
     tabId: TARGET_TAB_ID, // pinned tab (browser_use_tab) — overrides target when set
     policy: policySnapshot(),
-    focus: process.env.GHOST_BROWSER_FOCUS === '1'
+    focus: envBool('GHOST_BROWSER_FOCUS', false),
+    dialogs: DIALOG_POLICY // how the extension answers alert()/confirm()/prompt() (GHOST_BROWSER_DIALOGS)
   }
 }
 
@@ -56,13 +58,13 @@ function meta() {
 //   • short timeout, swallows every error → null
 //   • respects per-site policy: a blocked page throws in the extension → null (we won't quietly
 //     read a site the user blocked)
-// Disable entirely with GHOST_PAGE_CONTEXT=off.
+// Disable entirely with GHOST_PAGE_CONTEXT=0.
 export async function getActiveTabContext({ maxChars = 4000 } = {}) {
   if (!ACTIVE_TAB_MODE) return null
-  if ((process.env.GHOST_PAGE_CONTEXT || '').toLowerCase() === 'off') return null
-  if (!bridge.bridgeConnected()) return null
+  if (!envBool('GHOST_PAGE_CONTEXT', true)) return null
+  if (!bridge.browserConnected()) return null
   try {
-    const r = await bridge.sendCommand('getText', { target: 'active', policy: policySnapshot() }, 4000)
+    const r = await bridge.sendBrowserCommand('getText', { target: 'active', policy: policySnapshot() }, 4000)
     if (!r || !r.url) return null
     return { url: r.url, title: r.title || '', text: String(r.text || '').slice(0, maxChars) }
   } catch {
@@ -71,12 +73,17 @@ export async function getActiveTabContext({ maxChars = 4000 } = {}) {
 }
 
 // Backend selector. 'auto' (default) uses the Chrome extension whenever it's connected — that
-// drives your REAL Chrome via a local bridge, with no profile and no single-instance lock — and
-// otherwise falls back to Playwright. 'extension' / 'playwright' force one.
+// drives your REAL Chrome via a local bridge, with no profile and no single-instance lock. If no
+// extension is connected (and auto-launching Chrome didn't bring one online within ~12s) it falls
+// back to Playwright: on the configured profile when that can't collide with the Chrome we just
+// opened, otherwise on the separate Ghost-Prime profile. 'extension' / 'playwright' force one.
 const BROWSER_BACKEND = process.env.GHOST_BROWSER_BACKEND || 'auto'
+// Longest in-page wait the extension will honour (WAIT_CAP_MS in extension/background.js): the
+// extension can't poll while it runs a command, and the bridge counts a device as gone after 30s.
+const EXT_WAIT_CAP = 24000
 // When the extension backend is wanted but no Chrome is connected, open Chrome so the (already
-// installed) extension can attach. Set GHOST_BROWSER_AUTOLAUNCH=false to disable.
-const AUTOLAUNCH = process.env.GHOST_BROWSER_AUTOLAUNCH !== 'false'
+// installed) extension can attach. Set GHOST_BROWSER_AUTOLAUNCH=0 to disable.
+const AUTOLAUNCH = envBool('GHOST_BROWSER_AUTOLAUNCH', true)
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 
 function commandExists(cmd) {
@@ -90,6 +97,18 @@ function commandExists(cmd) {
 function findChromeBinary() {
   const candidates = [process.env.GHOST_CHROME_BIN, 'google-chrome', 'google-chrome-stable', 'chromium', 'chromium-browser'].filter(Boolean)
   return candidates.find((c) => (c.startsWith('/') ? existsSync(c) : commandExists(c))) || null
+}
+
+// Is the user's real Chrome running on its default profile right now? Chrome keeps a SingletonLock
+// symlink in the profile dir while it's open (lstat: the link's target is a "host-pid" that never
+// exists, so existsSync would say no).
+function chromeProfileLocked() {
+  try {
+    lstatSync(join(DEFAULT_CHROME_PROFILE, 'SingletonLock'))
+    return true
+  } catch {
+    return false
+  }
 }
 
 let launching = null
@@ -113,8 +132,19 @@ function launchRealChrome() {
 }
 
 // Decide the backend for this action. In extension/auto mode, if nothing's connected and
-// auto-launch is on, open Chrome and wait (~12s) for the extension to come online.
+// auto-launch is on, open Chrome ONCE and wait (~12s) for the extension to come online.
+//
+// The launch outcome is remembered: if Chrome came up without an extension (not loaded, or
+// dev-mode extensions blocked), we don't try again for EXTENSION_RETRY_MS — otherwise every single
+// tool call would spawn another Chrome window (ProcessSingleton just opens a new window in the
+// running instance) and stall ~13s before falling back. The cheap browserConnected() check always
+// runs first, so an extension loaded later is picked up on the very next action, and a Playwright
+// context that's already open is kept (no auto-launch while it runs).
+const EXTENSION_RETRY_MS = 10 * 60_000
+let extensionAbsentUntil = 0 // Date.now() before which auto-launch is skipped (last launch brought no extension)
 let lastBackend = null
+let fallbackProfile = null // set once 'auto' had to sidestep the real profile's single-instance lock
+let fallbackWarned = false
 async function ensureBrowserBackend() {
   const b = await pickBrowserBackend()
   // Refs from a snapshot on the OTHER backend point at a different page/DOM — never replay them.
@@ -128,27 +158,51 @@ async function ensureBrowserBackend() {
 }
 async function pickBrowserBackend() {
   if (BROWSER_BACKEND === 'playwright') return 'playwright'
-  if (bridge.bridgeConnected()) return 'extension'
+  if (bridge.browserConnected()) {
+    extensionAbsentUntil = 0 // the extension is here — a later disconnect may auto-launch again
+    return 'extension'
+  }
   let launched = false
-  if (AUTOLAUNCH) {
+  const skipLaunch = !AUTOLAUNCH || Date.now() < extensionAbsentUntil || (BROWSER_BACKEND !== 'extension' && !!context)
+  if (!skipLaunch) {
     launched = await launchRealChrome()
     if (launched) {
-      for (let i = 0; i < 24 && !bridge.bridgeConnected(); i++) await sleep(500)
-      if (bridge.bridgeConnected()) return 'extension'
+      for (let i = 0; i < 24 && !bridge.browserConnected(); i++) await sleep(500)
+      if (bridge.browserConnected()) {
+        extensionAbsentUntil = 0
+        return 'extension'
+      }
+      // Chrome is up but no extension connected: don't spawn/wait again on every action.
+      extensionAbsentUntil = Date.now() + EXTENSION_RETRY_MS
     }
   }
-  // Forced extension, or we opened Chrome but the extension didn't attach: don't silently fall to
-  // Playwright on the real profile (it would hit Chrome's single-instance lock) — guide instead.
-  if (BROWSER_BACKEND === 'extension' || launched) {
+  // Forced extension: don't silently switch — guide instead.
+  if (BROWSER_BACKEND === 'extension') {
     throw new Error(
-      (launched
+      (launched || (chromeProfileLocked() && Date.now() < extensionAbsentUntil)
         ? 'Opened Chrome, but the Ghost-Prime extension isn’t connected, so I can’t drive it. '
         : 'The Ghost-Prime browser extension isn’t connected. ') +
         'Load it in Chrome (chrome://extensions → Load unpacked → the extension/ folder) and try again, ' +
         'or set GHOST_BROWSER_BACKEND=playwright to use the built-in browser instead.'
     )
   }
-  return 'playwright' // Chrome appears closed and there's no extension — let Playwright launch its own
+  // 'auto' with no extension: fall back to Playwright. Chrome allows one instance per profile, so if
+  // we just opened the user's real Chrome (or it was already running) and Playwright would use that
+  // same profile, it would hit the single-instance lock — use the separate Ghost-Prime profile then.
+  // Only when no Playwright context exists yet: an open context may itself be the Chrome holding
+  // the default profile's lock, and it must keep running on that (logged-in) profile.
+  if (!context && !fallbackProfile && (launched || chromeProfileLocked()) && CHANNEL === 'chrome' && resolveProfileDir() === DEFAULT_CHROME_PROFILE) {
+    fallbackProfile = ISOLATED_PROFILE
+    console.warn(
+      `[browser] Chrome is open but the Ghost-Prime extension isn’t connected — falling back to the built-in ` +
+        `Playwright browser on the separate profile ${ISOLATED_PROFILE} (your real profile is locked by the running Chrome). ` +
+        'Load the extension in Chrome (chrome://extensions → Load unpacked → extension/) to drive your real browser instead.'
+    )
+  } else if (!fallbackWarned) {
+    console.warn(`[browser] Ghost-Prime extension not connected — using the built-in Playwright browser (profile: ${resolveProfileDir()}).`)
+  }
+  fallbackWarned = true
+  return 'playwright'
 }
 
 // Ghost-Prime drives your REAL Google Chrome — the Linux app at /usr/bin/google-chrome,
@@ -165,19 +219,20 @@ async function pickBrowserBackend() {
 //   GHOST_BROWSER_CHANNEL=chromium    use Playwright's bundled Chromium instead of real Chrome
 //   GHOST_BROWSER_PROFILE=isolated    use a separate Ghost-Prime profile (log in once; never
 //                                     conflicts with your open Chrome) — or pass a custom path
-//   GHOST_BROWSER_HEADLESS=true       no visible window (e.g. tests)
-//   GHOST_BROWSER_NO_SANDBOX=true     pass --no-sandbox (only if Chrome refuses to start; it
+//   GHOST_BROWSER_HEADLESS=1          no visible window (e.g. tests)
+//   GHOST_BROWSER_NO_SANDBOX=1        pass --no-sandbox (only if Chrome refuses to start; it
 //                                     makes Chrome show an "unsupported flag" warning bar)
 //   GHOST_BROWSER_DIALOGS=dismiss     answer confirm()/prompt() with Cancel instead of OK
 const CHANNEL = process.env.GHOST_BROWSER_CHANNEL ?? 'chrome' // '' falls back to bundled Chromium
-const HEADLESS = process.env.GHOST_BROWSER_HEADLESS === 'true'
+const HEADLESS = envBool('GHOST_BROWSER_HEADLESS', false)
 // Chrome on Crostini runs fine with its sandbox (your normal Chrome does). Passing
 // --no-sandbox triggers Chrome's yellow "security will suffer" banner, so leave it OFF.
-const NO_SANDBOX = process.env.GHOST_BROWSER_NO_SANDBOX === 'true'
+const NO_SANDBOX = envBool('GHOST_BROWSER_NO_SANDBOX', false)
 const DEFAULT_CHROME_PROFILE = join(homedir(), '.config', 'google-chrome')
 const ISOLATED_PROFILE = join(homedir(), '.config', 'ghost-prime', 'browser-profile')
 
 function resolveProfileDir() {
+  if (fallbackProfile) return fallbackProfile // 'auto' backend sidestepping a running Chrome (pickBrowserBackend)
   const p = process.env.GHOST_BROWSER_PROFILE
   if (!p || p === 'default' || p === 'chrome') return DEFAULT_CHROME_PROFILE // your real Chrome profile
   if (p === 'isolated' || p === 'ghost') return ISOLATED_PROFILE
@@ -436,7 +491,7 @@ export async function browserNavigate({ url, waitUntil } = {}) {
   url = normalizeUrl(url)
   const gate = checkUrl(url)
   if (!gate.ok) throw new Error(gate.reason)
-  if ((await ensureBrowserBackend()) === 'extension') return bridge.sendCommand('navigate', { url, ...meta() }, 35000)
+  if ((await ensureBrowserBackend()) === 'extension') return bridge.sendBrowserCommand('navigate', { url, ...meta() }, 35000)
   const p = await ensurePage()
   const mode = waitUntil === 'networkidle' ? 'networkidle' : 'domcontentloaded'
   const before = p.url()
@@ -493,14 +548,21 @@ function removeMarksInPage() {
 
 export async function browserScreenshot({ fullPage, annotate } = {}) {
   if ((await ensureBrowserBackend()) === 'extension') {
-    // annotate is forwarded so a future extension build can draw marks; today it can't, so say so
-    // (the brains append r.note to the tool output) instead of silently returning a plain image.
-    const r = await bridge.sendCommand('screenshot', { fullPage: !!fullPage, annotate: !!annotate, ...meta() })
+    // The extension snapshots the page, draws the [N] marks in-page before the capture (same overlay
+    // as below) and returns `marks` (drawn) + `refs` (every numbered element with its
+    // data-ghost-ref selector) — remembered here so browser_click { ref: N } acts on what's drawn.
+    const r = await bridge.sendBrowserCommand('screenshot', { fullPage: !!fullPage, annotate: !!annotate, ...meta() })
+    if (annotate && Array.isArray(r?.refs)) {
+      rememberExtensionRefs(r.refs.map((it) => ({ ...it, refSelector: it.selector })))
+      return { base64: r.base64, url: r.url, marks: r.marks || [] }
+    }
+    // An older extension build that can't draw marks: say so (the brains append r.note to the tool
+    // output) instead of silently returning a plain image.
     return annotate && !r?.marks
       ? {
           ...r,
           marks: null,
-          note: 'annotate is not supported on the Chrome-extension backend; use browser_get_page refs, browser_click { text } or browser_click_at { x, y } (0..1 fractions)'
+          note: 'annotate is not supported by the loaded Chrome-extension build (reload it from extension/); use browser_get_page refs, browser_click { text } or browser_click_at { x, y } (0..1 fractions)'
         }
       : r
   }
@@ -537,21 +599,21 @@ export function formatMarks(marks) {
 // Back / forward / reload in the active tab's own history — the browser's nav buttons, for the
 // agent. Extension path runs against your real Chrome tab; Playwright path drives its own page.
 export async function browserGoBack() {
-  if ((await ensureBrowserBackend()) === 'extension') return bridge.sendCommand('goBack', { ...meta() }, 35000)
+  if ((await ensureBrowserBackend()) === 'extension') return bridge.sendBrowserCommand('goBack', { ...meta() }, 35000)
   const p = await ensurePage() // no assertPageAllowed: going back is the way OFF a blocked page
   await p.goBack({ waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => {})
   return actionResult(p, { navigated: true })
 }
 
 export async function browserGoForward() {
-  if ((await ensureBrowserBackend()) === 'extension') return bridge.sendCommand('goForward', { ...meta() }, 35000)
+  if ((await ensureBrowserBackend()) === 'extension') return bridge.sendBrowserCommand('goForward', { ...meta() }, 35000)
   const p = await ensurePage()
   await p.goForward({ waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => {})
   return actionResult(p, { navigated: true })
 }
 
 export async function browserReload() {
-  if ((await ensureBrowserBackend()) === 'extension') return bridge.sendCommand('reloadTab', { ...meta() }, 35000)
+  if ((await ensureBrowserBackend()) === 'extension') return bridge.sendBrowserCommand('reloadTab', { ...meta() }, 35000)
   const p = await ensurePage()
   assertPageAllowed(p)
   await p.reload({ waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => {})
@@ -857,6 +919,20 @@ function refError(ref) {
   )
 }
 
+// Extension backend: record the numbered elements of a getPage snapshot / annotated screenshot so
+// { ref: N } resolves to the `[data-ghost-ref=…]` selector the extension tagged them with. Links
+// carry no selector on older extension builds — those fall back to their label.
+function rememberExtensionRefs(items) {
+  const refs = new Map()
+  for (const it of items || []) {
+    if (it.ref == null) continue
+    refs.set(Number(it.ref), { label: it.label, selector: it.refSelector || it.selector || '', kind: it.kind })
+  }
+  lastRefs = refs
+  lastRefsBackend = 'extension'
+  refGen++
+}
+
 // Extension backend: translate a ref from the last EXTENSION snapshot into the data-ghost-ref
 // selector (or label) it was recorded with. Refs numbered by a Playwright snapshot never apply.
 function refToExtensionArgs({ ref, text, selector }) {
@@ -1020,7 +1096,7 @@ async function clarifyClickError(page, err, { selector, text, ref }) {
 export async function browserClick({ ref, selector, text, double, button = 'left' } = {}) {
   if ((await ensureBrowserBackend()) === 'extension') {
     const t = refToExtensionArgs({ ref, text, selector })
-    return withRefError(ref, () => bridge.sendCommand('click', { ...t, double: !!double, button, ...meta() }))
+    return withRefError(ref, () => bridge.sendBrowserCommand('click', { ...t, double: !!double, button, ...meta() }))
   }
   const p = await ensurePage()
   assertPageAllowed(p)
@@ -1050,9 +1126,11 @@ export async function browserClick({ ref, selector, text, double, button = 'left
 export async function browserHover({ ref, selector, text } = {}) {
   if ((await ensureBrowserBackend()) === 'extension') {
     const t = refToExtensionArgs({ ref, text, selector })
-    const r = await withRefError(ref, () => bridge.sendCommand('hover', { ...t, ...meta() }))
+    const r = await withRefError(ref, () => bridge.sendBrowserCommand('hover', { ...t, ...meta() }))
     await sleep(250) // let a hover menu open before the agent looks
-    return { ok: true, url: r?.url || '' }
+    // Keep the events (dialogs the guard/CDP answered) so a hover-raised dialog is reported now,
+    // not on the next action.
+    return { ok: true, url: r?.url || '', events: r?.events || [] }
   }
   const p = await ensurePage()
   assertPageAllowed(p)
@@ -1070,8 +1148,12 @@ export async function browserHover({ ref, selector, text } = {}) {
 export async function browserFill({ ref, selector, value, label, pressEnter } = {}) {
   if ((await ensureBrowserBackend()) === 'extension') {
     const t = refToExtensionArgs({ ref, text: label, selector })
-    const r = await withRefError(ref, () => bridge.sendCommand('fill', { selector: t.selector, label: t.text, value, ...meta() }))
-    if (pressEnter) await bridge.sendCommand('pressKey', { keys: 'Enter', ...meta() }, 30000)
+    const r = await withRefError(ref, () => bridge.sendBrowserCommand('fill', { selector: t.selector, label: t.text, value, ...meta() }))
+    if (pressEnter) {
+      // Enter usually submits/navigates: report the post-Enter url and any dialogs from BOTH steps.
+      const pk = await bridge.sendBrowserCommand('pressKey', { keys: 'Enter', ...meta() }, 30000)
+      return { ...(r || {}), ...(pk || {}), events: [...(r?.events || []), ...(pk?.events || [])] }
+    }
     return r
   }
   const p = await ensurePage()
@@ -1123,20 +1205,10 @@ export async function browserFill({ ref, selector, value, label, pressEnter } = 
 export async function browserGetPage({ limit } = {}) {
   const cap = Math.min(Number(limit) || 40, 60)
   if ((await ensureBrowserBackend()) === 'extension') {
-    const r = await bridge.sendCommand('getPage', { limit: cap, ...meta() })
+    const r = await bridge.sendBrowserCommand('getPage', { limit: cap, ...meta() })
     // The extension numbers its items (ref + a data-ghost-ref selector); remember them so
-    // browser_click / browser_fill / browser_hover { ref } resolve on this backend too. Links carry
-    // no selector on older extension builds — those fall back to their label.
-    const refs = new Map()
-    for (const k of ['buttons', 'links', 'fields', 'selects']) {
-      for (const it of r?.[k] || []) {
-        if (it.ref == null) continue
-        refs.set(Number(it.ref), { label: it.label, selector: it.refSelector || it.selector || '', kind: k })
-      }
-    }
-    lastRefs = refs
-    lastRefsBackend = 'extension'
-    refGen++
+    // browser_click / browser_fill / browser_hover { ref } resolve on this backend too.
+    rememberExtensionRefs(['buttons', 'links', 'fields', 'selects'].flatMap((k) => (r?.[k] || []).map((it) => ({ ...it, kind: k }))))
     return { ...r, formatted: formatPageSnapshot(r) }
   }
   const p = await ensurePage()
@@ -1147,7 +1219,7 @@ export async function browserGetPage({ limit } = {}) {
 
 export async function browserGetText({ offset } = {}) {
   const off = Math.max(0, Number(offset) || 0)
-  if ((await ensureBrowserBackend()) === 'extension') return bridge.sendCommand('getText', { offset: off, ...meta() })
+  if ((await ensureBrowserBackend()) === 'extension') return bridge.sendBrowserCommand('getText', { offset: off, ...meta() })
   const p = await ensurePage()
   assertPageAllowed(p)
   // Main document first, then any iframe with real content (chat widgets, embeds, OAuth frames).
@@ -1203,7 +1275,7 @@ export async function browserFind({ text, limit } = {}) {
   const needle = String(text ?? '').trim()
   if (!needle) throw new Error('browser_find needs the "text" to look for')
   if ((await ensureBrowserBackend()) === 'extension') {
-    return bridge.sendCommand('find', { needle, max: Math.min(Number(limit) || 5, 20), ...meta() })
+    return bridge.sendBrowserCommand('find', { needle, max: Math.min(Number(limit) || 5, 20), ...meta() })
   }
   const p = await ensurePage()
   assertPageAllowed(p)
@@ -1230,7 +1302,7 @@ export async function browserReadPages({ urls, keepOpen } = {}) {
       }
     })
     const valid = entries.filter((e) => !e.error).map((e) => e.url)
-    const r = valid.length ? await bridge.sendCommand('readPages', { urls: valid, keepOpen: keepOpen !== false, ...meta() }, 60000) : { pages: [] }
+    const r = valid.length ? await bridge.sendBrowserCommand('readPages', { urls: valid, keepOpen: keepOpen !== false, ...meta() }, 60000) : { pages: [] }
     const got = Array.isArray(r?.pages) ? r.pages : []
     let i = 0
     return { ...r, pages: entries.map((e) => (e.error ? e : got[i++] || { url: e.url, title: '', text: '', error: 'no result' })) }
@@ -1269,7 +1341,7 @@ export async function browserReadPages({ urls, keepOpen } = {}) {
 // (0..1, top-left origin) — or raw pixels if > 1. The fix for sites where text/selector fails.
 export async function browserClickAt({ x, y } = {}) {
   if (x == null || y == null) throw new Error('browser_click_at needs x and y (fractions of the viewport, 0..1)')
-  if ((await ensureBrowserBackend()) === 'extension') return bridge.sendCommand('clickAt', { x: Number(x), y: Number(y), ...meta() })
+  if ((await ensureBrowserBackend()) === 'extension') return bridge.sendBrowserCommand('clickAt', { x: Number(x), y: Number(y), ...meta() })
   const p = await ensurePage()
   assertPageAllowed(p)
   const before = p.url()
@@ -1313,7 +1385,7 @@ export async function browserDrag({ fromSelector, toSelector, from, to } = {}) {
 
 // Scroll the page (or a specific scrollable element) to reveal off-screen content / load more.
 export async function browserScroll({ direction = 'down', amount, selector } = {}) {
-  if ((await ensureBrowserBackend()) === 'extension') return bridge.sendCommand('scroll', { direction, amount, selector, ...meta() })
+  if ((await ensureBrowserBackend()) === 'extension') return bridge.sendBrowserCommand('scroll', { direction, amount, selector, ...meta() })
   const p = await ensurePage()
   assertPageAllowed(p)
   const scrollY = await p.evaluate(
@@ -1404,7 +1476,7 @@ export async function browserPressKey({ keys, text } = {}) {
   if (!hasText && !keyList.length) throw new Error('browser_press_key needs "text" to type and/or "keys" to press')
   if ((await ensureBrowserBackend()) === 'extension') {
     // Hand the extension the current clipboard text (for paste) and take back any copied selection.
-    const r = await bridge.sendCommand('pressKey', { keys, text, clipboardText: clipboard.readText(), ...meta() }, 30000)
+    const r = await bridge.sendBrowserCommand('pressKey', { keys, text, clipboardText: clipboard.readText(), ...meta() }, 30000)
     if (r && typeof r.copied === 'string' && r.copied) {
       try {
         clipboard.writeText(r.copied)
@@ -1447,8 +1519,11 @@ export async function browserWaitFor({ selector, text, timeoutMs } = {}) {
   if (!selector && !hasText) throw new Error('browser_wait_for needs a "selector" or "text" to wait for')
   const ms = Math.min(Number(timeoutMs) || 10000, 30000)
   if ((await ensureBrowserBackend()) === 'extension') {
-    // Give the bridge call headroom beyond the in-page wait so it never times out first.
-    return bridge.sendCommand('waitFor', { selector, text, timeoutMs: ms, ...meta() }, ms + 6000)
+    // The extension caps a wait at ~24s (it can't poll the bridge while a command runs, and the bridge
+    // counts it as gone after 30s of silence); give the bridge call headroom beyond that so it never
+    // times out first.
+    const extMs = Math.min(ms, EXT_WAIT_CAP)
+    return bridge.sendBrowserCommand('waitFor', { selector, text, timeoutMs: extMs, ...meta() }, extMs + 6000)
   }
   const p = await ensurePage()
   assertPageAllowed(p)
@@ -1481,7 +1556,8 @@ export async function browserWaitFor({ selector, text, timeoutMs } = {}) {
 export async function browserWaitForNavigation({ timeoutMs } = {}) {
   const ms = Math.min(Number(timeoutMs) || 30000, 60000)
   if ((await ensureBrowserBackend()) === 'extension') {
-    return bridge.sendCommand('waitForNavigation', { timeoutMs: ms, ...meta() }, ms + 6000)
+    const extMs = Math.min(ms, EXT_WAIT_CAP) // see browserWaitFor
+    return bridge.sendBrowserCommand('waitForNavigation', { timeoutMs: extMs, ...meta() }, extMs + 6000)
   }
   const p = await ensurePage()
   const before = p.url()
@@ -1510,7 +1586,7 @@ export async function browserClose() {
 // about:blank page if the closed one was the last — so subsequent commands still work.
 // Closing a popup returns to the page that opened it.
 export async function browserCloseTab() {
-  if ((await ensureBrowserBackend()) === 'extension') return bridge.sendCommand('closeTab', { ...meta() }, 15000)
+  if ((await ensureBrowserBackend()) === 'extension') return bridge.sendBrowserCommand('closeTab', { ...meta() }, 15000)
   await ensurePage()
   const closing = page
   const others = context.pages().filter((x) => x !== closing && !x.isClosed())
@@ -1535,7 +1611,7 @@ function redactBlockedTab(t) {
 
 export async function browserListTabs() {
   if ((await ensureBrowserBackend()) === 'extension') {
-    const r = await bridge.sendCommand('listTabs', { ...meta() }, 15000)
+    const r = await bridge.sendBrowserCommand('listTabs', { ...meta() }, 15000)
     return { ...r, tabs: (r?.tabs || []).map(redactBlockedTab) }
   }
   // Playwright fallback: enumerate the context's pages (no per-tab audible signal here).

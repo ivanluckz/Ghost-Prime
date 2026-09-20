@@ -6,8 +6,9 @@ import * as screen from '../tools/screen.js'
 import * as shell from '../tools/shell-sessions.js'
 import * as reminders from '../tools/reminders.js'
 import * as fileUndo from '../tools/file-undo.js'
-import { saveMemory, recallMemories, memoryDigest } from '../memory/db.js'
+import { saveMemory, recallMemories, memoryDigest, getRunContext, setRunContext } from '../memory/db.js'
 import { getToolSpecs, executeTool } from '../tools/index.js'
+import { envBool } from '../env.js'
 
 // Two chat brains, picked PER TURN by pickBrain() below:
 //   gemini — Google AI Studio free tier (Gemini 2.5 Flash) with full tool calling (src/main/tools)
@@ -15,7 +16,15 @@ import { getToolSpecs, executeTool } from '../tools/index.js'
 // Chat selectors: GHOST_BRAIN_MODE=auto|gemini|claude, GHOST_CONTROL_BRAIN=claude|gemini, and the
 // per-turn /brain override. GHOST_PROVIDER / GHOST_FALLBACK_PROVIDER (claude-agent | gemini |
 // openrouter) only choose the model for background work — session auto-summaries and proactive
-// check-ins (summarizeConversation / generateShort) — never a chat reply.
+// check-ins (summarizeConversation / generateShort) — never a chat reply. `openrouter` is therefore
+// reachable ONLY from those background jobs (OPENROUTER_API_KEY / OPENROUTER_MODEL are otherwise
+// unused); the OpenAI-compatible table below serves both the Gemini chat brain and that path.
+//
+// Every streamChat call also carries a `surface` ('desktop' | 'discord'), an `origin` and an
+// optional `notify(text)` (see streamChat) so reminders / notify_user set from Discord are
+// delivered back to the channel that asked — and agent runs are serialized GLOBALLY (one at a
+// time across the desktop UI and every Discord channel) because they all share the same browser,
+// terminals and memory.
 const OPENAI_PROVIDERS = {
   openrouter: {
     baseURL: 'https://openrouter.ai/api/v1',
@@ -100,12 +109,12 @@ const SYSTEM_TOOL_NAMES = ['clipboard_read', 'clipboard_write', 'notify_user'].m
 // External Canva MCP (the @canva/cli dev server) — gives the agent Canva's tools. Spawned per session
 // via npx; needs Node >= 22. On by default; set GHOST_CANVA=0 to drop it (saves tokens for this
 // cost-sensitive user). `mcp__canva` in allowedTools permits all of its tools.
-const CANVA_ENABLED = process.env.GHOST_CANVA !== '0'
+const CANVA_ENABLED = envBool('GHOST_CANVA', true)
 const CANVA_SERVER = 'canva'
 
 // Experimental desktop control (screenshot + keyboard/mouse for native Linux apps, beyond the
 // browser). Off unless GHOST_SCREEN_TOOLS=1 — limited on Crostini (see src/main/tools/screen.js).
-const SCREEN_ENABLED = process.env.GHOST_SCREEN_TOOLS === '1'
+const SCREEN_ENABLED = envBool('GHOST_SCREEN_TOOLS', false)
 const SCREEN_SERVER = 'ghost-screen'
 const SCREEN_TOOL_NAMES = ['screen_screenshot', 'screen_type', 'screen_key', 'screen_click', 'launch_app'].map(
   (n) => `mcp__${SCREEN_SERVER}__${n}`
@@ -191,7 +200,7 @@ const SHARED_TAIL = `
 
 DRIVING THE BROWSER:
 - Look first: browser_get_page numbers every visible button, link, field and dropdown as [N]. Act on them with browser_click { ref: N } / browser_fill { ref: N, value } — the most reliable way. { text } (visible label) and { selector } (standard CSS) also work.
-- When layout matters or nothing is numbered where you need to click (canvas, maps, icon buttons), take browser_screenshot { annotate: true }: each element's [N] is drawn on the image — click by ref, or browser_click_at { x, y } (0..1 fractions of the image) for anything unnumbered. Ref numbering and annotate are fully supported on the Playwright backend; on the Chrome-extension backend, if a result says a ref is unknown or annotate is unsupported, fall back to browser_click { text } or browser_click_at { x, y } from a plain screenshot.
+- When layout matters or nothing is numbered where you need to click (canvas, maps, icon buttons), take browser_screenshot { annotate: true }: each element's [N] is drawn on the image — click by ref, or browser_click_at { x, y } (0..1 fractions of the image) for anything unnumbered. Both backends support refs and annotate; if a result ever says a ref is unknown, call browser_get_page again.
 - Every action result tells you where you are now, whether the page changed ("page changed" → refs are stale, call browser_get_page again), and any dialog, download, or new tab it caused. Clicks already wait for the navigation they trigger — you do not need browser_wait_for_navigation after them.
 - Content that appears later (spinners, search results, SPAs): browser_wait_for { text | selector } before acting. Hover menus: browser_hover first. Long pages: browser_find { text } jumps to a phrase; browser_scroll reveals more. (browser_hover / browser_find by ref are fully supported on the Playwright backend; on the extension backend prefer { text }.)
 - Dropdowns / checkboxes: browser_fill with the option's visible text, or "true"/"false". Editors with no form field (Docs, Notion, code editors): click into them, then browser_press_key { text } / { keys }.
@@ -203,9 +212,33 @@ HOW TO WORK:
 - Ground every progress and success claim in an actual tool result.
 - Be concise and clear: state the outcome first, then any details. Plain, natural language suitable for voice.`
 
+// Where the current run's user is: Discord users cannot see the desktop, so tell the model how
+// reminders / notifications reach them and not to reference desktop-only UI (Shift+Tab).
+function surfaceSection() {
+  const ctx = getRunContext()
+  if (ctx?.surface !== 'discord') return ''
+  return `
+
+WHERE THE USER IS: this conversation is happening over Discord (a chat message, possibly from their phone) — they may not be at the desktop. reminder_set and notify_user deliver to THIS Discord channel (as well as the desktop), so it is fine to promise "I'll remind you here". Autonomy mode is changed with the Discord command \`!mode plan|auto|full\`, never with Shift+Tab. Never mention the desktop window, keyboard shortcuts, or "the app" as if they could see it.`
+}
+
 // brain: 'gemini' | 'claude'
 export function buildSystemPrompt(brain) {
-  return SHARED_HEAD + (brain === 'claude' ? claudeToolsSection() : geminiToolsSection()) + SHARED_TAIL
+  return SHARED_HEAD + (brain === 'claude' ? claudeToolsSection() : geminiToolsSection()) + SHARED_TAIL + surfaceSection()
+}
+
+// Deliver a notify_user message to the surface that started this run (Discord), on top of the
+// desktop notification. Best-effort — never throws into the tool loop.
+async function notifySurface(title, body) {
+  const ctx = getRunContext()
+  if (typeof ctx?.notify !== 'function') return false
+  try {
+    await ctx.notify(`🔔 **${String(title || 'Ghost-Prime')}**\n${String(body || '')}`.trim())
+    return true
+  } catch (e) {
+    console.warn('[ghost] surface notify failed:', e?.message || e)
+    return false
+  }
 }
 
 
@@ -382,7 +415,11 @@ async function streamChatGeminiAgent({ messages, signal, onDelta, onEvent, model
       ]
 
       if (mode === 'plan' && !readOnlyTools.includes(name)) {
-        const planMsg = `[PLAN MODE: Skipping execution of state-changing tool "${name}". Switch to AUTO or FULL mode with Shift+Tab to execute.]`
+        // How to leave plan mode differs per surface: the desktop cycles with Shift+Tab, Discord
+        // has the !mode command — the model relays this text to the user, so it must be right.
+        const howToSwitch =
+          getRunContext()?.surface === 'discord' ? 'Switch with `!mode auto` or `!mode full` to execute.' : 'Switch to AUTO or FULL mode with Shift+Tab to execute.'
+        const planMsg = `[PLAN MODE: Skipping execution of state-changing tool "${name}". ${howToSwitch}]`
         onEvent?.({ kind: 'tool_use', id: callId, name, input: args })
         onEvent?.({ kind: 'tool_result', id: callId, output: planMsg, isError: true, durationMs: 1 })
         conversation.push({
@@ -399,6 +436,11 @@ async function streamChatGeminiAgent({ messages, signal, onDelta, onEvent, model
       let toolRes
       try {
         toolRes = await executeTool(name, args, { signal })
+        // notify_user only pops a desktop notification (tools/index.js); a Discord-originated run
+        // also gets the message posted back to its channel, and the model is told so.
+        if (name === 'notify_user' && !toolRes?.isError && (await notifySurface(args.title, args.body))) {
+          toolRes = { ...toolRes, output: `${toolRes.output || 'Notification displayed.'} Also delivered to the user's Discord channel.` }
+        }
       } catch (err) {
         toolRes = { output: `Tool execution failed: ${err.message}`, isError: true }
       }
@@ -445,7 +487,7 @@ async function streamChatGeminiAgent({ messages, signal, onDelta, onEvent, model
   }
 
   // A Stop that lands after the final reply has already streamed must not throw the reply away
-  // (ipc.js would skip saveMessage on the aborted path).
+  // (ipc.js would persist it with a [stopped] marker and report the turn as aborted instead of done).
   if (signal?.aborted && !fullOutput.trim()) throw new Error('Request aborted')
   // Belt-and-braces: a provider that ignores tool_choice, or an empty final content, must not end
   // the turn silently (ipc.js skips persisting an empty reply; Discord shows "(no response)").
@@ -462,7 +504,10 @@ async function streamChatGeminiAgent({ messages, signal, onDelta, onEvent, model
   return fullOutput
 }
 
-async function streamChatOpenAI({ messages, signal, onDelta, model, provider = summaryProvider() }) {
+// Plain (tool-less) chat completion. Only reached as the fallback inside streamChatGeminiAgent when
+// the model rejects tool definitions — always called with an explicit provider, never the
+// background-job GHOST_PROVIDER (chat replies do not go to OpenRouter).
+async function streamChatOpenAI({ messages, signal, onDelta, model, provider }) {
   const cfg = getOpenAIConfig(provider)
   const openai = getClient(provider)
   const useModel = model || process.env[cfg.modelEnv] || process.env.GHOST_MODEL || cfg.defaultModel
@@ -1042,7 +1087,10 @@ async function getSystemMcpServer() {
               w.flashFrame(true) // bounce the taskbar entry for attention
             } catch {}
           }
-          return { content: [{ type: 'text', text: 'Notified the user.' }] }
+          // A run started from Discord also gets the message in its channel (the user may be away
+          // from the desktop entirely).
+          const relayed = await notifySurface(title, body)
+          return { content: [{ type: 'text', text: relayed ? "Notified the user (desktop + their Discord channel)." : 'Notified the user.' }] }
         }
       )
     ]
@@ -1212,10 +1260,11 @@ async function streamChatClaudeAgent({ messages, signal, onDelta, onEvent, model
   // replies: fewer/consolidated tool calls, less preamble, faster first token. Bump
   // CLAUDE_AGENT_EFFORT to medium/high/xhigh/max for harder multi-step work. Effort is only valid
   // on Sonnet 4.6 / Opus / Fable (Haiku 4.5 would 400), so we skip it for haiku. Set
-  // CLAUDE_AGENT_THINKING=off to disable thinking entirely for the fastest possible first token.
+  // CLAUDE_AGENT_THINKING=0 to disable thinking entirely for the fastest possible first token
+  // (the per-session /thinking off|adaptive override wins over the env flag).
   const effortVal = effort || process.env.CLAUDE_AGENT_EFFORT || 'low'
   const supportsEffort = !/haiku/i.test(useModel)
-  const thinkingOff = (thinking || process.env.CLAUDE_AGENT_THINKING || '').toLowerCase() === 'off'
+  const thinkingOff = thinking ? String(thinking).toLowerCase() === 'off' : !envBool('CLAUDE_AGENT_THINKING', true)
   // Flatten any rich (image) content to text — the Agent SDK prompt is a string, so images dropped
   // into the chat are noted but not shown on the Claude brain (they DO work on the Gemini brain).
   const flat = (c) =>
@@ -1382,7 +1431,8 @@ async function streamChatClaudeAgent({ messages, signal, onDelta, onEvent, model
 }
 
 // Errors that mean "Claude itself is unavailable right now" — credit/usage/rate/auth — rather
-// than a bug in a tool or our own code. Only these trigger the automatic OpenRouter fallback.
+// than a bug in a tool or our own code. Only these make a chat turn fall over to the other brain
+// (streamChat) or a background job to GHOST_FALLBACK_PROVIDER (summaries / proactive lines).
 function isClaudeUnavailable(err) {
   const msg = (err?.message || String(err)).toLowerCase()
   return /usage limit|rate.?limit|too many requests|\b429\b|\b529\b|\b503\b|quota|credit|insufficient|balance|billing|payment|overloaded|temporarily unavailable|service unavailable|\b401\b|\b403\b|unauthorized|forbidden|authentication|not authenticated|not logged in|invalid api key|please log ?in|token (?:expired|invalid)|subscription/.test(
@@ -1390,6 +1440,7 @@ function isClaudeUnavailable(err) {
   )
 }
 
+// Background jobs only (summaries / proactive): is GHOST_FALLBACK_PROVIDER usable?
 function fallbackReady() {
   const cfg = OPENAI_PROVIDERS[summaryFallback()]
   return !!(cfg && process.env[cfg.apiKeyEnv])
@@ -1469,39 +1520,155 @@ export function pickBrain(opts = {}) {
 }
 
 function runBrain(opts, brain) {
-  if (brain === 'claude') return streamChatClaudeAgent(opts)
+  // Surface routing (surface/origin/notify) lives in the run context — the brains never see it.
+  const { surface, origin, notify, ...brainOpts } = opts
+  if (brain === 'claude') return streamChatClaudeAgent(brainOpts)
   // `model` is the Claude alias from /model (sonnet|opus|haiku), effort/thinking are Claude-only —
   // never send them to Gemini (it would 404 on model "opus").
-  const { model, effort, thinking, ...rest } = opts
+  const { model, effort, thinking, ...rest } = brainOpts
   return streamChatGeminiAgent({ ...rest, provider: 'gemini' })
 }
 
-export async function streamChat(opts) {
-  const brain = pickBrain(opts)
-  opts.onEvent?.({ kind: 'brain', brain }) // tell the UI which brain is answering
-  let streamedAny = false
-  let usedTools = false
-  const onDelta = (t) => {
-    streamedAny = true
-    opts.onDelta?.(t)
-  }
-  const onEvent = (ev) => {
-    if (ev?.kind === 'tool_use') usedTools = true
-    opts.onEvent?.(ev)
-  }
+// --- Global run slot -------------------------------------------------------
+// Every agent run — desktop chat:send, each Discord channel — drives the SAME Playwright browser,
+// active-tab state, live terminals and memory, so two runs at once interleave their clicks/typing
+// on one page. Runs therefore queue here (FIFO, never rejected): a caller whose turn is not yet up
+// gets onEvent({ kind: 'queued', behind: <surface> }) so it can show a "busy — queued" notice, and
+// an abort while waiting throws immediately without ever taking the slot.
+let runTail = Promise.resolve()
+let activeRun = null // { surface, origin, startedAt, abort } while a run holds the slot
+let queued = 0 // runs holding or waiting for the slot (so a burst in one tick still sees "busy")
+let lastEnqueued = null // ctx of the most recent entrant — what a newcomer is queued behind
+// Watchdog: a run that holds the slot this long is probably stuck (SDK subprocess stall, a page
+// that never settles, a shell command that never returns) and is blocking every other surface —
+// log it so the reason "Discord says queued forever" is in the log, and keep logging periodically.
+const SLOT_WATCHDOG_MS = Number(process.env.GHOST_RUN_WATCHDOG_MS) > 0 ? Number(process.env.GHOST_RUN_WATCHDOG_MS) : 10 * 60_000
+
+// The run currently holding the slot (for status lines), or null when idle.
+export function currentRun() {
+  return activeRun
+}
+// How many runs are holding or waiting for the slot.
+export function runQueueDepth() {
+  return queued
+}
+// Cancel whichever run holds the slot right now, from ANY surface — the escape hatch when a stuck
+// desktop run is blocking every Discord channel (or vice versa). Returns the holder's
+// { surface, origin } when an abort was issued, null when the slot is idle or the holder gave no
+// abort hook. The holder's own signal fires, so its caller cleans up exactly as on a local Stop.
+export function abortCurrentRun() {
+  const run = activeRun
+  if (!run?.abort) return null
   try {
-    return await runBrain({ ...opts, onDelta, onEvent }, brain)
-  } catch (err) {
-    // never double-answer, and never replay a turn whose tools already ran (side effects would repeat)
-    if (opts.signal?.aborted || streamedAny || usedTools) throw err
-    if (!isClaudeUnavailable(err)) throw err // only availability errors fall over to the other brain
-    const other = brain === 'claude' ? 'gemini' : 'claude'
-    const reason = (err?.message || String(err)).split('\n')[0].slice(0, 160)
-    console.warn(`[ghost] ${brain} unavailable → ${other}: ${reason}`)
-    opts.onEvent?.({ kind: 'brain', brain: other, fallback: true })
-    opts.onDelta?.(`*⚡ ${brain} was unavailable (${reason}). Using ${other} for this reply.*\n\n`) // *…* — the renderer has no _italic_ rule
-    return await runBrain({ ...opts, onDelta, onEvent }, other)
+    run.abort()
+  } catch (e) {
+    console.warn('[ghost] abortCurrentRun:', e?.message || e)
+    return null
   }
+  return { surface: run.surface, origin: run.origin }
+}
+
+// Run `fn` as THE agent run: waits for every run queued before it, publishes `ctx` as the run
+// context (getRunContext) for its duration, then hands the slot on. Exported so the queueing can be
+// smoke-tested without a brain (scripts/smoke-run-slot.mjs); streamChat is the only production caller.
+export async function withRunSlot(opts, ctx, fn) {
+  if (queued > 0) {
+    const behind = activeRun || lastEnqueued
+    opts.onEvent?.({ kind: 'queued', behind: behind?.surface || 'desktop', since: activeRun?.startedAt ?? null, ahead: queued })
+  }
+  queued++
+  lastEnqueued = ctx
+  let release
+  const mine = new Promise((r) => (release = r))
+  const ahead = runTail
+  runTail = ahead.then(() => mine)
+  const leave = () => {
+    queued--
+    if (lastEnqueued === ctx && queued === 0) lastEnqueued = null
+    release() // let the runs behind us proceed
+  }
+
+  // Wait for everything queued before us — unless Stop arrives first.
+  const signal = opts.signal
+  let onAbort = null
+  try {
+    await Promise.race([
+      ahead,
+      new Promise((_, reject) => {
+        if (!signal) return
+        if (signal.aborted) return reject(new Error('Request aborted'))
+        onAbort = () => reject(new Error('Request aborted'))
+        signal.addEventListener('abort', onAbort, { once: true })
+      })
+    ])
+  } catch (err) {
+    leave()
+    throw err
+  } finally {
+    if (onAbort) signal.removeEventListener('abort', onAbort)
+  }
+
+  activeRun = {
+    surface: ctx.surface,
+    origin: ctx.origin,
+    startedAt: Date.now(),
+    abort: typeof opts.abort === 'function' ? opts.abort : null
+  }
+  setRunContext(ctx)
+  const holder = activeRun
+  const watchdog = setInterval(() => {
+    const mins = Math.round((Date.now() - holder.startedAt) / 60_000)
+    console.warn(`[ghost] run slot held by ${holder.surface}${holder.origin ? ` (${holder.origin})` : ''} for ${mins} min — ${queued - 1} waiting. Stuck? Stop it from the desktop or \`!stop all\` on Discord.`)
+  }, SLOT_WATCHDOG_MS)
+  watchdog.unref?.() // never keep the process alive on its own
+  try {
+    return await fn()
+  } finally {
+    clearInterval(watchdog)
+    setRunContext(null)
+    activeRun = null
+    leave()
+  }
+}
+
+// opts: { messages, mode, brain, model, effort, thinking, signal, onDelta, onEvent,
+//         surface?: 'desktop' | 'discord' (default desktop), origin?: string, notify?: (text) => Promise,
+//         abort?: () => void — cancels this run's own controller, so abortCurrentRun() can stop it from elsewhere }
+// `origin` (e.g. 'discord:<channelId>') is stamped on reminders created during the run so they
+// fire back to that channel; `notify` receives notify_user text for a non-desktop surface.
+export async function streamChat(opts) {
+  const ctx = {
+    surface: opts.surface === 'discord' ? 'discord' : 'desktop',
+    origin: opts.origin || null,
+    notify: typeof opts.notify === 'function' ? opts.notify : null
+  }
+  return withRunSlot(opts, ctx, async () => {
+    const brain = pickBrain(opts)
+    opts.onEvent?.({ kind: 'brain', brain }) // tell the UI which brain is answering
+    let streamedAny = false
+    let usedTools = false
+    const onDelta = (t) => {
+      streamedAny = true
+      opts.onDelta?.(t)
+    }
+    const onEvent = (ev) => {
+      if (ev?.kind === 'tool_use') usedTools = true
+      opts.onEvent?.(ev)
+    }
+    try {
+      return await runBrain({ ...opts, onDelta, onEvent }, brain)
+    } catch (err) {
+      // never double-answer, and never replay a turn whose tools already ran (side effects would repeat)
+      if (opts.signal?.aborted || streamedAny || usedTools) throw err
+      if (!isClaudeUnavailable(err)) throw err // only availability errors fall over to the other brain
+      const other = brain === 'claude' ? 'gemini' : 'claude'
+      const reason = (err?.message || String(err)).split('\n')[0].slice(0, 160)
+      console.warn(`[ghost] ${brain} unavailable → ${other}: ${reason}`)
+      opts.onEvent?.({ kind: 'brain', brain: other, fallback: true })
+      opts.onDelta?.(`*⚡ ${brain} was unavailable (${reason}). Using ${other} for this reply.*\n\n`) // *…* — the renderer has no _italic_ rule
+      return await runBrain({ ...opts, onDelta, onEvent }, other)
+    }
+  })
 }
 
 // ---------------------------------------------------------------------------
@@ -1597,7 +1764,7 @@ export async function summarizeConversation(messages, { signal, known = [] } = {
     if (!String(text || '').trim()) return null // blank/aborted reply: "didn't get an answer", not "nothing durable"
     return parseFacts(text)
   } catch (e) {
-    if (process.env.GHOST_DEBUG) console.warn('[auto-summary] summarize failed:', e?.message || e)
+    if (envBool('GHOST_DEBUG', false)) console.warn('[auto-summary] summarize failed:', e?.message || e)
     return null // null = call failed (caller retries next time); [] = model genuinely found nothing durable
   }
 }
@@ -1616,7 +1783,7 @@ export async function generateShort(systemPrompt, prompt) {
     }
     return (await summarizeViaOpenAI(systemPrompt, prompt, undefined, summaryProvider())).trim()
   } catch (e) {
-    if (process.env.GHOST_DEBUG) console.warn('[proactive] generate failed:', e?.message || e)
+    if (envBool('GHOST_DEBUG', false)) console.warn('[proactive] generate failed:', e?.message || e)
     return ''
   }
 }

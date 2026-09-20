@@ -1,7 +1,7 @@
-import { homedir, tmpdir } from 'node:os'
-import { writeFileSync } from 'node:fs'
+import { homedir, tmpdir, userInfo } from 'node:os'
+import { writeFileSync, mkdirSync, lstatSync, statSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
-import { BrowserWindow } from 'electron'
+import { app, BrowserWindow } from 'electron'
 
 // node-pty is a native module. Load it lazily + defensively: an ABI mismatch (e.g. after an
 // Electron upgrade without a rebuild) must never crash the whole app at import time — terminals
@@ -32,8 +32,40 @@ let counter = 0
 // tell where a command's output begins (C) and ends (D;<exit>) WITHOUT typing any marker commands
 // that would echo into the user's view. We point bash at this rc file, which also sources the user's
 // normal profile/bashrc so their prompt and aliases are intact.
+//
+// The file is sourced by every terminal, so it lives in a per-user private dir (userData, or a
+// uid-scoped tmpdir fallback) with 0600 perms. The fallback path is predictable, so ensureRc()
+// verifies the dir is a plain directory we own (no symlink, not group/other writable) and creates
+// the file with O_EXCL, so a pre-planted dir or symlink can never redirect what bash sources.
 let rcPath = null
-function ensureRc() {
+function rcDir() {
+  try {
+    const d = app?.getPath?.('userData')
+    if (d) return { dir: d, fallback: false }
+  } catch {}
+  let uid = 'u'
+  try {
+    uid = String(userInfo().uid ?? process.getuid?.() ?? 'u')
+  } catch {}
+  return { dir: join(tmpdir(), `ghost-prime-${uid}`), fallback: true }
+}
+
+// The tmpdir fallback lives at a predictable path in a shared directory, so mkdirSync({recursive})
+// succeeding is not enough: another local user could have pre-created it (or planted a symlink)
+// before we got there. Refuse anything that isn't a plain directory we own with no group/other
+// write bit. userData is under the user's own config dir, so it only needs to be a directory.
+function assertSafeDir(dir, fallback) {
+  const st = lstatSync(dir)
+  if (!fallback) {
+    if (!(st.isDirectory() || (st.isSymbolicLink() && statSync(dir).isDirectory()))) throw new Error(`rc dir is not a directory: ${dir}`)
+    return
+  }
+  if (st.isSymbolicLink() || !st.isDirectory()) throw new Error(`unsafe rc dir (not a plain directory): ${dir}`)
+  const uid = process.getuid?.()
+  if (uid !== undefined && st.uid !== undefined && st.uid !== uid) throw new Error(`unsafe rc dir (owned by uid ${st.uid}, not ${uid}): ${dir}`)
+  if (uid !== undefined && (st.mode & 0o022) !== 0) throw new Error(`unsafe rc dir (group/other writable): ${dir}`)
+}
+export function ensureRc() {
   if (rcPath) return rcPath
   const body = [
     '# Ghost-Prime shell integration (OSC 133 semantic prompts)',
@@ -48,8 +80,16 @@ function ensureRc() {
     "printf '\\033]133;A\\007'",
     ''
   ].join('\n')
-  const p = join(tmpdir(), 'ghost-prime-shell.bash')
-  writeFileSync(p, body, 'utf8')
+  const { dir, fallback } = rcDir()
+  mkdirSync(dir, { recursive: true, mode: 0o700 })
+  assertSafeDir(dir, fallback)
+  const p = join(dir, 'shell-init.bash')
+  // Remove whatever is there (a stale copy, or a planted symlink — rmSync unlinks the link itself,
+  // never its target) and create fresh with O_EXCL: 'wx' cannot follow a symlink, so the content
+  // always lands in a brand-new 0600 file we own. writeFileSync's mode applies at creation, and
+  // we always create, so no follow-up chmod (which would follow symlinks) is needed.
+  rmSync(p, { force: true })
+  writeFileSync(p, body, { encoding: 'utf8', mode: 0o600, flag: 'wx' })
   rcPath = p
   return rcPath
 }
@@ -87,6 +127,14 @@ function snapshot() {
 }
 const emitSessions = () => broadcast('shell:sessions', snapshot())
 
+// Every live chunk carries the session's sequence number AFTER appending it to the scrollback, so
+// `getScrollback().seq` names exactly the last chunk the text already contains; the renderer writes
+// only chunks with a higher seq after replaying history (no duplicated output on attach mid-stream).
+function emitData(session, data) {
+  session.seq += 1
+  broadcast('shell:data', { id: session.id, data, seq: session.seq })
+}
+
 // ---- lifecycle -----------------------------------------------------------------------------------
 export async function createSession({ name, cwd, cols = 80, rows = 24, agent = false } = {}) {
   const p = await loadPty()
@@ -111,6 +159,7 @@ export async function createSession({ name, cwd, cols = 80, rows = 24, agent = f
     agent: !!agent,
     createdAt: Date.now(),
     scrollback: '',
+    seq: 0, // increments per shell:data chunk so a re-attaching UI can drop chunks its scrollback already holds
     capture: null,
     osc: null, // null = unknown, true = OSC-133 integration live, false = fell back to printf markers
     lastExit: null // exit code once the shell process dies (so shell_list surfaces deaths)
@@ -120,13 +169,15 @@ export async function createSession({ name, cwd, cols = 80, rows = 24, agent = f
     session.scrollback = (session.scrollback + data).slice(-MAX_SCROLLBACK)
     // Integration is live the moment we see any OSC-133 marker (emitted on the first prompt).
     if (session.osc === null && session.scrollback.slice(-64).indexOf('\x1b]133;') !== -1) session.osc = true
-    broadcast('shell:data', { id: session.id, data })
+    emitData(session, data)
     if (session.capture) session.capture.feed(data)
   })
   shell.onExit(({ exitCode }) => {
     session.alive = false
     session.lastExit = exitCode
-    broadcast('shell:data', { id: session.id, data: `\r\n\x1b[2m[process exited: ${exitCode}]\x1b[0m\r\n` })
+    const note = `\r\n\x1b[2m[process exited: ${exitCode}]\x1b[0m\r\n`
+    session.scrollback = (session.scrollback + note).slice(-MAX_SCROLLBACK) // re-attach shows the exit too
+    emitData(session, note)
     if (session.capture) session.capture.onExit(exitCode)
     emitSessions()
   })
@@ -167,7 +218,8 @@ export function listSessions() {
 }
 
 export function getScrollback(id) {
-  return sessions.get(id)?.scrollback || ''
+  const s = sessions.get(id)
+  return { text: s?.scrollback || '', seq: s?.seq || 0 }
 }
 
 export function killAll() {
