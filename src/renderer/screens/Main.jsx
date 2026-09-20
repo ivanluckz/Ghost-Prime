@@ -647,7 +647,8 @@ export default function Main() {
           <div className="topbar-drag" title="Drag to move window">
             <span className="brand">
               <span className="brand-mark" aria-hidden="true" />
-              GHOST<span className="brand-accent">-PRIME</span>
+              <span className="brand-word">GHOST</span>
+              <span className="brand-accent">-PRIME</span>
             </span>
             <span className="brand-version" title={`Version ${GHOST_VERSION} · built ${GHOST_BUILD}`}>
               v{GHOST_VERSION}

@@ -25,6 +25,8 @@ const cases = [
   ['open discord', 'claude'],
   ['what is on this page', 'claude'],
   ['post "hello" on my discord server', 'claude'],
+  ['open whatsapp on my phone and send mum a message', 'claude'],
+  ['take a screenshot of my galaxy', 'claude'],
   // hard reasoning/coding → claude (unchanged)
   ['refactor this module to use async iterators', 'claude'],
   // …even when a Jarvis keyword appears in a coding ask (the one-shot pre-emption is short-text only)

@@ -43,6 +43,17 @@
   --r-lg: 22px;
   --r-md: 14px;
   --r-sm: 10px;
+
+  /* Type */
+  --font-sans: 'Inter Variable', 'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --mono: 'JetBrains Mono Variable', 'JetBrains Mono', ui-monospace, 'SFMono-Regular', Menlo, monospace;
+  --text-xs: 11px;
+  --text-sm: 12.5px;
+  --text-md: 14px;
+  --text-lg: 15.5px;
+
+  /* Focus ring shared by every control */
+  --ring: 0 0 0 2px rgba(3, 5, 12, 0.9), 0 0 0 4px rgba(0, 230, 255, 0.55);
 }
 
 * {
@@ -114,10 +125,10 @@ body,
   height: 2px;
   z-index: 3;
   pointer-events: none;
-  background: linear-gradient(90deg, transparent, rgba(0, 230, 255, 0.65), transparent);
-  box-shadow: 0 0 14px rgba(0, 230, 255, 0.5);
+  background: linear-gradient(90deg, transparent, rgba(0, 230, 255, 0.28), transparent);
+  box-shadow: 0 0 10px rgba(0, 230, 255, 0.2);
   opacity: 0;
-  animation: scan 8s ease-in-out infinite;
+  animation: scan 14s ease-in-out infinite;
 }
 
 @keyframes scan {
@@ -126,10 +137,10 @@ body,
     opacity: 0;
   }
   10% {
-    opacity: 0.85;
+    opacity: 0.5;
   }
   90% {
-    opacity: 0.85;
+    opacity: 0.5;
   }
   100% {
     transform: translateY(100vh);
@@ -150,7 +161,10 @@ html.native-frame .window-shell {
 body {
   background: radial-gradient(140% 120% at 50% 0%, var(--bg-1), var(--bg-0) 60%);
   color: var(--ink);
-  font-family: 'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  font-family: var(--font-sans);
+  font-size: var(--text-md);
+  font-optical-sizing: auto;
+  font-feature-settings: 'cv11', 'ss03'; /* single-storey a, straighter punctuation — calmer UI text */
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
   overflow: hidden;
@@ -364,6 +378,9 @@ input {
 .topbar-drag {
   flex: 1;
   min-width: 0;
+  display: flex;
+  align-items: center;
+  overflow: hidden; /* never let the wordmark run under the controls on a narrow pane */
   -webkit-app-region: drag;
   cursor: default;
   user-select: none;
@@ -424,10 +441,11 @@ html.native-frame .topbar {
 .brand {
   display: inline-flex;
   align-items: center;
-  gap: 11px;
+  gap: 0;
   font-weight: 800;
-  letter-spacing: 0.24em;
+  letter-spacing: 0.22em;
   font-size: 15px;
+  white-space: nowrap;
   background: linear-gradient(90deg, var(--cyan), var(--violet), var(--magenta), var(--cyan));
   background-size: 300% 100%;
   -webkit-background-clip: text;
@@ -443,6 +461,7 @@ html.native-frame .topbar {
   width: 17px;
   height: 17px;
   border-radius: 5px;
+  margin-right: 11px;
   background: conic-gradient(from 0deg, var(--cyan), var(--violet), var(--magenta), var(--cyan));
   box-shadow:
     0 0 16px rgba(0, 230, 255, 0.6),
@@ -497,7 +516,7 @@ html.native-frame .topbar {
 .brand-version {
   margin-left: 10px;
   align-self: center;
-  font: 500 10.5px/1 var(--mono, ui-monospace, monospace);
+  font: 500 10.5px/1 var(--mono);
   letter-spacing: 0.04em;
   color: var(--ink-faint);
   padding: 3px 7px;
@@ -516,9 +535,10 @@ html.native-frame .topbar {
 }
 
 .topbar-right {
+  flex: 0 0 auto;
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 8px;
 }
 
 .status {
@@ -765,7 +785,13 @@ html.native-frame .sidebar-head {
   box-shadow: 0 0 10px rgba(0, 230, 255, 0.6);
 }
 
+.session-branch {
+  min-width: 0;
+}
+
 .session-title {
+  display: block;
+  max-width: 100%;
   font-size: 13px;
   white-space: nowrap;
   overflow: hidden;
@@ -787,6 +813,7 @@ html.native-frame .sidebar-head {
 .session-row .session-item {
   flex: 1;
   min-width: 0;
+  overflow: hidden;
   padding-right: 32px; /* clear space for the delete button */
 }
 
@@ -945,10 +972,11 @@ html.native-frame .sidebar-head {
 
 .empty-title {
   margin: 0 0 8px;
-  font-size: 30px;
+  font-size: clamp(24px, 4.2cqi, 30px);
   font-weight: 800;
   letter-spacing: -0.022em;
   line-height: 1.14;
+  text-wrap: balance;
   color: #fff;
   text-shadow: 0 0 34px rgba(124, 92, 255, 0.22);
 }
@@ -1148,7 +1176,7 @@ html.native-frame .sidebar-head {
 }
 
 .md-code {
-  font-family: ui-monospace, 'SFMono-Regular', Menlo, monospace;
+  font-family: var(--mono);
   font-size: 0.9em;
   background: rgba(0, 0, 0, 0.4);
   border: 1px solid var(--glass-brd);
@@ -1168,7 +1196,7 @@ html.native-frame .sidebar-head {
 }
 
 .md-pre code {
-  font-family: ui-monospace, 'SFMono-Regular', Menlo, monospace;
+  font-family: var(--mono);
   font-size: 12.5px;
   color: #d6e6ff;
   white-space: pre;
@@ -1305,6 +1333,9 @@ html.native-frame .sidebar-head {
 .toolcard.tool-tool {
   border-left-color: #8a93a6;
 }
+.toolcard.tool-phone {
+  border-left-color: #ff45c0;
+}
 .toolcard.tool-error {
   border-left-color: var(--error);
 }
@@ -1340,7 +1371,7 @@ html.native-frame .sidebar-head {
 
 .tool-glyph {
   flex: 0 0 auto;
-  font-family: ui-monospace, 'SFMono-Regular', Menlo, monospace;
+  font-family: var(--mono);
   color: var(--ink-dim);
 }
 
@@ -1355,7 +1386,7 @@ html.native-frame .sidebar-head {
   flex: 0 1 auto;
   min-width: 0;
   color: var(--ink-faint);
-  font-family: ui-monospace, 'SFMono-Regular', Menlo, monospace;
+  font-family: var(--mono);
   font-size: 12px;
   white-space: nowrap;
   overflow: hidden;
@@ -1372,7 +1403,7 @@ html.native-frame .sidebar-head {
 
 .tool-time {
   color: var(--ink-faint);
-  font-family: ui-monospace, 'SFMono-Regular', Menlo, monospace;
+  font-family: var(--mono);
   font-size: 11px;
 }
 
@@ -1556,7 +1587,7 @@ html.native-frame .sidebar-head {
 
 .cmd-name {
   flex: 0 0 auto;
-  font-family: ui-monospace, 'SFMono-Regular', Menlo, monospace;
+  font-family: var(--mono);
   font-size: 13px;
   color: var(--cyan);
 }
@@ -2384,6 +2415,7 @@ html.native-frame .sidebar-head {
 .act-tool.tool-reminder, .act-tool.tool-weather { border-left-color: #e0af68; }
 .act-tool.tool-media { border-left-color: var(--magenta); }
 .act-tool.tool-tool { border-left-color: #8a93a6; }
+.act-tool.tool-phone { border-left-color: var(--magenta); }
 .act-tool-status {
   flex: 0 0 auto;
   display: grid;
@@ -2409,7 +2441,7 @@ html.native-frame .sidebar-head {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  font-family: var(--mono, ui-monospace, SFMono-Regular, monospace);
+  font-family: var(--mono);
   font-size: 10.5px;
   color: var(--ink-faint);
 }
@@ -2486,7 +2518,7 @@ html.native-frame .sidebar-head {
 
 .term-glyph {
   color: var(--cyan);
-  font-family: ui-monospace, monospace;
+  font-family: var(--mono);
   font-weight: 700;
   text-shadow: 0 0 10px rgba(0, 230, 255, 0.5);
 }
@@ -2626,7 +2658,7 @@ html.native-frame .sidebar-head {
   font-size: 12.5px;
 }
 .term-empty kbd {
-  font-family: ui-monospace, monospace;
+  font-family: var(--mono);
   font-size: 11px;
   padding: 1px 6px;
   border-radius: 6px;
@@ -2638,7 +2670,7 @@ html.native-frame .sidebar-head {
 /* Terminal toggle button in the topbar */
 .term-toggle {
   position: relative;
-  font-family: ui-monospace, monospace;
+  font-family: var(--mono);
   font-size: 12px;
   font-weight: 700;
 }
@@ -2829,4 +2861,186 @@ html.native-frame .sidebar-head {
 .brain-claude {
   color: #ffb38a;
   background: rgba(255, 150, 90, 0.12);
+}
+
+/* ============================================================
+   POLISH PASS — type, density, responsiveness, unified chrome
+   Visual only: nothing here changes behaviour.
+   ============================================================ */
+
+/* The command bar adapts to the CHAT PANE's width (both side panels open on a 1280px window
+   leaves ~660px), not the window's — a media query can't see that. */
+.chat-pane {
+  container-type: inline-size;
+  container-name: pane;
+}
+
+@container pane (max-width: 820px) {
+  .brand-version { display: none; }
+  .mode-hint { display: none; }
+  .status { font-size: 0; gap: 0; }        /* keep the live dot, drop the word */
+  .topbar { padding: 10px 12px 10px 16px; gap: 8px; }
+  .messages,
+  .chat-input { padding-left: 18px; padding-right: 18px; }
+}
+
+/* Wordmark degrades in steps — "GHOST-PRIME" → "GHOST" → just the gem — never a clipped word. */
+@container pane (max-width: 760px) {
+  .brand-accent { display: none; }
+}
+
+@container pane (max-width: 640px) {
+  .brand-word { display: none; }
+  .brand-mark { margin-right: 0; }
+  .mode { padding: 5px 9px; font-size: 10px; }
+  .topbar-right { gap: 5px; }
+}
+
+/* Header controls: one consistent 34×30 glass tile per icon instead of pills of varying width. */
+.topbar-right .voice-toggle {
+  width: 34px;
+  height: 30px;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  font-size: 13px;
+  border-radius: 9px;
+}
+
+.topbar-right .mode {
+  height: 30px;
+  padding: 0 12px;
+}
+
+/* Composer: single-line by default, grows with the text, hints live under it instead of inside
+   a placeholder that wrapped and scrolled. */
+.chat-input {
+  flex-wrap: wrap;
+  row-gap: 8px;
+}
+
+.chat-input textarea {
+  min-height: 48px;
+  padding: 13px 16px;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.18) transparent;
+}
+
+.chat-input textarea::-webkit-scrollbar {
+  width: 8px;
+}
+
+.chat-input textarea::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.chat-input textarea::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.16);
+  border-radius: 8px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+
+.input-hint {
+  flex-basis: 100%;
+  display: flex;
+  justify-content: center;
+  gap: 16px;
+  padding: 0 4px;
+  font-size: var(--text-xs);
+  color: var(--ink-faint);
+  letter-spacing: 0.02em;
+  user-select: none;
+  pointer-events: none;
+}
+
+.input-hint kbd {
+  font-family: var(--mono);
+  font-size: 10px;
+  padding: 1px 5px;
+  margin-right: 1px;
+  border-radius: 5px;
+  border: 1px solid var(--glass-brd);
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--ink-dim);
+}
+
+@container pane (max-width: 640px) {
+  .input-hint span:last-child { display: none; }
+}
+
+/* Message thread density. */
+.msg-content {
+  font-size: var(--text-md);
+  line-height: 1.6;
+}
+
+.messages {
+  scroll-padding-bottom: 24px;
+  padding-bottom: 30px;
+}
+
+.empty-sub {
+  font-size: var(--text-md);
+}
+
+/* Terminal empty state: a centred paragraph, not a grid of orphaned inline fragments. */
+.term-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.term-empty p {
+  margin: 0;
+  max-width: 44ch;
+  line-height: 1.65;
+}
+
+/* Every other scrollable surface (settings, activity, terminal, tool output) shares one quiet
+   scrollbar; the thread and history keep their gradient thumbs. */
+*::-webkit-scrollbar {
+  width: 9px;
+  height: 9px;
+}
+
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+*::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.13);
+  border-radius: 9px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 230, 255, 0.4);
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+
+/* One focus ring for keyboard users, everywhere. */
+button:focus-visible,
+[role='button']:focus-visible,
+input:not([type='range']):focus-visible,
+select:focus-visible,
+.session-item:focus-visible {
+  outline: none;
+  box-shadow: var(--ring);
+}
+
+/* Meta text (timestamps, counts) sits on tabular figures so columns don't wobble. */
+.session-meta,
+.brand-version,
+.tool-dur,
+.tool-time {
+  font-variant-numeric: tabular-nums;
+}
+
+/* When the composer grows past one line the buttons stay anchored to its bottom edge. */
+.chat-input .btn {
+  align-self: flex-end;
+  height: 48px;
 }

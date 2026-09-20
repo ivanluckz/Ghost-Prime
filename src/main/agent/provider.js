@@ -2,6 +2,7 @@ import { homedir } from 'node:os'
 import { clipboard, Notification, BrowserWindow } from 'electron'
 import OpenAI from 'openai'
 import * as browser from '../tools/browser.js'
+import * as phone from '../tools/phone.js'
 import * as screen from '../tools/screen.js'
 import * as shell from '../tools/shell-sessions.js'
 import * as reminders from '../tools/reminders.js'
@@ -106,6 +107,12 @@ const REMINDER_TOOL_NAMES = ['reminder_set', 'reminder_list', 'reminder_cancel']
 const SYSTEM_SERVER = 'ghost-system'
 const SYSTEM_TOOL_NAMES = ['clipboard_read', 'clipboard_write', 'notify_user'].map((n) => `mcp__${SYSTEM_SERVER}__${n}`)
 
+// The user's Android phone (android-connector app over the bridge) — see, tap, swipe, type, open apps.
+const PHONE_SERVER = 'ghost-phone'
+const PHONE_TOOL_NAMES = ['phone_screenshot', 'phone_ui', 'phone_tap', 'phone_swipe', 'phone_type', 'phone_key', 'phone_open_app'].map(
+  (n) => `mcp__${PHONE_SERVER}__${n}`
+)
+
 // External Canva MCP (the @canva/cli dev server) — gives the agent Canva's tools. Spawned per session
 // via npx; needs Node >= 22. On by default; set GHOST_CANVA=0 to drop it (saves tokens for this
 // cost-sensitive user). `mcp__canva` in allowedTools permits all of its tools.
@@ -170,6 +177,7 @@ function claudeToolsSection() {
 - WebFetch / WebSearch — fetch a URL or search the web for current information.
 - browser_navigate / browser_get_page / browser_get_text / browser_find / browser_click / browser_click_at / browser_hover / browser_fill / browser_screenshot / browser_read_pages / browser_drag — drive the browser (via the Chrome extension bridge or Playwright).
 - browser_list_tabs / browser_use_tab / browser_close_tab / browser_scroll / browser_press_key / browser_wait_for / browser_wait_for_navigation / browser_go_back / browser_go_forward / browser_reload — browser tab and navigation controls. browser_list_browsers / browser_use_browser switch between separate connected browsers/profiles.
+- phone_screenshot / phone_ui / phone_tap / phone_swipe / phone_type / phone_key / phone_open_app — the user's Android phone, when the Ghost-Prime connector app is connected (errors say so if it isn't).
 - memory_save / memory_recall — your long-term memory across sessions (supports tags + a ttl for temporary facts).
 - file_write / file_create / file_move / file_delete — REVERSIBLE file changes. When the user might want to undo a change (moving/renaming/deleting/rewriting a file), prefer these over the plain Write tool so undo_last can restore it. undo_last / undo_list — take back the last such change, or show what's undoable. (Use the Edit tool for surgical in-place code edits.)
 - reminder_set / reminder_list / reminder_cancel — schedule a desktop notification for later ("remind me at 5 to…"). Resolve vague times to an absolute time or minutes-from-now yourself.
@@ -206,6 +214,10 @@ DRIVING THE BROWSER:
 - Dropdowns / checkboxes: browser_fill with the option's visible text, or "true"/"false". Editors with no form field (Docs, Notion, code editors): click into them, then browser_press_key { text } / { keys }.
 - Research across several pages: browser_read_pages with all the URLs at once.
 - Confirm outcomes from actual results (URL, title, page text) — never assume a click worked.
+
+DRIVING THE PHONE:
+- phone_ui lists what's on screen with the pixel point of each element; phone_tap { text } taps by label, { x, y } by point. phone_screenshot shows the real screen (then taps/swipes may use 0..1 fractions of it). phone_swipe { direction: "up" } scrolls further down a feed. Open apps by package name (com.whatsapp, com.instagram.android, com.google.android.youtube) or a URL.
+- Re-check with phone_ui or phone_screenshot after each action — phone UIs animate and shift.
 
 HOW TO WORK:
 - Act directly and autonomously. Reversible actions proceed without asking.
@@ -395,6 +407,8 @@ async function streamChatGeminiAgent({ messages, signal, onDelta, onEvent, model
         'file_read',
         'file_search',
         'file_grep',
+        'phone_screenshot',
+        'phone_ui',
         'browser_get_page',
         'browser_get_text',
         'browser_find',
@@ -1041,6 +1055,86 @@ async function getRemindersMcpServer() {
 }
 
 // ---------------------------------------------------------------------------
+// Phone MCP server — wraps src/main/tools/phone.js (the Android connector over the bridge).
+// ---------------------------------------------------------------------------
+let phoneMcpServer = null
+async function getPhoneMcpServer() {
+  if (phoneMcpServer) return phoneMcpServer
+  const { createSdkMcpServer, tool } = await import('@anthropic-ai/claude-agent-sdk')
+  const { z } = await import('zod')
+  const text = (t) => ({ content: [{ type: 'text', text: t }] })
+  phoneMcpServer = createSdkMcpServer({
+    name: PHONE_SERVER,
+    version: '1.0.0',
+    tools: [
+      tool(
+        'phone_screenshot',
+        "See the connected Android phone's screen (real pixels). Afterwards phone_tap / phone_swipe " +
+          'accept 0..1 fractions of this image.',
+        {},
+        async () => {
+          const r = await phone.phoneScreenshot()
+          return { content: [{ type: 'image', data: r.base64, mimeType: 'image/png' }, { type: 'text', text: `Phone screen ${r.w}×${r.h}` }] }
+        }
+      ),
+      tool(
+        'phone_ui',
+        "List the phone's on-screen elements from the accessibility tree — numbered, with text, role " +
+          'and the pixel point to tap. The phone equivalent of browser_get_page; call it before tapping.',
+        { limit: z.number().optional() },
+        async ({ limit }) => text((await phone.phoneUi({ limit })).formatted)
+      ),
+      tool(
+        'phone_tap',
+        'Tap on the phone: { text } for a visible label (preferred), or { x, y } as pixels from phone_ui ' +
+          'or 0..1 fractions of the last phone_screenshot.',
+        { text: z.string().optional(), x: z.number().optional(), y: z.number().optional() },
+        async ({ text: label, x, y }) => {
+          const r = await phone.phoneTap({ text: label, x, y })
+          const what = label ? `"${label}"` : `(${x}, ${y})`
+          return r?.ok === false
+            ? { content: [{ type: 'text', text: `Couldn't tap ${what} — nothing matched. Call phone_ui or phone_screenshot and try again.` }], isError: true }
+            : text(`Tapped ${what}`)
+        }
+      ),
+      tool(
+        'phone_swipe',
+        'Swipe/scroll on the phone. { direction: "up" } scrolls the content up (reads further down), ' +
+          '"down", "left", "right"; or { from:{x,y}, to:{x,y} } in pixels or 0..1 fractions.',
+        {
+          direction: z.enum(['up', 'down', 'left', 'right']).optional(),
+          from: z.object({ x: z.number(), y: z.number() }).optional(),
+          to: z.object({ x: z.number(), y: z.number() }).optional(),
+          durationMs: z.number().optional()
+        },
+        async ({ direction, from, to, durationMs }) => {
+          const r = await phone.phoneSwipe({ direction, from, to, durationMs })
+          return r?.ok === false ? { content: [{ type: 'text', text: 'Swipe was not performed.' }], isError: true } : text(`Swiped ${direction || 'between points'}`)
+        }
+      ),
+      tool('phone_type', 'Type text into the focused field on the phone (tap the field first).', { text: z.string() }, async ({ text: t }) => {
+        const r = await phone.phoneType({ text: t })
+        return r?.ok === false ? { content: [{ type: 'text', text: 'Nothing is focused to type into — tap a field first.' }], isError: true } : text('Typed text')
+      }),
+      tool('phone_key', 'Press a phone navigation key: back, home or recents.', { key: z.enum(['back', 'home', 'recents']) }, async ({ key }) => {
+        await phone.phoneKey({ key })
+        return text(`Pressed ${key}`)
+      }),
+      tool(
+        'phone_open_app',
+        'Open an app on the phone by package name ({ app: "com.whatsapp" }) or open a URL / deep link ({ url }).',
+        { app: z.string().optional(), url: z.string().optional() },
+        async ({ app, url }) => {
+          const r = await phone.phoneOpenApp({ app, url })
+          return text(`Opened ${r?.url || r?.app || app || url}`)
+        }
+      )
+    ]
+  })
+  return phoneMcpServer
+}
+
+// ---------------------------------------------------------------------------
 // System MCP server — local-machine conveniences: clipboard + desktop notifications.
 // ---------------------------------------------------------------------------
 let systemMcpServer = null
@@ -1287,6 +1381,7 @@ async function streamChatClaudeAgent({ messages, signal, onDelta, onEvent, model
   const memoryServer = await getMemoryMcpServer()
   const shellServer = await getShellMcpServer()
   const systemServer = await getSystemMcpServer()
+  const phoneServer = await getPhoneMcpServer()
   const filesServer = await getFilesMcpServer()
   const remindersServer = await getRemindersMcpServer()
   const screenServer = SCREEN_ENABLED ? await getScreenMcpServer() : null
@@ -1335,6 +1430,7 @@ async function streamChatClaudeAgent({ messages, signal, onDelta, onEvent, model
         ...BROWSER_TOOL_NAMES,
         ...MEMORY_TOOL_NAMES,
         ...SYSTEM_TOOL_NAMES,
+        ...PHONE_TOOL_NAMES,
         ...FILES_TOOL_NAMES,
         ...REMINDER_TOOL_NAMES,
         ...(CANVA_ENABLED ? [`mcp__${CANVA_SERVER}`] : []), // allow all Canva tools
@@ -1345,6 +1441,7 @@ async function streamChatClaudeAgent({ messages, signal, onDelta, onEvent, model
         [MEMORY_SERVER]: memoryServer,
         [SHELL_SERVER]: shellServer,
         [SYSTEM_SERVER]: systemServer,
+        [PHONE_SERVER]: phoneServer,
         [FILES_SERVER]: filesServer,
         [REMINDER_SERVER]: remindersServer,
         // External stdio server (the @canva/cli MCP). Tools are deferred behind tool-search by
@@ -1498,6 +1595,9 @@ export function isComputerControl(text) {
   if (/\b(create|make|move|rename|delete|remove|copy|organi[sz]e|clean up|tidy|sort|edit|open|save|zip|unzip|extract)\b[^.?!\n]{0,40}\b(files?|folders?|director(?:y|ies)|downloads|desktop|documents|project|repo|\.[a-z]{2,4}\b)/i.test(t)) return true
   // Apps.
   if (/\b(launch|open|start|quit|close|switch to)\b[^.?!\n]{0,24}\b(app|application|program|window|terminal|discord|vs ?code|code editor|spotify|slack|zoom|calendar|settings)\b/i.test(t)) return true
+  // The phone.
+  if (/\b(on|to|from|with) (?:my |the )?(?:phone|galaxy|android|mobile)\b/i.test(t)) return true
+  if (/\b(whatsapp|instagram|tiktok|snapchat|telegram)\b/i.test(t)) return true
   return false
 }
 // Returns 'gemini' | 'claude'. Order: explicit per-turn override → GHOST_BRAIN_MODE → heuristic.

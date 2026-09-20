@@ -4,6 +4,7 @@ import * as files from './files.js'
 import * as web from './web.js'
 import * as jarvis from './jarvis.js'
 import * as screen from './screen.js'
+import * as phone from './phone.js'
 import * as fileUndo from './file-undo.js'
 import * as reminders from './reminders.js'
 import { saveMemory, recallMemories } from '../memory/db.js'
@@ -301,6 +302,85 @@ const ALL_TOOL_SPECS = [
           keepOpen: { type: 'boolean', description: 'Whether to keep tabs open' }
         },
         required: ['urls']
+      }
+    }
+  },
+
+  // ── Android phone (connector app over the bridge) ────────────────────────
+  {
+    type: 'function',
+    function: {
+      name: 'phone_screenshot',
+      description: "See the connected Android phone's screen (real pixels). Afterwards phone_tap / phone_swipe accept 0..1 fractions of this image.",
+      parameters: { type: 'object', properties: {} }
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'phone_ui',
+      description: "List the phone's on-screen elements from the accessibility tree — numbered, with text, role and the pixel point to tap. The phone equivalent of browser_get_page; use it before tapping.",
+      parameters: { type: 'object', properties: { limit: { type: 'integer', description: 'Max elements (default 60).' } } }
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'phone_tap',
+      description: 'Tap on the phone: { text } for a visible label (preferred), or { x, y } as pixels from phone_ui or 0..1 fractions of the last phone_screenshot.',
+      parameters: {
+        type: 'object',
+        properties: {
+          text: { type: 'string', description: 'Visible text/label of the element to tap.' },
+          x: { type: 'number', description: 'Horizontal position (pixels, or 0..1 of the screenshot).' },
+          y: { type: 'number', description: 'Vertical position (pixels, or 0..1 of the screenshot).' }
+        }
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'phone_swipe',
+      description: 'Swipe/scroll on the phone. { direction: "up" } scrolls the content up (i.e. reads further down), "down", "left", "right"; or { from:{x,y}, to:{x,y} }.',
+      parameters: {
+        type: 'object',
+        properties: {
+          direction: { type: 'string', enum: ['up', 'down', 'left', 'right'], description: 'Finger direction.' },
+          from: { type: 'object', description: 'Start point {x,y}.' },
+          to: { type: 'object', description: 'End point {x,y}.' },
+          durationMs: { type: 'integer', description: 'Gesture duration (default 300).' }
+        }
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'phone_type',
+      description: 'Type text into the focused field on the phone (tap the field first).',
+      parameters: { type: 'object', properties: { text: { type: 'string', description: 'Text to type.' } }, required: ['text'] }
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'phone_key',
+      description: "Press a phone navigation key: back, home or recents.",
+      parameters: { type: 'object', properties: { key: { type: 'string', enum: ['back', 'home', 'recents'] } }, required: ['key'] }
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'phone_open_app',
+      description: 'Open an app on the phone by package name ({ app: "com.whatsapp" }) or open a URL / deep link ({ url }).',
+      parameters: {
+        type: 'object',
+        properties: {
+          app: { type: 'string', description: 'Android package name, e.g. com.instagram.android' },
+          url: { type: 'string', description: 'A URL or deep link to open.' }
+        }
       }
     }
   },
@@ -881,6 +961,37 @@ export async function executeTool(name, args = {}, { signal } = {}) {
       case 'browser_use_browser': {
         const ok = browser.useBrowser(args.id)
         return { output: ok ? `Now driving ${args.id}.` : `No connected browser with id ${args.id}.` }
+      }
+
+      // Phone
+      case 'phone_screenshot': {
+        const r = await phone.phoneScreenshot()
+        return { output: `Phone screenshot captured (${r.w}×${r.h})`, image: `data:image/png;base64,${r.base64}` }
+      }
+      case 'phone_ui': {
+        const r = await phone.phoneUi({ limit: args.limit })
+        return { output: r.formatted }
+      }
+      case 'phone_tap': {
+        const r = await phone.phoneTap({ text: args.text, x: args.x, y: args.y })
+        const what = args.text ? `"${args.text}"` : `(${args.x}, ${args.y})`
+        return { output: r?.ok === false ? `Couldn't tap ${what} — nothing matched. Call phone_ui or phone_screenshot and try again.` : `Tapped ${what}`, isError: r?.ok === false }
+      }
+      case 'phone_swipe': {
+        const r = await phone.phoneSwipe({ direction: args.direction, from: args.from, to: args.to, durationMs: args.durationMs })
+        return { output: r?.ok === false ? 'Swipe was not performed.' : `Swiped ${args.direction || 'between points'}`, isError: r?.ok === false }
+      }
+      case 'phone_type': {
+        const r = await phone.phoneType({ text: args.text })
+        return { output: r?.ok === false ? 'Nothing is focused to type into — tap a field first.' : 'Typed text', isError: r?.ok === false }
+      }
+      case 'phone_key': {
+        await phone.phoneKey({ key: args.key })
+        return { output: `Pressed ${args.key}` }
+      }
+      case 'phone_open_app': {
+        const r = await phone.phoneOpenApp({ app: args.app, url: args.url })
+        return { output: `Opened ${r?.url || r?.app || args.app || args.url}` }
       }
 
       // Files

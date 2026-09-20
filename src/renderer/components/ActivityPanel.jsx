@@ -4,6 +4,25 @@ import GhostCore from './GhostCore'
 // Tool glyphs/kinds are shared with ToolCard so the rail and the cards never drift apart.
 import { TOOL_META, summarizeInput } from './tools/ToolCard'
 
+// MCP tool names arrive namespaced (mcp__ghost-browser__browser_click) — show the bare name.
+const cleanName = (n) => (typeof n === 'string' && n.startsWith('mcp__') ? n.split('__').pop() : n)
+const fmtDur = (ms) => (ms == null ? '' : ms < 1000 ? `${ms}ms` : `${(ms / 1000).toFixed(1)}s`)
+
+// Live "12s" counter for the in-flight task.
+function Elapsed({ since }) {
+  const [, tick] = useState(0)
+  useEffect(() => {
+    const id = setInterval(() => tick((n) => n + 1), 500)
+    return () => clearInterval(id)
+  }, [])
+  if (!since) return null
+  const s = Math.max(0, Math.floor((Date.now() - since) / 1000))
+  return <span className="act-elapsed">{s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${s % 60}s`}</span>
+}
+
+// Mission Control — the right-hand operational HUD. Everything it shows is derived from state that
+// already lives in Main (the in-flight task, the queue, and tool events) plus the browser target;
+// it's presentational and never drives the agent loop.
 export default function ActivityPanel({
   running,
   queue,

@@ -28,6 +28,17 @@ export default function ChatInput({ onSend, busy, hasAttachments = false }) {
 
   // Global hotkey (Ctrl/Cmd+Shift+G) summons the window and lands the cursor right here.
   useEffect(() => window.ghost.onFocusInput?.(() => taRef.current?.focus()), [])
+  // Grow with the text (one line by default, up to the CSS max-height) instead of scrolling inside
+  // a fixed two-line box.
+  useEffect(() => {
+    const ta = taRef.current
+    if (!ta) return
+    ta.style.height = 'auto'
+    const max = parseFloat(getComputedStyle(ta).maxHeight) || 170
+    const h = ta.scrollHeight + 2 // + top/bottom border (scrollHeight excludes them)
+    ta.style.height = `${Math.min(h, max)}px`
+    ta.style.overflowY = h > max ? 'auto' : 'hidden'
+  }, [value])
 
   const canSend = !!value.trim() || hasAttachments
 
@@ -64,8 +75,8 @@ export default function ChatInput({ onSend, busy, hasAttachments = false }) {
       : voiceState === 'transcribing'
         ? 'Transcribing…'
         : busy
-          ? 'Busy — your message will queue and run next (Enter to send)'
-          : 'Message Ghost-Prime…   (Enter to send, Shift+Enter for newline, / for commands)'
+          ? 'Busy — your message will queue and run next'
+          : 'Message Ghost-Prime…'
 
   const v = value.trim()
   const matches = /^\/[a-z]*$/i.test(v) ? COMMANDS.filter(([c]) => c.startsWith(v.toLowerCase())) : []
@@ -118,6 +129,11 @@ export default function ChatInput({ onSend, busy, hasAttachments = false }) {
       <button type="submit" className="btn btn-send" disabled={!canSend}>
         Send
       </button>
+      <div className="input-hint" aria-hidden="true">
+        <span><kbd>Enter</kbd> send</span>
+        <span><kbd>Shift</kbd>+<kbd>Enter</kbd> newline</span>
+        <span><kbd>/</kbd> commands</span>
+      </div>
     </form>
   )
 }

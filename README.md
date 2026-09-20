@@ -123,6 +123,8 @@ OPENROUTER_MODEL=openai/gpt-oss-120b:free
 | `node --import ./scripts/lib/register-electron-stub.mjs scripts/smoke-env-bool.mjs` | Boolean env-flag parsing (`envBool`): every accepted spelling + defaults (no LLM). |
 | `node scripts/smoke-proactive.mjs` | Proactive engine's morning-briefing bookkeeping (delivered-once-per-day, bounded retries) — in-memory stubs, no LLM, no DB, no Electron. |
 | `node --import ./scripts/lib/register-electron-stub.mjs scripts/smoke-gemini-agent.mjs` | Gemini brain + Jarvis tools end to end (free tier). |
+| `node --import ./scripts/lib/register-electron-stub.mjs scripts/smoke-phone-tools.mjs` | The agent's `phone_*` tools against the simulated Android connector (no LLM). |
+| `node scripts/ui-capture.mjs <outdir>` | Screenshot the running app's UI states over CDP (start it with `--remote-debugging-port=9333`); prints PAGEERROR on renderer crashes. |
 | `node --import ./scripts/lib/register-electron-stub.mjs scripts/smoke-gemini-browser-vision.mjs` | Proves the Gemini brain can see browser screenshots (free tier, same browser env prefix as below). |
 | `node scripts/smoke-claude-agent.mjs` | Headless check that the Claude brain streams (spends Pro allotment). |
 | `node scripts/smoke-claude-agent-tools.mjs` | Exercise the Claude brain's tools (honours `GHOST_TEST_PERMISSION`; spends Pro allotment). |

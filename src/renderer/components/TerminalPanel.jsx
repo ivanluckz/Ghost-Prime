@@ -201,7 +201,9 @@ export default function TerminalPanel({ sessions = [], onClose }) {
       <div className="term-body" ref={bodyRef}>
         {sessions.length === 0 && !err && (
           <div className="term-empty">
-            No terminal yet. Press <kbd>+</kbd> to open one — or just ask Ghost to run something.
+            <p>
+              No terminal yet. Press <kbd>+</kbd> to open one — or just ask Ghost to run something.
+            </p>
           </div>
         )}
         {err && (
