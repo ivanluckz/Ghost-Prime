@@ -168,7 +168,10 @@ export default function SettingsPanel({ onClose, mirror, onMirrorChange, onChats
   // Close on outside-click or Escape.
   useEffect(() => {
     const onDown = (e) => {
-      if (ref.current && !ref.current.contains(e.target)) onClose()
+      if (!ref.current || ref.current.contains(e.target)) return
+      // The ⚙ gear is a toggle; let its click close us instead of close-here-then-reopen-there.
+      if (e.target.closest?.('button[aria-label="Settings"]')) return
+      onClose()
     }
     const onKey = (e) => e.key === 'Escape' && onClose()
     document.addEventListener('mousedown', onDown)
@@ -204,7 +207,9 @@ export default function SettingsPanel({ onClose, mirror, onMirrorChange, onChats
     savePolicy({ ...policy, [list]: (policy[list] || []).filter((x) => x !== d) })
   }
 
-  const DomainList = ({ list, value, onValue }) => (
+  // Plain render function, not a component: declaring a component inside the render body gives it a
+  // new identity every render, which remounts the <input> (and drops focus) on every keystroke.
+  const renderDomainList = (list, value, onValue) => (
     <div className="set-domains">
       <div className="set-chips">
         {(policy[list] || []).length === 0 && <span className="set-empty">none</span>}
@@ -267,7 +272,7 @@ export default function SettingsPanel({ onClose, mirror, onMirrorChange, onChats
 
       <section className="set-section">
         <div className="set-title">Accent colour</div>
-        <p className="set-note">Recolour the HUD accent. The 3D core adopts a new colour on next launch.</p>
+        <p className="set-note">Recolour the HUD accent. The 3D core keeps its stock colour.</p>
         <div className="set-swatches">
           {HUE_SWATCHES.map((h) => (
             <button
@@ -334,11 +339,11 @@ export default function SettingsPanel({ onClose, mirror, onMirrorChange, onChats
         {policy.mode === 'strict' && (
           <>
             <div className="set-sub">Allowed sites</div>
-            <DomainList list="allow" value={allowInput} onValue={setAllowInput} />
+            {renderDomainList('allow', allowInput, setAllowInput)}
           </>
         )}
         <div className="set-sub">Blocked sites</div>
-        <DomainList list="block" value={blockInput} onValue={setBlockInput} />
+        {renderDomainList('block', blockInput, setBlockInput)}
       </section>
 
       <section className="set-section">

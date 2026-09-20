@@ -2,10 +2,10 @@
 // Jarvis one-shot controls that only exist on the Gemini path, plain chat, and dropped images
 // stay on Gemini; hard reasoning/coding still goes to Claude.
 // Run: node --import ./scripts/lib/register-electron-stub.mjs scripts/smoke-brain-router.mjs
-import { pickBrain } from '../src/main/agent/provider.js'
-
+// Clear the env BEFORE loading provider.js (a static import would be hoisted above the deletes).
 delete process.env.GHOST_BRAIN_MODE
 delete process.env.GHOST_CONTROL_BRAIN
+const { pickBrain } = await import('../src/main/agent/provider.js')
 
 const cases = [
   // computer control → claude
@@ -27,6 +27,9 @@ const cases = [
   ['post "hello" on my discord server', 'claude'],
   // hard reasoning/coding → claude (unchanged)
   ['refactor this module to use async iterators', 'claude'],
+  // …even when a Jarvis keyword appears in a coding ask (the one-shot pre-emption is short-text only)
+  ['refactor this module so CPU usage stays flat', 'claude'],
+  ['debug why this leaks memory usage over time: ```js\nsetInterval(() => cache.push(new Array(1e6)), 10)\n```', 'claude'],
   // gemini-only controls → gemini
   ['turn the volume up', 'gemini'],
   ['set brightness to 50', 'gemini'],

@@ -55,6 +55,12 @@ export default function Main() {
   const prevShellCount = useRef(0)
   const voiceOutRef = useRef(false)
   const sendRef = useRef(null) // latest send(), so externally-pushed tasks avoid a stale closure
+  const newChatRef = useRef(null) // latest newChat(), so the global key handler avoids a stale closure
+  const runningRef = useRef({}) // mirrors `running` (assigned during render) so stopAll is closure-proof
+  // Per-request reply text, kept outside React state: onDone fires in the same tick as the last
+  // delta, before React has rendered it, so reading `messages` there would miss the final chunk.
+  const replyTextRef = useRef({})
+  const dragDepth = useRef(0) // nested dragenter/dragleave depth — dragleave fires on children too
   const ackedRef = useRef(new Set()) // reqIds we've already spoken an instant "on it" for
 
   // A short, tool-aware "instant acknowledgment" spoken the moment a task reaches for a tool, so
@@ -93,7 +99,7 @@ export default function Main() {
         })
       } else if ((e.ctrlKey || e.metaKey) && (e.key === 'n' || e.key === 'N')) {
         e.preventDefault()
-        newChat()
+        newChatRef.current?.()
       }
     }
     window.addEventListener('keydown', onKey)
@@ -109,6 +115,7 @@ export default function Main() {
   useEffect(() => {
     // Streamed assistant text — routed to ITS request's bubble so parallel tasks never mix.
     const offDelta = window.ghost.onDelta(({ requestId, text }) => {
+      replyTextRef.current[requestId] = (replyTextRef.current[requestId] || '') + text
       setMessages((prev) => {
         const i = lastIndexFor(prev, requestId)
         if (i >= 0 && prev[i].role === 'assistant') {
@@ -158,7 +165,20 @@ export default function Main() {
       })
     })
 
-    const offDone = window.ghost.onDone(({ requestId }) => {
+    // Any tool still spinning for this request will never get a tool_result — close it out.
+    const settleTools = (requestId, label) =>
+      setMessages((prev) =>
+        prev.some((m) => m.role === 'tool' && m.reqId === requestId && m.status === 'running')
+          ? prev.map((m) =>
+              m.role === 'tool' && m.reqId === requestId && m.status === 'running'
+                ? { ...m, status: 'done', isError: true, output: m.output || label, durationMs: m.startedAt ? Date.now() - m.startedAt : null }
+                : m
+            )
+          : prev
+      )
+
+    const offDone = window.ghost.onDone(({ requestId, aborted }) => {
+      settleTools(requestId, aborted ? 'stopped' : 'no result')
       ackedRef.current.delete(requestId)
       setRunning((prev) => {
         const n = { ...prev }
@@ -166,17 +186,14 @@ export default function Main() {
         return n
       })
       refreshSessions() // a new/updated session may now have a title
-      // Speak this task's finished reply aloud if voice output is on.
-      if (voiceOutRef.current) {
-        setMessages((prev) => {
-          const reply = [...prev].reverse().find((m) => m.role === 'assistant' && m.reqId === requestId && !m.error)
-          if (reply?.content) window.ghost.voice?.speak(reply.content)
-          return prev
-        })
-      }
+      // Speak this task's finished reply aloud if voice output is on — not a reply the user just stopped.
+      const reply = replyTextRef.current[requestId]
+      delete replyTextRef.current[requestId]
+      if (voiceOutRef.current && !aborted && reply) window.ghost.voice?.speak(reply)
     })
 
     const offError = window.ghost.onError(({ requestId, message }) => {
+      settleTools(requestId, 'failed: ' + message)
       setMessages((prev) => {
         const i = lastIndexFor(prev, requestId)
         if (i >= 0 && prev[i].role === 'assistant') {
@@ -187,6 +204,7 @@ export default function Main() {
         return [...prev, { role: 'assistant', content: `⚠️ ${message}`, error: true, reqId: requestId }]
       })
       ackedRef.current.delete(requestId)
+      delete replyTextRef.current[requestId]
       setRunning((prev) => {
         const n = { ...prev }
         delete n[requestId]
@@ -205,6 +223,16 @@ export default function Main() {
   // Keep the mute button in sync if the setting is toggled elsewhere.
   useEffect(() => onMuteChange(setMutedState), [])
 
+  // A drag cancelled/leaving the window never fires drop; also reset the overlay when focus leaves.
+  useEffect(() => {
+    const onBlur = () => {
+      dragDepth.current = 0
+      setDragOver(false)
+    }
+    window.addEventListener('blur', onBlur)
+    return () => window.removeEventListener('blur', onBlur)
+  }, [])
+
   // Live terminals: track the session list for the dock + toolbar badge.
   useEffect(() => {
     window.ghost.shell
@@ -221,12 +249,12 @@ export default function Main() {
     prevShellCount.current = n
   }, [shellSessions])
 
-  // Right-click "Ask Ghost about this" in Chrome pushes a task up here — run it.
-  useEffect(() => window.ghost.onExternalTask?.(({ prompt }) => prompt && sendRef.current?.(prompt)), [])
-
-  // Proactive lines (morning briefing / idle check-ins) and reminders pushed from main — drop them
-  // into the chat as they arrive, and speak them if voice output is on.
+  // Pushes from main: right-click "Ask Ghost about this" in Chrome / the wake daemon (external tasks),
+  // proactive lines (morning briefing / idle check-ins) and reminders — drop them into the chat as
+  // they arrive, and speak them if voice output is on. Main buffers these until we say ui:ready, so
+  // subscribe first, then announce readiness (order matters: the flush must not race the listeners).
   useEffect(() => {
+    const offT = window.ghost.onExternalTask?.(({ prompt }) => prompt && sendRef.current?.(prompt))
     const offP = window.ghost.onProactive?.(({ text, kind }) => {
       if (!text) return
       setMessages((prev) => [...prev, { role: 'assistant', content: text, proactive: kind || 'checkin', reqId: `proactive_${Date.now()}` }])
@@ -238,7 +266,9 @@ export default function Main() {
       setMessages((prev) => [...prev, { role: 'system', content: `⏰ Reminder: ${text}` }])
       if (voiceOutRef.current) window.ghost.voice?.speak(`Reminder: ${text}`)
     })
+    window.ghost.uiReady?.()
     return () => {
+      offT?.()
       offP?.()
       offR?.()
     }
@@ -288,7 +318,7 @@ export default function Main() {
   }
 
   function stopAll() {
-    Object.keys(running).forEach((id) => window.ghost.abort(id))
+    Object.keys(runningRef.current).forEach((id) => window.ghost.abort(id))
     setRunning({})
     setQueue([]) // also drop anything waiting in the queue
   }
@@ -335,10 +365,16 @@ export default function Main() {
   }
 
   async function removeSession(id) {
-    if (id === activeId) stopAll()
+    const wasActive = id === activeId
+    if (wasActive) stopAll()
     setSessions((prev) => prev.filter((s) => s.id !== id)) // optimistic — the row vanishes instantly
     await window.ghost.deleteSession?.(id)
-    if (id === activeId) {
+    // The delete removes the whole subtree; if the active chat was inside it (the row itself OR a
+    // nested sub-chat), main has dropped its current session, so start a fresh one.
+    const stillActive = await window.ghost.activeSession?.().catch(() => null)
+    if (wasActive || !stillActive) {
+      if (!wasActive) stopAll()
+      window.ghost.voice?.stopSpeaking()
       setMessages([])
       const newId = await window.ghost.newSession()
       setActiveId(newId)
@@ -494,13 +530,13 @@ export default function Main() {
   const removeAttachment = (id) => setAttachments((prev) => prev.filter((a) => a.id !== id))
   function onDrop(e) {
     e.preventDefault()
+    dragDepth.current = 0
     setDragOver(false)
     if (e.dataTransfer?.files?.length) addFiles(e.dataTransfer.files)
   }
 
   function dispatch(t, modelContent) {
     playActivate() // swell as the Core powers up for this task
-    window.ghost.voice?.stopSpeaking()
     const history = messages
       .filter((m) => m.role === 'user' || m.role === 'assistant')
       .map(({ role, content }) => ({ role, content: typeof content === 'string' ? content : String(content) }))
@@ -538,6 +574,8 @@ export default function Main() {
     }
   }
   sendRef.current = send
+  newChatRef.current = newChat
+  runningRef.current = running
 
   // Drain the queue: whenever nothing is running and prompts are waiting, fire the next one.
   useEffect(() => {
@@ -554,14 +592,19 @@ export default function Main() {
   return (
     <div
       className="main fade-in"
+      onDragEnter={(e) => {
+        if (!e.dataTransfer?.types?.includes('Files')) return
+        e.preventDefault()
+        dragDepth.current += 1
+        setDragOver(true)
+      }}
       onDragOver={(e) => {
-        if (e.dataTransfer?.types?.includes('Files')) {
-          e.preventDefault()
-          setDragOver(true)
-        }
+        if (e.dataTransfer?.types?.includes('Files')) e.preventDefault()
       }}
       onDragLeave={(e) => {
-        if (e.currentTarget === e.target) setDragOver(false)
+        if (!e.dataTransfer?.types?.includes('Files')) return
+        dragDepth.current = Math.max(0, dragDepth.current - 1)
+        if (dragDepth.current === 0) setDragOver(false)
       }}
       onDrop={onDrop}
     >

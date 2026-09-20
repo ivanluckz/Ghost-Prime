@@ -65,6 +65,18 @@ try {
       message = `build: v${version} · ${stamp}\n\nCo-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>`
     }
 
+    // Refuse to sweep secrets into the auto-commit: any .env / .env.* copy (except .env.example)
+    // or the Jarvis API-key file. Throwing here skips BOTH the commit and the push.
+    const SECRET_PATH = /(^|\/)\.env(\.|$)/
+    const leaked = sh('git status --porcelain --untracked-files=all')
+      .split('\n')
+      .filter((l) => l && !l.slice(0, 2).includes('D')) // a deletion (e.g. git rm --cached) is fine to commit
+      .map((l) => l.slice(3).trim().replace(/^.* -> /, '').replace(/^"|"$/g, ''))
+      .filter((p) => (SECRET_PATH.test(p) && !p.endsWith('.env.example')) || p === 'jarvis/config/api_keys.json')
+    if (leaked.length) {
+      throw new Error(`refusing to commit secret file(s): ${leaked.join(', ')} — add them to .gitignore / git rm --cached first`)
+    }
+
     sh('git add -A')
     // -F - reads the message from stdin, so we never have to shell-escape it.
     execSync('git commit -F -', { input: message, stdio: ['pipe', 'pipe', 'pipe'] })

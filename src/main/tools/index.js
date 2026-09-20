@@ -14,7 +14,7 @@ const { clipboard, Notification } = electron || {}
 // ---------------------------------------------------------------------------
 // Tool Specifications for OpenAI / Gemini function calling
 // ---------------------------------------------------------------------------
-export const toolSpecs = [
+const ALL_TOOL_SPECS = [
   // ── Shell / Terminal ─────────────────────────────────────────────────────
   {
     type: 'function',
@@ -51,7 +51,8 @@ export const toolSpecs = [
       name: 'browser_get_page',
       description:
         'Structured snapshot of the current page: every visible button, link, input field and dropdown, each numbered [N], plus a short excerpt. ' +
-        'Call this BEFORE acting, then use browser_click / browser_fill with { ref: N } — the most reliable way to hit the right element.',
+        'Call this BEFORE acting, then use browser_click / browser_fill with { ref: N } — the most reliable way to hit the right element. ' +
+        'Ref numbering is fully supported on the Playwright backend; on the Chrome-extension backend fall back to { text } / browser_click_at { x, y } if a ref is unknown.',
       parameters: {
         type: 'object',
         properties: { limit: { type: 'integer', description: 'Max items per category (default 40, max 60).' } }
@@ -73,7 +74,9 @@ export const toolSpecs = [
     type: 'function',
     function: {
       name: 'browser_find',
-      description: 'Find a phrase on the current page (like Ctrl+F): returns the hit count and a snippet around each match, and scrolls the first one into view.',
+      description:
+        'Find a phrase on the current page (like Ctrl+F): returns the hit count and a snippet around each match, and scrolls the first one into view. ' +
+        'Fully supported on the Playwright backend; on the Chrome-extension backend use browser_get_text if it is unavailable.',
       parameters: {
         type: 'object',
         properties: {
@@ -123,7 +126,9 @@ export const toolSpecs = [
     type: 'function',
     function: {
       name: 'browser_hover',
-      description: 'Hover an element (by ref, visible text, or CSS selector) to open hover menus / reveal row actions / show tooltips before clicking what appears.',
+      description:
+        'Hover an element (by ref, visible text, or CSS selector) to open hover menus / reveal row actions / show tooltips before clicking what appears. ' +
+        'Refs are fully supported on the Playwright backend; on the Chrome-extension backend fall back to { text } if a ref is unknown.',
       parameters: {
         type: 'object',
         properties: {
@@ -160,7 +165,8 @@ export const toolSpecs = [
       name: 'browser_screenshot',
       description:
         'Take a screenshot of the browser page so you can SEE it. Pass annotate:true to draw each clickable element\'s number [N] on the image — then click by { ref: N }. ' +
-        'Pass fullPage:true for the whole scrollable page (not combinable with annotate).',
+        'Pass fullPage:true for the whole scrollable page (not combinable with annotate). ' +
+        'Ref numbering and annotate are fully supported on the Playwright backend; on the Chrome-extension backend fall back to { text } / browser_click_at { x, y } if a ref is unknown.',
       parameters: {
         type: 'object',
         properties: {
@@ -319,7 +325,7 @@ export const toolSpecs = [
     type: 'function',
     function: {
       name: 'file_write',
-      description: 'Write or overwrite a local file with new content.',
+      description: 'Write or overwrite a local file, REVERSIBLY — the previous version is snapshotted so undo_last restores it. Use file_edit for surgical in-place edits.',
       parameters: {
         type: 'object',
         properties: {
@@ -355,7 +361,7 @@ export const toolSpecs = [
         type: 'object',
         properties: {
           pattern: { type: 'string', description: 'Filename pattern, e.g. *.js or *config*' },
-          directory: { type: 'string', description: 'Starting directory (default current dir)' }
+          directory: { type: 'string', description: "Starting directory (relative paths resolve against the user's home directory; default: home)" }
         }
       }
     }
@@ -369,7 +375,7 @@ export const toolSpecs = [
         type: 'object',
         properties: {
           pattern: { type: 'string', description: 'Search term or regex.' },
-          directory: { type: 'string', description: 'Directory to search in.' },
+          directory: { type: 'string', description: "Directory to search in (relative paths resolve against the user's home directory)." },
           path: { type: 'string', description: 'Specific file path.' }
         },
         required: ['pattern']
@@ -433,9 +439,9 @@ export const toolSpecs = [
       parameters: {
         type: 'object',
         properties: {
-          query: { type: 'string', description: 'Search term.' },
-          tags: { type: 'array', items: { type: 'string' } },
-          limit: { type: 'integer', description: 'Max items to recall' }
+          query: { type: 'string', description: 'Search term (omit for the most important memories).' },
+          tag: { type: 'string', description: 'Restrict to memories carrying this tag.' },
+          limit: { type: 'integer', description: 'Max items to recall (default 8)' }
         }
       }
     }
@@ -512,13 +518,13 @@ export const toolSpecs = [
     type: 'function',
     function: {
       name: 'reminder_set',
-      description: 'Set a scheduled reminder with a desktop notification and audio chime.',
+      description: 'Set a scheduled reminder with a desktop notification and audio chime. Give EITHER delay_seconds OR at_time (ISO 8601) — resolve vague times ("at 5", "in half an hour") yourself first.',
       parameters: {
         type: 'object',
         properties: {
           text: { type: 'string', description: 'Reminder message to display.' },
           delay_seconds: { type: 'number', description: 'Seconds from now.' },
-          at_time: { type: 'string', description: 'ISO or human time string.' }
+          at_time: { type: 'string', description: 'ISO 8601 date-time (compute it yourself; e.g. 2026-09-19T17:00:00).' }
         },
         required: ['text']
       }
@@ -673,7 +679,7 @@ export const toolSpecs = [
       description:
         'Drag-and-drop on the page. Element mode: { fromSelector, toSelector } (CSS). Point mode: ' +
         '{ from:{x,y}, to:{x,y} } as viewport fractions 0..1 (locate the handle in a screenshot, then drag). ' +
-        'Use for sliders, reordering lists, Kanban cards, drag-to-upload zones.',
+        'Use for sliders, reordering lists, Kanban cards, drag-to-upload zones. Fully supported on the Playwright backend; on the Chrome-extension backend use point mode from a screenshot.',
       parameters: {
         type: 'object',
         properties: {
@@ -684,24 +690,60 @@ export const toolSpecs = [
         }
       }
     }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'browser_list_browsers',
+      description: 'List the connected browsers/devices Ghost can drive (separate Chrome windows/profiles, or a phone) and which one is selected.',
+      parameters: { type: 'object', properties: {} }
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'browser_use_browser',
+      description: 'Choose which connected browser/device to drive, by id (from browser_list_browsers).',
+      parameters: {
+        type: 'object',
+        properties: { id: { type: 'string', description: 'Browser id from browser_list_browsers.' } },
+        required: ['id']
+      }
+    }
   }
 ]
+
+// screen_screenshot is experimental (see src/main/tools/screen.js) and gated behind
+// GHOST_SCREEN_TOOLS=1 on the Claude path — apply the same gate here. Read at call time so a
+// late dotenv load still counts.
+export function getToolSpecs() {
+  return process.env.GHOST_SCREEN_TOOLS === '1' ? ALL_TOOL_SPECS : ALL_TOOL_SPECS.filter((t) => t.function.name !== 'screen_screenshot')
+}
+// Load-time snapshot for scripts that import the list directly (they load dotenv first).
+export const toolSpecs = getToolSpecs()
 
 // ---------------------------------------------------------------------------
 // Tool Dispatcher & Execution Handler
 // Returns { output: string, image?: string, isError?: boolean }
 // ---------------------------------------------------------------------------
-export async function executeTool(name, args = {}) {
+// `signal` (optional) is the chat's AbortController — threaded into long tool calls so Stop
+// actually interrupts them. Existing 2-arg callers keep working.
+export async function executeTool(name, args = {}, { signal } = {}) {
   try {
     switch (name) {
       // Shell
       case 'terminal_run': {
-        const res = await runCommand({ command: args.command, timeoutMs: args.timeout_ms })
+        // Normalise once: a JSON null/0/"abc" from the model must fall back to the default, not
+        // pass through as setTimeout(fn, null) and kill the command on the next tick.
+        const timeoutMs = Number(args.timeout_ms) > 0 ? Number(args.timeout_ms) : 30000
+        const res = await runCommand({ command: args.command, timeoutMs, signal })
         let text = ''
         if (res.stdout) text += res.stdout
         if (res.stderr) text += (text ? '\n--- stderr ---\n' : '') + res.stderr
-        text += `\n[exit code: ${res.exitCode}]`
-        return { output: text, isError: res.exitCode !== 0 }
+        // code is null when the shell died from a signal (timeout / abort)
+        const codeLabel = res.code == null ? 'killed by signal' : String(res.code)
+        text += `\n[exit code: ${codeLabel}${res.timedOut ? ` (timed out after ${timeoutMs} ms — process tree killed)` : ''}]`
+        return { output: text, isError: res.timedOut || res.code !== 0 }
       }
 
       // Browser
@@ -765,8 +807,9 @@ export async function executeTool(name, args = {}) {
       case 'browser_screenshot': {
         const r = await browser.browserScreenshot({ fullPage: args.fullPage, annotate: args.annotate })
         const legend = r.marks ? `\nNumbered elements: ${browser.formatMarks(r.marks)}` : ''
+        const note = typeof r.note === 'string' && r.note ? `\n${r.note}` : '' // e.g. "annotate unsupported on this backend"
         return {
-          output: `Screenshot captured (${r.marks ? `annotated — ${r.marks.length} elements numbered` : args.fullPage ? 'full page' : 'viewport'})${legend}`,
+          output: `Screenshot captured (${r.marks ? `annotated — ${r.marks.length} elements numbered` : args.fullPage ? 'full page' : 'viewport'})${legend}${note}`,
           image: `data:image/png;base64,${r.base64}`
         }
       }
@@ -841,10 +884,6 @@ export async function executeTool(name, args = {}) {
         const res = await files.fileRead(args)
         return { output: res.error || res.content, isError: !!res.error }
       }
-      case 'file_write': {
-        const res = await files.fileWrite(args)
-        return { output: res.error || `Wrote ${res.bytes} bytes to ${res.path}`, isError: !!res.error }
-      }
       case 'file_edit': {
         const res = await files.fileEdit(args)
         return { output: res.error || res.message, isError: !!res.error }
@@ -859,6 +898,8 @@ export async function executeTool(name, args = {}) {
       }
 
       // Reversible file ops + undo (src/main/tools/file-undo.js) — clear errors bubble to the outer catch.
+      case 'file_write':
+        return { output: await fileUndo.writeFile(args.path, args.content ?? '') }
       case 'file_move':
         return { output: await fileUndo.moveFile(args.from, args.to) }
       case 'file_delete':
@@ -872,7 +913,7 @@ export async function executeTool(name, args = {}) {
 
       // Web
       case 'web_search': {
-        const res = await web.webSearch(args)
+        const res = await web.webSearch({ ...args, signal })
         if (res.error) return { output: res.error, isError: true }
         const formatted = (res.results || [])
           .map((r, i) => `[${i + 1}] ${r.title}\nURL: ${r.url}\n${r.snippet}`)
@@ -880,26 +921,25 @@ export async function executeTool(name, args = {}) {
         return { output: formatted || 'No search results.' }
       }
       case 'web_fetch': {
-        const res = await web.webFetch(args)
+        const res = await web.webFetch({ ...args, signal })
         return { output: res.error || res.content, isError: !!res.error }
       }
 
       // Memory
+      // db.js takes positional args: saveMemory(content, type, importance, opts) / recallMemories(query, limit, opts).
       case 'memory_save': {
         const expiresAt = args.ttl_days ? Date.now() + args.ttl_days * 86_400_000 : null
-        saveMemory({
-          content: args.content,
-          type: args.type || 'fact',
-          importance: args.importance || 5,
-          tags: args.tags || [],
-          expiresAt
-        })
+        const id = saveMemory(args.content, args.type || 'fact', args.importance || 5, { tags: args.tags || [], expiresAt })
+        if (!id) return { output: 'Could not save memory (empty content or memory store unavailable).', isError: true }
         return { output: `Saved memory: "${args.content}"` }
       }
       case 'memory_recall': {
-        const list = recallMemories({ query: args.query, tags: args.tags, limit: args.limit || 8 })
+        const limit = Math.max(1, Math.min(50, Number(args.limit) || 8))
+        // db.js filters on a single tag; accept a legacy `tags` array too (first entry).
+        const tag = args.tag || (Array.isArray(args.tags) ? args.tags[0] : args.tags)
+        const list = recallMemories(args.query || '', limit, { tag })
         if (!list.length) return { output: 'No matching memories found.' }
-        const text = list.map((m) => `- [${m.type}] ${m.content}`).join('\n')
+        const text = list.map((m) => `- [${m.type}${m.tags?.length ? ' · ' + m.tags.join(',') : ''}] ${m.content}`).join('\n')
         return { output: text }
       }
 
@@ -930,7 +970,9 @@ export async function executeTool(name, args = {}) {
           const { dueAt } = reminders.setReminder({ text: args.text, at: args.at_time, inSeconds: args.delay_seconds })
           return { output: `Reminder set for ${new Date(dueAt).toLocaleString()}: "${args.text}"` }
         } catch (e) {
-          return { output: `Could not set reminder: ${e.message}`, isError: true }
+          // reminders.js names its own arg names; translate to the ones in this tool's schema
+          const msg = String(e.message || e).replace(/`at` \(ISO 8601\) or `inMinutes` \/ `inSeconds`/, '`at_time` (ISO 8601) or `delay_seconds`')
+          return { output: `Could not set reminder: ${msg}`, isError: true }
         }
       }
       case 'reminder_list': {

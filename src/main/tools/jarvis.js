@@ -1,22 +1,31 @@
-import { exec, spawn } from 'node:child_process'
+import { exec, execFile, spawn } from 'node:child_process'
 import { readFileSync, existsSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { promisify } from 'node:util'
 import electron from 'electron'
-const Notification = typeof electron === 'object' && electron?.Notification
-  ? electron.Notification
-  : class { show() {} static isSupported() { return false } }
-
 
 const execAsync = promisify(exec)
-const APP_ROOT = process.cwd()
+const execFileAsync = promisify(execFile)
+// app.getAppPath() inside Electron; cwd fallback keeps non-Electron smoke scripts working.
+const APP_ROOT = electron?.app?.getAppPath?.() || process.cwd()
 const JARVIS_DIR = join(APP_ROOT, 'jarvis')
-
+// Interpreter: JARVIS_PYTHON env → jarvis/.venv (created by `npm run jarvis:setup`) → system python3
+// A failed `python3 -m venv` (no ensurepip) still leaves bin/python behind, so require bin/pip too.
+const VENV_PY = join(JARVIS_DIR, '.venv', 'bin', 'python')
+const VENV_PIP = join(JARVIS_DIR, '.venv', 'bin', 'pip')
+const PYTHON = process.env.JARVIS_PYTHON || (existsSync(VENV_PY) && existsSync(VENV_PIP) ? VENV_PY : 'python3')
+const SETUP_HINT = 'Run: npm run jarvis:setup'
 
 
 // ---------------------------------------------------------------------------
 // 1. Audio / Volume Control (via pactl / PulseAudio on Crostini / Linux)
 // ---------------------------------------------------------------------------
+// Step for up/down: positive number clamped to 100, else the 5% default (never NaN into pactl).
+function volumeStep(value) {
+  const n = Number(value)
+  return Number.isFinite(n) && n > 0 ? Math.min(100, Math.round(n)) : 5
+}
+
 export async function systemVolume({ action = 'get', value = null } = {}) {
   try {
     switch (action) {
@@ -32,17 +41,19 @@ export async function systemVolume({ action = 'get', value = null } = {}) {
         }
       }
       case 'set': {
-        const pct = Math.max(0, Math.min(100, Math.round(Number(value) || 50)))
+        const n = value === null || value === undefined || value === '' ? NaN : Number(value)
+        if (!Number.isFinite(n)) return { error: 'system_volume set requires a numeric value (0-100).' }
+        const pct = Math.max(0, Math.min(100, Math.round(n)))
         await execAsync(`pactl set-sink-volume @DEFAULT_SINK@ ${pct}%`)
         return { success: true, message: `Volume set to ${pct}%` }
       }
       case 'up': {
-        const step = value ? Math.round(Number(value)) : 5
+        const step = volumeStep(value)
         await execAsync(`pactl set-sink-volume @DEFAULT_SINK@ +${step}%`)
         return { success: true, message: `Volume increased by ${step}%` }
       }
       case 'down': {
-        const step = value ? Math.round(Number(value)) : 5
+        const step = volumeStep(value)
         await execAsync(`pactl set-sink-volume @DEFAULT_SINK@ -${step}%`)
         return { success: true, message: `Volume decreased by ${step}%` }
       }
@@ -150,13 +161,31 @@ export async function systemPower({ action = 'battery' } = {}) {
       return { status: 'AC Connected', note: 'No discrete battery reported in container' }
     }
 
+    // Inside the Crostini container loginctl/systemctl cannot reach the Chrome OS session,
+    // so be honest instead of pretending; elsewhere let command failures reach the outer catch.
+    const inCrostini = existsSync('/opt/google/cros-containers') || existsSync('/dev/.cros_milestone')
+
     if (action === 'lock') {
-      await execAsync('loginctl lock-session').catch(() => {})
+      if (inCrostini) {
+        return {
+          success: false,
+          error: 'Cannot lock the Chrome OS screen from inside the Linux container',
+          note: 'Use the Chrome OS lock key (Search+L) or the power menu.'
+        }
+      }
+      await execAsync('loginctl lock-session')
       return { success: true, message: 'Screen locked' }
     }
 
     if (action === 'sleep') {
-      await execAsync('systemctl suspend').catch(() => {})
+      if (inCrostini) {
+        return {
+          success: false,
+          error: 'Cannot suspend the Chromebook from inside the Linux container',
+          note: 'Close the lid or use the Chrome OS power button.'
+        }
+      }
+      await execAsync('systemctl suspend')
       return { success: true, message: 'System suspended' }
     }
 
@@ -169,7 +198,12 @@ export async function systemPower({ action = 'battery' } = {}) {
 // ---------------------------------------------------------------------------
 // 4. System Telemetry (CPU, RAM, Disk, Load)
 // ---------------------------------------------------------------------------
-let lastCpuStat = null
+function readCpuTimes() {
+  const firstLine = readFileSync('/proc/stat', 'utf8').split('\n')[0]
+  const times = firstLine.replace(/^cpu\s+/, '').split(/\s+/).map(Number)
+  return { idle: times[3] + (times[4] || 0), total: times.reduce((a, b) => a + b, 0) }
+}
+
 export async function systemTelemetry() {
   try {
     // 1. RAM (from /proc/meminfo)
@@ -183,22 +217,17 @@ export async function systemTelemetry() {
     const usedKb = totalKb - availKb
     const ramPct = totalKb > 0 ? Math.round((usedKb / totalKb) * 100) : 0
 
-    // 2. CPU % (from /proc/stat)
+    // 2. CPU % (two /proc/stat samples 250 ms apart, so the first call already has a value)
     let cpuPct = null
     try {
-      const stat = readFileSync('/proc/stat', 'utf8')
-      const firstLine = stat.split('\n')[0]
-      const times = firstLine.replace(/^cpu\s+/, '').split(/\s+/).map(Number)
-      const idle = times[3] + (times[4] || 0)
-      const total = times.reduce((a, b) => a + b, 0)
-      if (lastCpuStat) {
-        const idleDelta = idle - lastCpuStat.idle
-        const totalDelta = total - lastCpuStat.total
-        if (totalDelta > 0) {
-          cpuPct = Math.max(0, Math.min(100, Math.round(100 * (1 - idleDelta / totalDelta))))
-        }
+      const a = readCpuTimes()
+      await new Promise((r) => setTimeout(r, 250))
+      const b = readCpuTimes()
+      const idleDelta = b.idle - a.idle
+      const totalDelta = b.total - a.total
+      if (totalDelta > 0) {
+        cpuPct = Math.max(0, Math.min(100, Math.round(100 * (1 - idleDelta / totalDelta))))
       }
-      lastCpuStat = { idle, total }
     } catch {}
 
     // 3. Load average
@@ -236,9 +265,12 @@ export async function systemTelemetry() {
 // ---------------------------------------------------------------------------
 export async function weatherGet({ location = '', units = 'metric' } = {}) {
   try {
-    const loc = encodeURIComponent(location.trim() || '')
+    const loc = encodeURIComponent(String(location ?? '').trim())
     const url = `https://wttr.in/${loc}?format=j1`
-    const res = await fetch(url, { headers: { 'User-Agent': 'curl/7.88.1' } })
+    const res = await fetch(url, {
+      headers: { 'User-Agent': 'curl/7.88.1' },
+      signal: AbortSignal.timeout(10_000)
+    })
     if (!res.ok) throw new Error(`Weather service returned ${res.status}`)
     const data = await res.json()
 
@@ -248,7 +280,8 @@ export async function weatherGet({ location = '', units = 'metric' } = {}) {
     const region = area.region?.[0]?.value || ''
     const country = area.country?.[0]?.value || ''
 
-    const isImperial = units === 'imperial' || /fahrenheit|imperial|us/i.test(units)
+    const u = String(units || 'metric').trim().toLowerCase()
+    const isImperial = ['imperial', 'fahrenheit', 'f', 'us'].includes(u)
     const temp = isImperial ? `${cur.temp_F}°F` : `${cur.temp_C}°C`
     const feelsLike = isImperial ? `${cur.FeelsLikeF}°F` : `${cur.FeelsLikeC}°C`
 
@@ -270,72 +303,15 @@ export async function weatherGet({ location = '', units = 'metric' } = {}) {
       forecast
     }
   } catch (err) {
+    if (err?.name === 'AbortError' || err?.name === 'TimeoutError') {
+      return { error: 'Weather service timed out' }
+    }
     return { error: `Weather lookup failed: ${err.message}` }
   }
 }
 
 // ---------------------------------------------------------------------------
-// 6. Smart Reminders (In-memory scheduled timers + desktop notification)
-// ---------------------------------------------------------------------------
-const activeReminders = new Map()
-let reminderSeq = 1
-
-export function reminderSet({ text, delay_seconds, at_time } = {}) {
-  let ms = 0
-  if (delay_seconds && Number(delay_seconds) > 0) {
-    ms = Number(delay_seconds) * 1000
-  } else if (at_time) {
-    const target = new Date(at_time).getTime()
-    const now = Date.now()
-    if (!isNaN(target) && target > now) ms = target - now
-  }
-  if (ms <= 0) ms = 60000 // default 1 min
-
-  const id = `rem_${reminderSeq++}`
-  const scheduledTime = new Date(Date.now() + ms).toLocaleTimeString()
-
-  const timer = setTimeout(() => {
-    activeReminders.delete(id)
-    try {
-      if (Notification.isSupported()) {
-        new Notification({
-          title: 'Jarvis Reminder',
-          body: text,
-          silent: false
-        }).show()
-      }
-    } catch {}
-  }, ms)
-
-  activeReminders.set(id, { id, text, scheduledTime, timer, targetMs: Date.now() + ms })
-  return {
-    id,
-    message: `Reminder set for ${scheduledTime}: "${text}"`,
-    delay_minutes: (ms / 60000).toFixed(1)
-  }
-}
-
-export function reminderList() {
-  const list = []
-  for (const [id, r] of activeReminders.entries()) {
-    const leftSec = Math.max(0, Math.round((r.targetMs - Date.now()) / 1000))
-    list.push({ id, text: r.text, scheduledTime: r.scheduledTime, secondsRemaining: leftSec })
-  }
-  return { reminders: list }
-}
-
-export function reminderCancel({ id } = {}) {
-  const r = activeReminders.get(id)
-  if (r) {
-    clearTimeout(r.timer)
-    activeReminders.delete(id)
-    return { success: true, message: `Reminder "${r.text}" cancelled.` }
-  }
-  return { error: `No reminder found with ID: ${id}` }
-}
-
-// ---------------------------------------------------------------------------
-// 7. YouTube & Media Control
+// 6. YouTube & Media Control
 // ---------------------------------------------------------------------------
 export async function youtubePlay({ query, url } = {}) {
   try {
@@ -345,19 +321,60 @@ export async function youtubePlay({ query, url } = {}) {
     }
     if (!targetUrl) return { error: 'Provide a search query or YouTube URL.' }
 
-    // Use xdg-open to launch in Chrome OS browser or default browser
-    exec(`xdg-open "${targetUrl}"`)
-    return { success: true, message: `Opened YouTube: ${targetUrl}` }
+    // Only ever open real YouTube http(s) links — the url comes straight from the model.
+    // Whitespace, quotes and control chars never appear in a genuine YouTube link.
+    if (typeof targetUrl !== 'string' || /[\s"'`<>\\\x00-\x1f]/.test(targetUrl)) {
+      return { error: `Invalid URL: ${targetUrl}` }
+    }
+    let parsed
+    try {
+      parsed = new URL(targetUrl)
+    } catch {
+      return { error: `Invalid URL: ${targetUrl}` }
+    }
+    // Suffix match allows music./m./www. subdomains but still rejects youtube.com.evil.com.
+    const h = parsed.hostname.toLowerCase()
+    const isYouTube = h === 'youtu.be' || h === 'youtube.com' || h.endsWith('.youtube.com')
+      || h === 'youtube-nocookie.com' || h.endsWith('.youtube-nocookie.com')
+    if (!/^https?:$/.test(parsed.protocol) || !isYouTube) {
+      return { error: `Refusing to open non-YouTube URL: ${targetUrl}` }
+    }
+
+    // shell.openExternal never goes through a shell (it calls xdg-open itself on Linux).
+    // Fall back to execFile('xdg-open') when electron.shell is unavailable (stub / smoke scripts).
+    if (typeof electron?.shell?.openExternal === 'function') {
+      await electron.shell.openExternal(parsed.href)
+    } else {
+      // xdg-open may block while the browser runs, so only wait for a spawn failure / early exit.
+      await new Promise((resolve, reject) => {
+        const child = spawn('xdg-open', [parsed.href], { detached: true, stdio: 'ignore' })
+        const t = setTimeout(() => { child.unref(); resolve() }, 1000)
+        child.once('error', (e) => { clearTimeout(t); reject(e) })
+        child.once('exit', (code) => {
+          clearTimeout(t)
+          code === 0 ? resolve() : reject(new Error(`xdg-open exited with code ${code}`))
+        })
+      })
+    }
+    return { success: true, message: `Opened YouTube: ${parsed.href}` }
   } catch (err) {
     return { error: `YouTube playback error: ${err.message}` }
   }
 }
 
 // ---------------------------------------------------------------------------
-// 8. Jarvis Python Action Runner Bridge
+// 7. Jarvis Python Action Runner Bridge
 // Executes any Python tool or plugin inside jarvis/actions/*.py
 // ---------------------------------------------------------------------------
 export async function jarvisActionRun({ action, args = {} } = {}) {
+  if (typeof action !== 'string' || !/^[A-Za-z_][A-Za-z0-9_]*$/.test(action)) {
+    return { error: 'Invalid action name.' }
+  }
+  // Some models send args as a JSON string; the Python side needs a dict either way.
+  if (typeof args === 'string') {
+    try { args = JSON.parse(args) } catch { return { error: 'args must be a JSON object' } }
+  }
+  if (args === null || typeof args !== 'object' || Array.isArray(args)) args = {}
   try {
     const actionFile = join(JARVIS_DIR, 'actions', `${action}.py`)
     const pluginFile = join(JARVIS_DIR, 'plugins', `${action}.py`)
@@ -366,41 +383,64 @@ export async function jarvisActionRun({ action, args = {} } = {}) {
     if (!target) {
       return { error: `Action or plugin "${action}" not found in jarvis/actions or jarvis/plugins.` }
     }
+    const pkg = target === actionFile ? 'actions' : 'plugins'
 
+    // Mirrors jarvis/core/action_loader.py: load the file as `actions.<name>` / `plugins.<name>`
+    // with JARVIS_DIR on sys.path so `from core import …` / `from config import …` resolve.
+    // Args travel over stdin (never inlined), and every handler takes a single `parameters` dict.
     const runnerScript = `
-import sys, json, os
-sys.path.insert(0, '${JARVIS_DIR}')
-import ${action} as mod
+import sys, json, importlib.util
+sys.path.insert(0, ${JSON.stringify(JARVIS_DIR)})
+spec = importlib.util.spec_from_file_location(${JSON.stringify(`${pkg}.${action}`)}, ${JSON.stringify(target)})
+mod = importlib.util.module_from_spec(spec)
+sys.modules[spec.name] = mod
+spec.loader.exec_module(mod)
 
-args = json.loads('''${JSON.stringify(args).replace(/'/g, "\\'")}''')
+args = json.load(sys.stdin)
 result = None
 if hasattr(mod, 'run'):
-    result = mod.run(**args)
+    result = mod.run(parameters=args)
 elif hasattr(mod, 'TOOL') and 'handler' in mod.TOOL:
-    result = mod.TOOL['handler'](**args)
+    result = mod.TOOL['handler'](parameters=args)
 else:
     result = {"error": "No run() or TOOL handler found in ${action}"}
 
 print("__JARVIS_OUT__" + json.dumps(result, default=str))
 `
-    const { stdout, stderr } = await execAsync(`python3 -c "${runnerScript.replace(/"/g, '\\"')}"`, {
-      cwd: JARVIS_DIR,
-      timeout: 30000
+    // execFile: no shell, so quotes/newlines/$VAR/backticks in args are never interpreted.
+    const { stdout, stderr } = await new Promise((resolve, reject) => {
+      const child = execFile(
+        PYTHON,
+        ['-c', runnerScript],
+        { cwd: JARVIS_DIR, timeout: 30000, maxBuffer: 10 * 1024 * 1024 },
+        (err, out, errOut) => (err ? reject(Object.assign(err, { stderr: errOut })) : resolve({ stdout: out, stderr: errOut }))
+      )
+      child.stdin.on('error', () => {})
+      child.stdin.end(JSON.stringify(args))
     })
 
     if (stdout.includes('__JARVIS_OUT__')) {
       const raw = stdout.split('__JARVIS_OUT__')[1].trim()
-      return JSON.parse(raw)
+      const parsed = JSON.parse(raw)
+      if (typeof parsed === 'object' && parsed !== null) return parsed
+      // Bundled handlers return plain strings; wrap so callers always get an object.
+      if (typeof parsed === 'string' && /^Tool '.*' failed/.test(parsed)) return { error: parsed }
+      return { result: parsed }
     }
 
     return { stdout: stdout.trim(), stderr: stderr.trim() }
   } catch (err) {
-    return { error: `Jarvis action error: ${err.message}` }
+    if (err.killed || err.signal === 'SIGTERM') return { error: `Jarvis action "${action}" timed out after 30 s.` }
+    // Only the first line of err.message: the rest is "Command failed: python -c <runner source>".
+    const text = String(err.stderr || '').trim() || String(err.message || '').split('\n')[0]
+    const m = /ModuleNotFoundError: No module named '([^']+)'/.exec(text)
+    if (m) return { error: `Python module "${m[1]}" is not installed for ${PYTHON}. ${SETUP_HINT}` }
+    return { error: `Jarvis action error: ${text.trim().split('\n').slice(-3).join('\n')}` }
   }
 }
 
 // ---------------------------------------------------------------------------
-// 9. Jarvis Mobile Phone Remote Dashboard Server
+// 8. Jarvis Mobile Phone Remote Dashboard Server
 // ---------------------------------------------------------------------------
 let dashboardProcess = null
 
@@ -414,13 +454,37 @@ export async function startDashboardServer() {
     return { error: 'Dashboard server script not found in jarvis/dashboard/server.py' }
   }
 
+  // Pre-check the deps so a missing uvicorn gives an actionable error instead of a silent death.
   try {
-    dashboardProcess = spawn('python3', ['-m', 'uvicorn', 'dashboard.server:app', '--host', '0.0.0.0', '--port', '8000'], {
+    await execFileAsync(PYTHON, ['-c', 'import uvicorn, fastapi'], { cwd: JARVIS_DIR, timeout: 15000 })
+  } catch {
+    return { error: `uvicorn/fastapi are not installed for ${PYTHON}. ${SETUP_HINT}` }
+  }
+
+  try {
+    const child = spawn(PYTHON, ['-m', 'uvicorn', 'dashboard.server:app', '--host', '0.0.0.0', '--port', '8000'], {
       cwd: JARVIS_DIR,
       detached: true,
-      stdio: 'ignore'
+      stdio: ['ignore', 'ignore', 'pipe']
     })
-    dashboardProcess.unref()
+    let errBuf = ''
+    child.stderr.on('data', (d) => { errBuf = (errBuf + d).slice(-4000) })
+    child.on('exit', () => { if (dashboardProcess === child) dashboardProcess = null })
+
+    // Reject if the server dies within ~1 s (bad port, import error, …) instead of reporting "started".
+    await new Promise((resolve, reject) => {
+      const t = setTimeout(resolve, 1000)
+      child.once('exit', (code) => {
+        clearTimeout(t)
+        reject(new Error(`uvicorn exited with code ${code}: ${errBuf.trim().split('\n').slice(-3).join('\n')}`))
+      })
+      child.once('error', (e) => { clearTimeout(t); reject(e) })
+    })
+    // Past the startup window the pipe is only a leak (and a broken pipe once Electron exits).
+    child.stderr.removeAllListeners('data')
+    child.stderr.destroy()
+    child.unref()
+    dashboardProcess = child
 
     return {
       status: 'started',

@@ -1,5 +1,6 @@
 // Phase 3 verification: the claude-agent drives the Playwright browser via SDK MCP tools.
-// Run: GHOST_BROWSER_HEADLESS=true node scripts/smoke-claude-agent-browser.mjs
+// Run: GHOST_BROWSER_BACKEND=playwright GHOST_BROWSER_HEADLESS=true node scripts/smoke-claude-agent-browser.mjs
+import './lib/force-playwright.mjs' // must come before browser.js (hoisted imports)
 import { homedir } from 'node:os'
 import { query, createSdkMcpServer, tool } from '@anthropic-ai/claude-agent-sdk'
 import { z } from 'zod'

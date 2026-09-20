@@ -1,5 +1,6 @@
 // Smoke test for Gemini Autonomous Agent with Jarvis tools
-// Run: node scripts/smoke-gemini-agent.mjs
+// Run: node --import ./scripts/lib/register-electron-stub.mjs scripts/smoke-gemini-agent.mjs
+// (the loader stub stands in for `electron`, which tools/index.js's dependency graph imports)
 import 'dotenv/config'
 import OpenAI from 'openai'
 import { toolSpecs, executeTool } from '../src/main/tools/index.js'

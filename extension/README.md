@@ -15,7 +15,8 @@ Ghost-Prime app (Claude Agent SDK)
 ```
 
 Same Claude brain as the app — the extension is just its hands in your browser. The connection is
-plain `127.0.0.1` (no external tunnel), gated by a shared token, bound to loopback only.
+plain `127.0.0.1` (no external tunnel), gated by a shared token, bound to loopback unless you set a
+private token (see step 4 below).
 
 ## Install (once)
 
@@ -32,7 +33,10 @@ reboot.
 4. Extension **Details → Extension options** → set Host / Port / Token to match the app's `.env`:
    - **Crostini Linux Chrome:** Host `127.0.0.1` (leave `GHOST_BRIDGE_HOST=127.0.0.1`).
    - **Chrome OS host browser:** Host `penguin.linux.test`, and set `GHOST_BRIDGE_HOST=0.0.0.0` in
-     `.env` so the bridge is reachable from the host.
+     `.env` so the bridge is reachable from the host. **A private `GHOST_BRIDGE_TOKEN` is REQUIRED
+     first** (set it in `.env` and the same value here in the options page): with the default
+     `ghost-local` token the app refuses `0.0.0.0` and binds `127.0.0.1` instead, since anything that
+     could reach the port would otherwise be able to run tasks through the agent.
 
 After this, edits auto-reload while the app runs (`GHOST_EXT_AUTORELOAD=1`) — no manual reload, and
 the synced copy means it stays put across restarts.

@@ -1,6 +1,8 @@
-# Secrets — never commit
+# Secrets — never commit (.env.* also catches .env.save / .env.bak copies)
 .env
-.env.local
+.env.*
+!.env.example
+jarvis/config/api_keys.json
 
 # Dependencies / build output
 node_modules/

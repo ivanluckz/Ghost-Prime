@@ -1,16 +1,19 @@
 import { readFileSync, writeFileSync, existsSync, mkdirSync, statSync } from 'node:fs'
-import { resolve, join, dirname, isAbsolute } from 'node:path'
-import { homedir } from 'node:os'
-import { exec } from 'node:child_process'
+import { dirname } from 'node:path'
+import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
+// Shared resolver: relative paths land in $HOME, same as file_create/move/delete and the shells.
+import { resolvePath } from './file-undo.js'
 
-const execAsync = promisify(exec)
+const execFileAsync = promisify(execFile)
+const MAX_BUFFER = 8 * 1024 * 1024
+// The default directory is $HOME, so an unbounded recursive search can run for minutes.
+const SEARCH_TIMEOUT_MS = 30_000
+const EXEC_OPTS = { maxBuffer: MAX_BUFFER, timeout: SEARCH_TIMEOUT_MS }
+const timedOut = (err) => err.killed || err.signal === 'SIGTERM'
 
-function resolvePath(p) {
-  if (!p) return process.cwd()
-  if (p.startsWith('~/')) return join(homedir(), p.slice(2))
-  if (isAbsolute(p)) return p
-  return resolve(process.cwd(), p)
+function firstLines(text, n = 50) {
+  return text.split('\n').filter(Boolean).slice(0, n)
 }
 
 export async function fileRead({ path, offset = 1, limit = 500 } = {}) {
@@ -57,7 +60,8 @@ export async function fileEdit({ path, old_text, new_text } = {}) {
     if (!original.includes(old_text)) {
       return { error: `Target text not found in ${path}. Ensure whitespace matches exactly.` }
     }
-    const updated = original.replace(old_text, new_text)
+    // Replacer function so `$&`, `$$`, `$'` etc. in new_text are inserted literally.
+    const updated = original.replace(old_text, () => new_text)
     writeFileSync(fullPath, updated, 'utf8')
     return { success: true, path: fullPath, message: `Replaced text successfully in ${path}` }
   } catch (err) {
@@ -65,11 +69,20 @@ export async function fileEdit({ path, old_text, new_text } = {}) {
   }
 }
 
+// Both search tools go through execFile with argv arrays — no shell ever sees pattern/directory/path.
 export async function fileSearch({ pattern = '*', directory = '.' } = {}) {
   try {
     const base = resolvePath(directory)
-    const { stdout } = await execAsync(`find "${base}" -maxdepth 4 -name "${pattern}" 2>/dev/null | head -n 50`)
-    const files = stdout.trim().split('\n').filter(Boolean)
+    let stdout = ''
+    try {
+      ;({ stdout } = await execFileAsync('find', [base, '-maxdepth', '4', '-name', String(pattern)], EXEC_OPTS))
+    } catch (err) {
+      if (timedOut(err)) return { error: `Search timed out after ${SEARCH_TIMEOUT_MS / 1000}s — narrow \`directory\`` }
+      // find exits non-zero on unreadable subdirs but still prints matches; keep partial output
+      stdout = err.stdout || ''
+      if (!stdout && err.code !== 1) throw err
+    }
+    const files = firstLines(stdout)
     return { count: files.length, files }
   } catch (err) {
     return { error: `Search failed: ${err.message}` }
@@ -78,12 +91,25 @@ export async function fileSearch({ pattern = '*', directory = '.' } = {}) {
 
 export async function fileGrep({ pattern, directory = '.', path = null } = {}) {
   try {
+    if (typeof pattern !== 'string' || !pattern) return { error: 'pattern is required' }
     const target = path ? resolvePath(path) : resolvePath(directory)
-    const cmd = path
-      ? `grep -n -C 2 -i "${pattern.replace(/"/g, '\\"')}" "${target}" 2>/dev/null | head -n 50`
-      : `grep -rn -C 1 -i --exclude-dir={node_modules,.git,dist,out} "${pattern.replace(/"/g, '\\"')}" "${target}" 2>/dev/null | head -n 50`
-    const { stdout } = await execAsync(cmd).catch(() => ({ stdout: '' }))
-    return { matches: stdout.trim() || 'No matches found.' }
+    const args = path
+      ? ['-n', '-C', '2', '-i', '--', pattern, target]
+      : ['-rn', '-C', '1', '-i',
+         '--exclude-dir=node_modules', '--exclude-dir=.git', '--exclude-dir=dist', '--exclude-dir=out',
+         '--exclude-dir=.cache', '--exclude-dir=.npm', '--exclude-dir=.local',
+         '--', pattern, target]
+    let stdout = ''
+    try {
+      ;({ stdout } = await execFileAsync('grep', args, EXEC_OPTS))
+    } catch (err) {
+      if (timedOut(err)) return { error: `Grep timed out after ${SEARCH_TIMEOUT_MS / 1000}s — narrow \`directory\`` }
+      if (err.code === 1) stdout = ''            // grep: no matches
+      else stdout = err.stdout || ''             // ENOBUFS / partial output — keep what we got
+      if (!stdout && err.code !== 1) return { error: `Grep failed: ${err.message}` }
+    }
+    const matches = firstLines(stdout).join('\n')
+    return { matches: matches || 'No matches found.' }
   } catch (err) {
     return { error: `Grep failed: ${err.message}` }
   }

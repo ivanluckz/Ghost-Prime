@@ -46,7 +46,9 @@ function recentSummaries(limit = 6) {
 }
 
 async function briefingIfNewDay() {
-  const today = new Date().toISOString().slice(0, 10)
+  // Local calendar day (not UTC) — the greeting text and waking-hours logic are local too.
+  const d = new Date()
+  const today = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
   if (getPref('lastBriefingDate') === today) return
   setPref('lastBriefingDate', today) // set first so a failure never loops
   const when = new Date().toLocaleString(undefined, { weekday: 'long', hour: 'numeric', minute: '2-digit' })

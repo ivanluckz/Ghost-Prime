@@ -1,5 +1,5 @@
 import { spawn, spawnSync } from 'node:child_process'
-import { existsSync, readFileSync } from 'node:fs'
+import { existsSync, readFileSync, statSync, unlinkSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { app } from 'electron'
@@ -31,6 +31,7 @@ const voiceProvider = () => process.env.GHOST_VOICE_PROVIDER || (geminiKey() ? '
 const useGemini = () => voiceProvider() === 'gemini' && !!geminiKey()
 
 let recProc = null
+let recErr = '' // arecord's stderr for the current take — surfaced if nothing was captured
 let speakProcs = []
 let speakSeq = 0 // bumped to cancel an in-flight Gemini TTS fetch when stopped/superseded
 
@@ -58,11 +59,13 @@ export function ttsAvailable() {
   return useGemini() || hasPiper() || hasEspeak()
 }
 
-async function geminiGenerate(model, body) {
+// timeoutMs bounds a stalled connection; the callers' catch paths fall back to the local engines.
+async function geminiGenerate(model, body, timeoutMs = 20_000) {
   const res = await fetch(`${GEMINI_API_BASE}/models/${model}:generateContent`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'x-goog-api-key': geminiKey() },
-    body: JSON.stringify(body)
+    body: JSON.stringify(body),
+    signal: AbortSignal.timeout(timeoutMs)
   })
   if (!res.ok) {
     const detail = (await res.text().catch(() => '')).slice(0, 200)
@@ -74,9 +77,17 @@ async function geminiGenerate(model, body) {
 // --- Speech-to-text (push-to-talk) ---------------------------------------
 export function startRecording() {
   if (recProc) return
+  recErr = ''
+  try {
+    unlinkSync(REC_PATH) // don't let a stale WAV from a previous take mask a failed capture
+  } catch {}
   // S16_LE / 16 kHz / mono — what Whisper wants, and valid WAV input for Gemini too.
   recProc = spawn('arecord', ['-q', '-f', 'S16_LE', '-r', '16000', '-c', '1', '-t', 'wav', REC_PATH])
-  recProc.on('error', (e) => console.error('[voice] arecord error:', e.message))
+  recProc.stderr.on('data', (d) => (recErr += d))
+  recProc.on('error', (e) => {
+    recErr += e.message
+    console.error('[voice] arecord error:', e.message)
+  })
 }
 
 export function stopRecordingAndTranscribe() {
@@ -84,10 +95,41 @@ export function stopRecordingAndTranscribe() {
     if (!recProc) return reject(new Error('not recording'))
     const p = recProc
     recProc = null
-    p.on('close', () => {
-      transcribe(REC_PATH).then(resolve, reject)
-    })
-    p.kill('SIGINT') // lets arecord finalize a valid WAV header
+    const err = () => recErr.trim().split('\n').pop() || 'arecord failed'
+    let settled = false
+    const finish = () => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      // NOTE: arecord exits 1 on SIGINT even on success (its handler calls prg_exit(EXIT_FAILURE)
+      // after finalizing the header), so judge by the output file, not the exit code.
+      let size = 0
+      try {
+        size = statSync(REC_PATH).size
+      } catch {}
+      if (size <= 44) return reject(new Error(err())) // header-only or missing → nothing captured
+      transcribe(REC_PATH)
+        .then(resolve, reject)
+        .finally(() => {
+          try {
+            unlinkSync(REC_PATH) // don't keep the user's speech around
+          } catch {}
+        })
+    }
+    // Already dead (mic disabled/missing → immediate exit, or ENOENT): 'close' has already fired
+    // and a late listener would never run, so settle now instead of hanging the IPC call.
+    if (p.exitCode !== null || p.signalCode !== null) return reject(new Error(err()))
+    // Safety net: if arecord ignores SIGINT, force it down so the mic button can never get stuck.
+    const timer = setTimeout(() => {
+      if (settled) return
+      settled = true
+      try {
+        p.kill('SIGKILL')
+      } catch {}
+      reject(new Error('recording failed: arecord did not stop'))
+    }, 5000)
+    p.once('close', finish)
+    if (!p.kill('SIGINT')) finish() // kill() false ⇒ it exited between the check and the signal
   })
 }
 
@@ -178,20 +220,23 @@ function speakLocal(text) {
 }
 
 // Split into small chunks so the FIRST audio starts after one sentence's worth of TTS, not the
-// whole reply — much snappier. Tiny fragments merge so we don't hammer the API.
+// whole reply — much snappier. Split only where a terminator is followed by whitespace so decimals/
+// versions like "1.5.0" stay intact (short abbreviations like "e.g." may still split, but the ~60-char
+// merge below usually rejoins them), then merge consecutive sentences until a chunk is ~60+ chars so
+// short sentences don't each cost a request.
 function chunkForSpeech(text) {
-  const parts = text.match(/[^.!?\n]+[.!?\n]*/g) || [text]
+  const parts = text.split(/(?<=[.!?])\s+/).filter(Boolean)
   const chunks = []
   let buf = ''
   for (const p of parts) {
-    buf += p
-    if (buf.trim().length >= 60 || /[.!?\n]\s*$/.test(buf)) {
-      if (buf.trim()) chunks.push(buf.trim())
+    buf = buf ? buf + ' ' + p : p
+    if (buf.length >= 60) {
+      chunks.push(buf)
       buf = ''
     }
   }
-  if (buf.trim()) chunks.push(buf.trim())
-  return chunks
+  if (buf) chunks.push(buf)
+  return chunks.length ? chunks : [text]
 }
 
 // Play raw PCM via aplay; resolves when playback finishes, so chunks play back-to-back.
@@ -214,13 +259,17 @@ async function speakWithGemini(text, seq) {
     if (seq !== speakSeq) return // stopped or superseded
     let j
     try {
-      j = await geminiGenerate(ttsModel(), {
-        contents: [{ parts: [{ text: chunk }] }],
-        generationConfig: {
-          responseModalities: ['AUDIO'],
-          speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: ttsVoice() } } }
-        }
-      })
+      j = await geminiGenerate(
+        ttsModel(),
+        {
+          contents: [{ parts: [{ text: chunk }] }],
+          generationConfig: {
+            responseModalities: ['AUDIO'],
+            speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: ttsVoice() } } }
+          }
+        },
+        15_000
+      )
     } catch (e) {
       if (!played) throw e // nothing spoken yet → let speak() fall back to the local voice
       console.warn('[voice] TTS chunk failed mid-reply, stopping early:', e.message) // don't re-speak
@@ -253,7 +302,7 @@ function speakWithPiper(text) {
 }
 
 function speakWithEspeak(text) {
-  const proc = spawn('espeak-ng', ['-s', '160', text])
+  const proc = spawn('espeak-ng', ['-s', '160', '--', text]) // '--' so a reply starting with '-' isn't a flag
   proc.on('error', (e) => console.error('[voice] espeak-ng error:', e.message))
   speakProcs = [proc]
 }
@@ -266,4 +315,16 @@ export function stopSpeaking() {
     } catch {}
   }
   speakProcs = []
+}
+
+// App shutdown: Node doesn't kill children on exit, so an arecord left 'listening' would keep
+// writing REC_PATH forever and aplay/piper/espeak would keep talking after the window is gone.
+export function shutdownVoice() {
+  if (recProc) {
+    try {
+      recProc.kill('SIGKILL')
+    } catch {}
+    recProc = null
+  }
+  stopSpeaking()
 }

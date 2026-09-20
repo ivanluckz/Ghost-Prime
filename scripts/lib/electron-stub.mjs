@@ -8,7 +8,7 @@ import { tmpdir } from 'node:os'
 const dataDir = join(tmpdir(), 'ghost-prime-stub')
 mkdirSync(dataDir, { recursive: true })
 
-export const app = { getPath: () => dataDir, isPackaged: false, on() {} }
+export const app = { getPath: () => dataDir, getAppPath: () => process.cwd(), isPackaged: false, on() {} }
 export class BrowserWindow {
   static getAllWindows() {
     return []

@@ -1,5 +1,6 @@
 // Headless end-to-end check of the Ghost-Prime brain for the SELECTED provider.
-// Mirrors src/main/agent/provider.js resolution. Run: node scripts/smoke-openrouter.mjs
+// Mirrors src/main/agent/provider.js resolution. Run: node scripts/smoke-openrouter.mjs [openrouter|gemini]
+// (falls back to openrouter when GHOST_PROVIDER is unset or not OpenAI-compatible, e.g. claude-agent)
 import 'dotenv/config'
 import OpenAI from 'openai'
 
@@ -18,10 +19,10 @@ const PROVIDERS = {
   }
 }
 
-const provider = process.env.GHOST_PROVIDER || 'openrouter'
+const provider = process.argv[2] || (PROVIDERS[process.env.GHOST_PROVIDER] ? process.env.GHOST_PROVIDER : 'openrouter')
 const cfg = PROVIDERS[provider]
 if (!cfg) {
-  console.error(`FAIL: unknown GHOST_PROVIDER "${provider}"`)
+  console.error(`FAIL: unknown provider "${provider}" (argv[2] or GHOST_PROVIDER)`)
   process.exit(1)
 }
 

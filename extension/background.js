@@ -20,6 +20,28 @@ async function loadCfg() {
   }
 }
 
+// Stable per-install identity for the bridge's device registry, so two browsers / profiles running
+// this extension show up as two devices (browser_list_browsers) instead of collapsing into one and
+// evicting each other's held poll. storage.local is per-profile (sync would share the id across
+// signed-in profiles; session wouldn't survive a browser restart).
+let deviceId = null
+async function loadDeviceId() {
+  if (deviceId) return deviceId
+  try {
+    const s = await chrome.storage.local.get('deviceId')
+    deviceId = s.deviceId || crypto.randomUUID()
+    if (!s.deviceId) await chrome.storage.local.set({ deviceId })
+  } catch {
+    deviceId = deviceId || crypto.randomUUID()
+  }
+  return deviceId
+}
+// Browser brand for the device list ("Chrome", "Brave", "Microsoft Edge", …).
+function browserBrand() {
+  const brands = (navigator.userAgentData && navigator.userAgentData.brands) || []
+  return brands.map((b) => b.brand).find((b) => !/Not.?A.?Brand|Chromium/i.test(b)) || 'Chrome'
+}
+
 // Ghost-Prime works in its OWN tab, inside a dedicated "Ghost-Prime" tab group — so it never
 // hijacks the tab you're looking at (no more loading Gmail over your YouTube tab). When the app
 // turns on "current tab" mode it instead acts on the tab you're focused on (see resolveTab).
@@ -197,6 +219,18 @@ function injectAllFrames(tabId, func, arg) {
   return chrome.scripting.executeScript({ target: { tabId, allFrames: true }, func, args: [arg] })
 }
 
+// Act in exactly ONE frame: probe every frame (func with { probe: true } only reports a match), pick
+// the top document if it matched, else the first subframe that did, and run the real action there.
+// Returns the probe results too so callers can build their not-found / options errors as before.
+async function actInOneFrame(tabId, func, args) {
+  const frames = await injectAllFrames(tabId, func, { ...args, probe: true })
+  const hits = frames.filter((f) => f?.result?.ok)
+  if (!hits.length) return { frames, result: null }
+  const frame = hits.find((f) => f.frameId === 0) || hits[0]
+  const [{ result }] = await chrome.scripting.executeScript({ target: { tabId, frameIds: [frame.frameId] }, func, args: [args] })
+  return { frames, result }
+}
+
 // ---- Keyboard via the Chrome DevTools Protocol (debugger) ----
 // chrome.scripting can set <input>.value, but it CANNOT type into editors that render their own
 // surface (Google Docs/Slides on a canvas, Monaco, Notion). Those need real keyboard events sent
@@ -340,7 +374,10 @@ async function withDebugger(tabId, fn) {
 
 // ---- Injected page functions (must be fully self-contained) ----
 
-function clickInPage({ selector, text, double, button }) {
+// `probe`: only report whether a match exists in this frame — don't act. The background probes every
+// frame, then runs the real click in exactly one (actInOneFrame) so a label present in the page AND
+// an iframe isn't clicked twice.
+function clickInPage({ selector, text, double, button, probe }) {
   const visible = (el) => {
     const r = el.getBoundingClientRect()
     if (r.width < 1 || r.height < 1) return false
@@ -348,7 +385,8 @@ function clickInPage({ selector, text, double, button }) {
     return s.visibility !== 'hidden' && s.display !== 'none' && s.opacity !== '0'
   }
   const fire = (el) => {
-    el.scrollIntoView({ block: 'center', inline: 'center' })
+    if (probe) return true
+    el.scrollIntoView({ block: 'center', inline: 'center', behavior: 'instant' })
     const btn = button === 'right' ? 2 : button === 'middle' ? 1 : 0
     if (double) {
       el.dispatchEvent(new MouseEvent('dblclick', { bubbles: true, cancelable: true, button: btn }))
@@ -397,7 +435,7 @@ function clickInPage({ selector, text, double, button }) {
   return { ok: false, clickables: [] }
 }
 
-function fillInPage({ selector, label, value }) {
+function fillInPage({ selector, label, value, probe }) {
   const visible = (el) => {
     const r = el.getBoundingClientRect()
     if (r.width < 1 || r.height < 1) return false
@@ -423,7 +461,23 @@ function fillInPage({ selector, label, value }) {
     })
   }
   if (!el) return { ok: false }
-  el.focus()
+  if (el.tagName === 'INPUT' && (el.type === 'checkbox' || el.type === 'radio')) {
+    if (probe) return { ok: true, found: true }
+    // value decides the state: "false"/"no"/"off"/"unchecked" clears it, anything else sets it
+    const on = !/^(false|no|off|0|unchecked|uncheck)$/i.test(String(value ?? '').trim())
+    el.focus()
+    if (el.checked !== on) {
+      if (on || el.type === 'checkbox') {
+        el.click() // toggles .checked and fires input/change natively
+      } else {
+        // a click never unchecks a radio; clear it directly
+        el.checked = false
+        el.dispatchEvent(new Event('input', { bubbles: true }))
+        el.dispatchEvent(new Event('change', { bubbles: true }))
+      }
+    }
+    return { ok: true }
+  }
   if (el.tagName === 'SELECT') {
     // Native dropdown: choose the option whose value or visible text matches (exact, then contains).
     const want = String(value ?? '').trim().toLowerCase()
@@ -432,10 +486,16 @@ function fillInPage({ selector, label, value }) {
       opts.find((o) => o.value.toLowerCase() === want || o.text.trim().toLowerCase() === want) ||
       (want && opts.find((o) => o.text.trim().toLowerCase().includes(want)))
     if (!opt) return { ok: false, options: opts.map((o) => o.text.trim()).filter(Boolean).slice(0, 30) }
+    if (probe) return { ok: true, found: true }
+    el.focus()
     el.value = opt.value
+  } else if (probe) {
+    return { ok: true, found: true }
   } else if (el.isContentEditable) {
+    el.focus()
     el.textContent = value ?? ''
   } else {
+    el.focus()
     const proto = el.tagName === 'TEXTAREA' ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype
     const setter = Object.getOwnPropertyDescriptor(proto, 'value')?.set
     setter ? setter.call(el, value ?? '') : (el.value = value ?? '')
@@ -450,8 +510,27 @@ function getTextInPage(maxChars) {
   return { url: location.href, title: document.title, text: (document.body?.innerText || '').slice(0, cap) }
 }
 
+// Every collected element gets a data-ghost-ref="<nonce>:<i>" attribute (nonce is per frame, so
+// the value is unique across frames); the background numbers the merged list and hands the app a
+// `[data-ghost-ref=…]` selector per item, which clickInPage/fillInPage's selector path resolves.
 function pageSnapshotInPage(maxItems) {
   const cap = Math.min(Number(maxItems) || 40, 60)
+  const ATTR = 'data-ghost-ref'
+  for (const el of document.querySelectorAll(`[${ATTR}]`)) el.removeAttribute(ATTR)
+  const nonce = Math.random().toString(36).slice(2, 8)
+  let i = 0
+  const tag = (el) => {
+    // Old attrs were stripped above, so a present one is from THIS snapshot — reuse it rather
+    // than re-tag an element that shows up in two loops (breaks the first entry's ref).
+    if (el.hasAttribute(ATTR)) return el.getAttribute(ATTR)
+    const refAttr = `${nonce}:${i++}`
+    el.setAttribute(ATTR, refAttr)
+    return refAttr
+  }
+  const rectOf = (el) => {
+    const r = el.getBoundingClientRect()
+    return { x: r.left, y: r.top, w: r.width, h: r.height }
+  }
   const visible = (el) => {
     const r = el.getBoundingClientRect()
     if (r.width < 1 || r.height < 1) return false
@@ -479,26 +558,31 @@ function pageSnapshotInPage(maxItems) {
     if (!visible(el)) continue
     const label = labelOf(el)
     if (!label) continue
-    buttons.push({ label, selector: selOf(el) })
+    buttons.push({ label, selector: selOf(el), refAttr: tag(el), rect: rectOf(el) })
     if (buttons.length >= cap) break
   }
   for (const el of document.querySelectorAll('a[href]')) {
     if (!visible(el)) continue
     const label = labelOf(el)
     if (!label) continue
-    links.push({ label, href: el.href })
+    links.push({ label, href: el.href, refAttr: tag(el), rect: rectOf(el) })
     if (links.length >= cap) break
   }
   for (const el of document.querySelectorAll('input, textarea, [contenteditable="true"]')) {
     if (!visible(el)) continue
     if (el.type === 'hidden') continue
+    if (['submit', 'button', 'reset', 'image'].includes(el.type)) continue // already listed as a button
+    const isCheck = el.type === 'checkbox' || el.type === 'radio'
     fields.push({
       label: labelOf(el),
       name: el.name || '',
       type: el.type || el.tagName.toLowerCase(),
       placeholder: el.placeholder || '',
-      value: el.value || el.textContent?.slice(0, 40) || '',
-      selector: selOf(el)
+      value: isCheck ? '' : el.value || el.textContent?.slice(0, 40) || '',
+      checked: isCheck ? !!el.checked : undefined,
+      selector: selOf(el),
+      refAttr: tag(el),
+      rect: rectOf(el)
     })
     if (fields.length >= cap) break
   }
@@ -508,7 +592,9 @@ function pageSnapshotInPage(maxItems) {
       label: labelOf(el),
       name: el.name || '',
       selector: selOf(el),
-      options: [...el.options].map((o) => o.text.trim()).filter(Boolean)
+      options: [...el.options].map((o) => o.text.trim()).filter(Boolean),
+      refAttr: tag(el),
+      rect: rectOf(el)
     })
     if (selects.length >= cap) break
   }
@@ -524,6 +610,74 @@ function clickAtInPage({ x, y }) {
   if (el.scrollIntoView) el.scrollIntoView({ block: 'center' })
   el.click()
   return { ok: true }
+}
+
+// Injected: locate an element the way clickInPage does (selector, then visible text), scroll it into
+// view and return its centre in viewport px — the background then moves the real cursor there via
+// CDP so CSS :hover menus open (synthetic mouseover events alone wouldn't trigger them).
+function locateInPage({ selector, text }) {
+  const visible = (el) => {
+    const r = el.getBoundingClientRect()
+    if (r.width < 1 || r.height < 1) return false
+    const s = getComputedStyle(el)
+    return s.visibility !== 'hidden' && s.display !== 'none' && s.opacity !== '0'
+  }
+  let el = null
+  if (selector) {
+    try {
+      el = [...document.querySelectorAll(selector)].find(visible) || document.querySelector(selector)
+    } catch {
+      return { ok: false, invalid: true }
+    }
+  }
+  if (!el && text && String(text).trim()) {
+    const t = String(text).trim().toLowerCase()
+    const sel = 'button, a, [role="button"], [role="link"], [role="menuitem"], [role="tab"], [role="option"], input[type="submit"], input[type="button"], summary'
+    const controls = [...document.querySelectorAll(sel)].filter(visible)
+    const label = (e) => (e.getAttribute('aria-label') || e.innerText || e.value || e.title || '').trim().toLowerCase()
+    el = controls.find((e) => label(e) === t) || controls.find((e) => label(e).includes(t))
+    if (!el) {
+      el = [...document.querySelectorAll('*')].find(
+        (e) => visible(e) && e.childElementCount === 0 && (e.innerText || '').trim().toLowerCase().includes(t)
+      )
+    }
+  }
+  if (!el) return { ok: false }
+  el.scrollIntoView({ block: 'center', inline: 'center', behavior: 'instant' }) // smooth scroll would give mid-animation coords
+  const r = el.getBoundingClientRect()
+  return { ok: true, x: r.left + r.width / 2, y: r.top + r.height / 2 }
+}
+
+// Injected: find a phrase in the page text (Ctrl+F for the agent) — count, a snippet around each
+// hit, and the first on-screen occurrence scrolled into view. Copy of browser.js findInPage.
+function findInPage({ needle, max }) {
+  const body = document.body?.innerText || ''
+  const hay = body.toLowerCase()
+  const n = needle.toLowerCase()
+  const matches = []
+  let count = 0
+  for (let i = hay.indexOf(n); i !== -1; i = hay.indexOf(n, i + n.length)) {
+    count++
+    if (matches.length < max) {
+      const s = Math.max(0, i - 100)
+      const e = Math.min(body.length, i + n.length + 100)
+      matches.push((s > 0 ? '…' : '') + body.slice(s, e).replace(/\s+/g, ' ').trim() + (e < body.length ? '…' : ''))
+    }
+  }
+  let scrolled = false
+  if (count) {
+    const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT)
+    for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+      if (!node.nodeValue.toLowerCase().includes(n)) continue
+      const el = node.parentElement
+      if (el && el.getBoundingClientRect().width > 0) {
+        el.scrollIntoView({ block: 'center' })
+        scrolled = true
+        break
+      }
+    }
+  }
+  return { count, matches, scrolled }
 }
 
 // Injected (async): poll until a selector or visible text shows up, or the timeout elapses.
@@ -793,9 +947,11 @@ async function run(cmd, args) {
   }
   const tab = await resolveTab(cmd, args)
   // Per-site permission gate: navigate is judged by where it's GOING; every other action by the
-  // page it would act ON.
-  const gate = siteCheck(args.policy, cmd === 'navigate' ? args.url : tab.url)
-  if (!gate.ok) throw new Error(gate.reason)
+  // page it would act ON. Back/forward/close only LEAVE the page, so they're the way off a blocked one.
+  if (cmd !== 'goBack' && cmd !== 'goForward' && cmd !== 'closeTab') {
+    const gate = siteCheck(args.policy, cmd === 'navigate' ? args.url : tab.url)
+    if (!gate.ok) throw new Error(gate.reason)
+  }
   // Visual "I'm acting here" glow (toggleable). Skip passive reads (getText/screenshot/waitFor) and
   // navigate (page is about to change — it glows once it has loaded, below).
   if (cmd === 'click' || cmd === 'fill' || cmd === 'clickAt' || cmd === 'scroll' || cmd === 'pressKey') maybeGlow(tab.id)
@@ -838,6 +994,14 @@ async function run(cmd, args) {
       }
       const cap = Math.min(Number(args.limit) || 40, 60)
       for (const k of ['buttons', 'links', 'fields', 'selects']) main[k] = (main[k] || []).slice(0, cap)
+      // Number the merged list here (one sequence across frames); the app keeps ref → selector.
+      let n = 1
+      for (const k of ['buttons', 'links', 'fields', 'selects']) {
+        for (const it of main[k]) {
+          it.ref = n++
+          if (it.refAttr) it.refSelector = `[data-ghost-ref="${it.refAttr}"]`
+        }
+      }
       return main
     }
     case 'getText': {
@@ -893,8 +1057,8 @@ async function run(cmd, args) {
       return { base64: String(dataUrl).split(',')[1] || '', url: tab.url }
     }
     case 'click': {
-      const frames = await injectAllFrames(tab.id, clickInPage, args)
-      if (frames.some((f) => f?.result?.ok)) return { ok: true, url: tab.url }
+      const { frames, result } = await actInOneFrame(tab.id, clickInPage, args)
+      if (result?.ok) return { ok: true, url: tab.url }
       if (frames.some((f) => f?.result?.invalid)) {
         throw new Error(
           `Invalid CSS selector ${JSON.stringify(args.selector)}. Use a standard CSS selector, or click by visible text with { text: "..." }.`
@@ -906,13 +1070,63 @@ async function run(cmd, args) {
       throw new Error(`Couldn't click ${what} — not found on the page.${list} Retry with the exact visible text of the element you want.`)
     }
     case 'fill': {
-      const frames = await injectAllFrames(tab.id, fillInPage, args)
-      if (frames.some((f) => f?.result?.ok)) return { ok: true }
+      const { frames, result } = await actInOneFrame(tab.id, fillInPage, args)
+      if (result?.ok) return { ok: true }
       const opts = [...new Set(frames.flatMap((f) => f?.result?.options || []))]
       if (opts.length) {
         throw new Error(`Couldn't match "${args.value}" to a dropdown option. Choose one of: ${opts.map((o) => `"${o}"`).join(', ')}.`)
       }
       throw new Error(`Couldn't find a field for ${args.label ? `label "${args.label}"` : `selector ${JSON.stringify(args.selector)}`}.`)
+    }
+    case 'find': {
+      const needle = String(args.needle ?? '').trim()
+      if (!needle) throw new Error('browser_find needs the "text" to look for')
+      const [{ result }] = await chrome.scripting.executeScript({
+        target: { tabId: tab.id },
+        func: findInPage,
+        args: [{ needle, max: Math.min(Number(args.max) || 5, 20) }]
+      })
+      return { ...(result || { count: 0, matches: [], scrolled: false }), url: tab.url }
+    }
+    case 'hover': {
+      // Resolve the element in whichever frame has it, then move the REAL cursor there over CDP so
+      // CSS :hover menus open. Quiet mode (no debugger) falls back to synthetic mouse events.
+      const frames = await injectAllFrames(tab.id, locateInPage, { selector: args.selector, text: args.text })
+      if (frames.some((f) => f?.result?.invalid)) {
+        throw new Error(`Invalid CSS selector ${JSON.stringify(args.selector)}. Use a standard CSS selector, or hover by visible text with { text: "..." }.`)
+      }
+      const hit = frames.find((f) => f?.result?.ok)
+      if (!hit) {
+        const what = args.text ? `text "${args.text}"` : `selector ${JSON.stringify(args.selector)}`
+        throw new Error(`Couldn't hover ${what} — not found on the page. Call browser_get_page and use the element's { ref: N } or exact visible text.`)
+      }
+      const { x, y } = hit.result
+      // CDP coords are top-document viewport px; a subframe's coords would need its offset, which
+      // this extension can't look up (no webNavigation permission) — so only the top frame gets the
+      // real cursor move, and subframes / quiet mode / a blocked debugger use synthetic events.
+      let moved = false
+      if (hit.frameId === 0 && !cfg.quietDebugger) {
+        try {
+          await withDebugger(tab.id, (target) =>
+            cdpSend(target, 'Input.dispatchMouseEvent', { type: 'mouseMoved', x: Math.round(x), y: Math.round(y) })
+          )
+          moved = true
+        } catch {}
+      }
+      if (!moved) {
+        await chrome.scripting.executeScript({
+          target: { tabId: tab.id, frameIds: [hit.frameId] },
+          func: ({ x, y }) => {
+            const el = document.elementFromPoint(x, y)
+            if (!el) return false
+            for (const type of ['pointerover', 'pointerenter', 'mouseover', 'mouseenter', 'mousemove'])
+              el.dispatchEvent(new MouseEvent(type, { bubbles: type !== 'mouseenter' && type !== 'pointerenter', clientX: x, clientY: y }))
+            return true
+          },
+          args: [hit.result]
+        }).catch(() => {})
+      }
+      return { ok: true, url: tab.url }
     }
     case 'clickAt': {
       const [{ result }] = await chrome.scripting.executeScript({ target: { tabId: tab.id }, func: clickAtInPage, args: [args] })
@@ -1016,22 +1230,44 @@ async function run(cmd, args) {
       }
     }
     case 'waitForNavigation': {
+      // A navigation that's already under way (status 'loading') or one that starts within ~8s counts
+      // as "started"; then wait (up to timeoutMs) for it to complete. If nothing starts, return
+      // early instead of stalling for the whole timeout — mirrors the Playwright path.
       try {
-        await new Promise((resolve, reject) => {
-          const listener = (tabId, info) => {
-            if (tabId === tab.id && info.status === 'complete') {
-              chrome.tabs.onUpdated.removeListener(listener)
-              resolve()
-            }
-          }
-          chrome.tabs.onUpdated.addListener(listener)
-          setTimeout(() => {
+        const total = Number(args.timeoutMs) || 30000
+        const t0 = Date.now()
+        let started = tab.status === 'loading'
+        await new Promise((resolve) => {
+          let startTimer = null
+          let hardTimer = null
+          let poll = null
+          const finish = () => {
+            clearTimeout(startTimer)
+            clearTimeout(hardTimer)
+            clearInterval(poll)
             chrome.tabs.onUpdated.removeListener(listener)
             resolve()
-          }, Number(args.timeoutMs) || 30000)
+          }
+          const listener = (tabId, info) => {
+            if (tabId !== tab.id) return
+            if (info.status === 'loading') {
+              started = true
+              clearTimeout(startTimer)
+            } else if (info.status === 'complete' && started) finish()
+          }
+          chrome.tabs.onUpdated.addListener(listener)
+          // Nothing started within the cap → give up waiting for a start.
+          if (!started) startTimer = setTimeout(() => !started && finish(), Math.min(total, 8000))
+          hardTimer = setTimeout(finish, total)
+          // Belt and braces: the 'complete' event can slip past between tabs.get and addListener.
+          poll = setInterval(async () => {
+            const t = await chrome.tabs.get(tab.id).catch(() => null)
+            if (!t) return finish()
+            if (started && t.status === 'complete') finish()
+          }, 500)
         })
         const t = await chrome.tabs.get(tab.id)
-        return { ok: true, url: t.url, title: t.title }
+        return { ok: true, url: t.url, title: t.title, navigated: started || t.url !== tab.url, waitedMs: Date.now() - t0 }
       } catch (e) {
         throw new Error(`Navigation wait failed: ${e?.message || e}`)
       }
@@ -1054,13 +1290,19 @@ async function pollOnce() {
   const to = setTimeout(() => ctrl.abort(), POLL_TIMEOUT)
   let r
   try {
-    r = await fetch(q('/poll'), { signal: ctrl.signal })
+    if (!deviceId) await loadDeviceId()
+    const brand = browserBrand()
+    const ident = `&id=${encodeURIComponent(deviceId)}&kind=browser&brand=${encodeURIComponent(brand)}&name=${encodeURIComponent(brand)}`
+    r = await fetch(q('/poll') + ident, { signal: ctrl.signal })
   } finally {
     clearTimeout(to)
   }
   if (!r.ok) throw new Error(`poll ${r.status}`)
   const job = await r.json()
-  if (!job || !job.cmd) return
+  if (!job || !job.cmd) {
+    await sleep(250) // empty hold ended early (e.g. another poller with our id) — never tight-loop
+    return
+  }
   let result
   try {
     result = { id: job.id, ok: true, data: await run(job.cmd, job.args || {}) }
@@ -1131,7 +1373,7 @@ chrome.action?.onClicked.addListener((tab) => {
 })
 
 chrome.runtime.onInstalled.addListener(() => {
-  loadCfg().then(loop)
+  Promise.all([loadCfg(), loadDeviceId()]).then(loop)
   enableSidePanel()
   try {
     chrome.contextMenus.removeAll(() => {
@@ -1151,7 +1393,7 @@ chrome.runtime.onInstalled.addListener(() => {
   } catch {}
 })
 chrome.runtime.onStartup.addListener(() => {
-  loadCfg().then(loop)
+  Promise.all([loadCfg(), loadDeviceId()]).then(loop)
   enableSidePanel()
 })
 
@@ -1174,7 +1416,7 @@ chrome.contextMenus?.onClicked.addListener(async (info, tab) => {
   } catch {}
 })
 chrome.alarms.create('keepalive', { periodInMinutes: 1 }) // restart the loop if the SW was idled out
-chrome.alarms.onAlarm.addListener(() => loadCfg().then(loop))
+chrome.alarms.onAlarm.addListener(() => Promise.all([loadCfg(), loadDeviceId()]).then(loop))
 // Only the synced config matters here; ignore the high-frequency session writes (ghost tab/group
 // ids) that saveGhostRefs() makes on every command — reloading cfg for those is wasted work.
 chrome.storage.onChanged.addListener((_changes, areaName) => {
@@ -1182,4 +1424,4 @@ chrome.storage.onChanged.addListener((_changes, areaName) => {
 })
 enableSidePanel()
 setConnected(false) // show "not connected" until the first successful poll proves the bridge is up
-loadCfg().then(loop)
+Promise.all([loadCfg(), loadDeviceId()]).then(loop)

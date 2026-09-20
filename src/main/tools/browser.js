@@ -114,7 +114,19 @@ function launchRealChrome() {
 
 // Decide the backend for this action. In extension/auto mode, if nothing's connected and
 // auto-launch is on, open Chrome and wait (~12s) for the extension to come online.
+let lastBackend = null
 async function ensureBrowserBackend() {
+  const b = await pickBrowserBackend()
+  // Refs from a snapshot on the OTHER backend point at a different page/DOM — never replay them.
+  if (b !== lastBackend) {
+    lastBackend = b
+    lastRefs = new Map()
+    lastRefsBackend = null
+    refGen++
+  }
+  return b
+}
+async function pickBrowserBackend() {
   if (BROWSER_BACKEND === 'playwright') return 'playwright'
   if (bridge.bridgeConnected()) return 'extension'
   let launched = false
@@ -368,6 +380,10 @@ async function settle(p, beforeUrl, grace = 600) {
 
 async function actionResult(pg, extra = {}) {
   const alive = pg && !pg.isClosed()
+  // Landed on a site the policy forbids (link, redirect, back): say so, hide title/text — the next
+  // action's assertPageAllowed() will refuse to act there.
+  const g = alive ? checkUrl(pg.url()) : { ok: true }
+  if (!g.ok) return { ok: true, blocked: g.reason, url: pg.url(), title: '', tabId: idOf(pg), navigated: !!extra.navigated, events: drainEvents() }
   return {
     ok: true,
     url: alive ? pg.url() : '',
@@ -396,7 +412,8 @@ export function describeEvents(events = []) {
 export function formatActionResult(lead, r = {}) {
   const where = r.url ? ` — now at ${r.url}${r.title ? ` — "${r.title}"` : ''}` : ''
   const changed = r.navigated ? ' (page changed — element refs are stale; call browser_get_page again)' : ''
-  return [`${lead}${where}${changed}`, ...describeEvents(r.events)].join('\n')
+  const why = r.blocked ? `\n${r.blocked}` : '' // landed on a blocked site — say so now, not on the next call
+  return [`${lead}${where}${changed}${why}`, ...describeEvents(r.events)].join('\n')
 }
 
 function normalizeUrl(url) {
@@ -406,6 +423,13 @@ function normalizeUrl(url) {
   if (/^(about|chrome|file|data|blob):/i.test(u)) return u
   if (!/^[a-z][a-z0-9+.-]*:\/\//i.test(u)) u = 'https://' + u.replace(/^\/+/, '') // "example.com" → https://
   return u
+}
+
+// Per-action site-policy gate for the Playwright backend (the extension checks tab.url itself):
+// refuse to read or act on a page the user blocked / didn't allow-list, however we got there.
+function assertPageAllowed(p) {
+  const g = checkUrl(p.url())
+  if (!g.ok) throw new Error(g.reason)
 }
 
 export async function browserNavigate({ url, waitUntil } = {}) {
@@ -468,8 +492,20 @@ function removeMarksInPage() {
 }
 
 export async function browserScreenshot({ fullPage, annotate } = {}) {
-  if ((await ensureBrowserBackend()) === 'extension') return bridge.sendCommand('screenshot', { fullPage: !!fullPage, ...meta() })
+  if ((await ensureBrowserBackend()) === 'extension') {
+    // annotate is forwarded so a future extension build can draw marks; today it can't, so say so
+    // (the brains append r.note to the tool output) instead of silently returning a plain image.
+    const r = await bridge.sendCommand('screenshot', { fullPage: !!fullPage, annotate: !!annotate, ...meta() })
+    return annotate && !r?.marks
+      ? {
+          ...r,
+          marks: null,
+          note: 'annotate is not supported on the Chrome-extension backend; use browser_get_page refs, browser_click { text } or browser_click_at { x, y } (0..1 fractions)'
+        }
+      : r
+  }
   const p = await ensurePage()
+  assertPageAllowed(p)
   let marks = null
   if (annotate) {
     // Fresh snapshot so the numbers on the image match what browser_click { ref } will act on.
@@ -502,7 +538,7 @@ export function formatMarks(marks) {
 // agent. Extension path runs against your real Chrome tab; Playwright path drives its own page.
 export async function browserGoBack() {
   if ((await ensureBrowserBackend()) === 'extension') return bridge.sendCommand('goBack', { ...meta() }, 35000)
-  const p = await ensurePage()
+  const p = await ensurePage() // no assertPageAllowed: going back is the way OFF a blocked page
   await p.goBack({ waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => {})
   return actionResult(p, { navigated: true })
 }
@@ -517,6 +553,7 @@ export async function browserGoForward() {
 export async function browserReload() {
   if ((await ensureBrowserBackend()) === 'extension') return bridge.sendCommand('reloadTab', { ...meta() }, 35000)
   const p = await ensurePage()
+  assertPageAllowed(p)
   await p.reload({ waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => {})
   return actionResult(p, { navigated: true })
 }
@@ -603,6 +640,7 @@ export function formatPageSnapshot(s) {
 const REF_ATTR = 'data-ghost-ref'
 let refGen = 0
 let lastRefs = new Map() // ref -> { label, selector, kind } from the latest snapshot
+let lastRefsBackend = null // 'playwright' | 'extension' — which backend numbered lastRefs
 
 // Injected in-page (self-contained): tag + describe the interactive elements of ONE frame.
 function snapshotInPage({ cap, startRef, gen, attr }) {
@@ -797,6 +835,7 @@ async function takeSnapshot(p, cap) {
   }
   for (const k of ['buttons', 'links', 'fields', 'selects']) out[k] = out[k].slice(0, cap)
   lastRefs = refs
+  lastRefsBackend = 'playwright'
   return out
 }
 
@@ -814,17 +853,30 @@ function refError(ref) {
   return new Error(
     known
       ? `Element [${ref}] ("${known.label}") is no longer on the page — it changed since the last snapshot. Call browser_get_page again and use the new number.`
-      : `Unknown element ref [${ref}]. Call browser_get_page first — it numbers every visible button, link and field — then pass one of those numbers.`
+      : `Unknown element ref [${ref}] — it may be from a previous page or browser backend. Call browser_get_page again and use one of its numbers, or act by visible text with { text } / by position with browser_click_at.`
   )
 }
 
-// Extension backend has no refs of its own: translate a ref from our last snapshot into the
-// selector / label it was recorded with.
+// Extension backend: translate a ref from the last EXTENSION snapshot into the data-ghost-ref
+// selector (or label) it was recorded with. Refs numbered by a Playwright snapshot never apply.
 function refToExtensionArgs({ ref, text, selector }) {
   if (ref == null || ref === '') return { text, selector }
+  if (lastRefsBackend !== 'extension') throw refError(ref)
   const k = lastRefs.get(Number(ref))
   if (!k) throw refError(ref)
   return k.selector ? { selector: k.selector } : { text: k.label }
+}
+
+// Extension backend: a ref-based action that fails with "not found" means the page changed since
+// the snapshot — give the same re-snapshot guidance as the Playwright path instead of leaking the
+// internal data-ghost-ref selector the bridge complains about.
+async function withRefError(ref, fn) {
+  try {
+    return await fn()
+  } catch (e) {
+    if (ref != null && ref !== '' && /not found/i.test(e?.message || '')) throw refError(ref)
+    throw e
+  }
 }
 
 // A locator (on `root`, the page or a frame) restricted to elements Playwright counts as
@@ -967,9 +1019,11 @@ async function clarifyClickError(page, err, { selector, text, ref }) {
 
 export async function browserClick({ ref, selector, text, double, button = 'left' } = {}) {
   if ((await ensureBrowserBackend()) === 'extension') {
-    return bridge.sendCommand('click', { ...refToExtensionArgs({ ref, text, selector }), double: !!double, button, ...meta() })
+    const t = refToExtensionArgs({ ref, text, selector })
+    return withRefError(ref, () => bridge.sendCommand('click', { ...t, double: !!double, button, ...meta() }))
   }
   const p = await ensurePage()
+  assertPageAllowed(p)
   const before = p.url()
   const clickOpts = { timeout: 12000, button: button === 'right' ? 'right' : button === 'middle' ? 'middle' : 'left' }
   try {
@@ -994,9 +1048,14 @@ export async function browserClick({ ref, selector, text, double, button = 'left
 // Hover an element — the only way to open hover-driven menus (nav dropdowns, row action icons,
 // tooltips) before clicking what appears.
 export async function browserHover({ ref, selector, text } = {}) {
-  if ((await ensureBrowserBackend()) === 'extension')
-    throw new Error('browser_hover runs on the Playwright backend — set GHOST_BROWSER_BACKEND=playwright.')
+  if ((await ensureBrowserBackend()) === 'extension') {
+    const t = refToExtensionArgs({ ref, text, selector })
+    const r = await withRefError(ref, () => bridge.sendCommand('hover', { ...t, ...meta() }))
+    await sleep(250) // let a hover menu open before the agent looks
+    return { ok: true, url: r?.url || '' }
+  }
   const p = await ensurePage()
+  assertPageAllowed(p)
   try {
     const loc = await resolveTarget(p, { ref, text, selector }, 'hover')
     await loc.scrollIntoViewIfNeeded({ timeout: 4000 }).catch(() => {})
@@ -1011,11 +1070,12 @@ export async function browserHover({ ref, selector, text } = {}) {
 export async function browserFill({ ref, selector, value, label, pressEnter } = {}) {
   if ((await ensureBrowserBackend()) === 'extension') {
     const t = refToExtensionArgs({ ref, text: label, selector })
-    const r = await bridge.sendCommand('fill', { selector: t.selector, label: t.text, value, ...meta() })
+    const r = await withRefError(ref, () => bridge.sendCommand('fill', { selector: t.selector, label: t.text, value, ...meta() }))
     if (pressEnter) await bridge.sendCommand('pressKey', { keys: 'Enter', ...meta() }, 30000)
     return r
   }
   const p = await ensurePage()
+  assertPageAllowed(p)
   const val = value == null ? '' : String(value)
   const before = p.url()
   try {
@@ -1064,9 +1124,23 @@ export async function browserGetPage({ limit } = {}) {
   const cap = Math.min(Number(limit) || 40, 60)
   if ((await ensureBrowserBackend()) === 'extension') {
     const r = await bridge.sendCommand('getPage', { limit: cap, ...meta() })
+    // The extension numbers its items (ref + a data-ghost-ref selector); remember them so
+    // browser_click / browser_fill / browser_hover { ref } resolve on this backend too. Links carry
+    // no selector on older extension builds — those fall back to their label.
+    const refs = new Map()
+    for (const k of ['buttons', 'links', 'fields', 'selects']) {
+      for (const it of r?.[k] || []) {
+        if (it.ref == null) continue
+        refs.set(Number(it.ref), { label: it.label, selector: it.refSelector || it.selector || '', kind: k })
+      }
+    }
+    lastRefs = refs
+    lastRefsBackend = 'extension'
+    refGen++
     return { ...r, formatted: formatPageSnapshot(r) }
   }
   const p = await ensurePage()
+  assertPageAllowed(p)
   const snapshot = await takeSnapshot(p, cap)
   return { ...snapshot, formatted: formatPageSnapshot(snapshot) }
 }
@@ -1075,6 +1149,7 @@ export async function browserGetText({ offset } = {}) {
   const off = Math.max(0, Number(offset) || 0)
   if ((await ensureBrowserBackend()) === 'extension') return bridge.sendCommand('getText', { offset: off, ...meta() })
   const p = await ensurePage()
+  assertPageAllowed(p)
   // Main document first, then any iframe with real content (chat widgets, embeds, OAuth frames).
   const parts = []
   for (const frame of p.frames()) {
@@ -1127,9 +1202,11 @@ function findInPage({ needle, max }) {
 export async function browserFind({ text, limit } = {}) {
   const needle = String(text ?? '').trim()
   if (!needle) throw new Error('browser_find needs the "text" to look for')
-  if ((await ensureBrowserBackend()) === 'extension')
-    throw new Error('browser_find runs on the Playwright backend — use browser_get_text instead.')
+  if ((await ensureBrowserBackend()) === 'extension') {
+    return bridge.sendCommand('find', { needle, max: Math.min(Number(limit) || 5, 20), ...meta() })
+  }
   const p = await ensurePage()
+  assertPageAllowed(p)
   const r = await p.evaluate(findInPage, { needle, max: Math.min(Number(limit) || 5, 20) })
   return { ...r, url: p.url() }
 }
@@ -1142,7 +1219,21 @@ export async function browserReadPages({ urls, keepOpen } = {}) {
   if (!list.length) throw new Error('browser_read_pages needs a non-empty "urls" array')
 
   if ((await ensureBrowserBackend()) === 'extension') {
-    return bridge.sendCommand('readPages', { urls: list, keepOpen: keepOpen !== false, ...meta() }, 60000)
+    // Normalize first ("example.com" → https://…) so the extension never opens a bare domain as an
+    // extension-relative path, and the site check sees the real host. Bad entries stay in place
+    // as error rows; only valid URLs go to the bridge, then everything is merged back in order.
+    const entries = list.map((raw) => {
+      try {
+        return { url: normalizeUrl(raw) }
+      } catch (e) {
+        return { url: raw, title: '', text: '', error: e.message }
+      }
+    })
+    const valid = entries.filter((e) => !e.error).map((e) => e.url)
+    const r = valid.length ? await bridge.sendCommand('readPages', { urls: valid, keepOpen: keepOpen !== false, ...meta() }, 60000) : { pages: [] }
+    const got = Array.isArray(r?.pages) ? r.pages : []
+    let i = 0
+    return { ...r, pages: entries.map((e) => (e.error ? e : got[i++] || { url: e.url, title: '', text: '', error: 'no result' })) }
   }
 
   // Playwright fallback: open each page concurrently in the persistent context.
@@ -1180,6 +1271,7 @@ export async function browserClickAt({ x, y } = {}) {
   if (x == null || y == null) throw new Error('browser_click_at needs x and y (fractions of the viewport, 0..1)')
   if ((await ensureBrowserBackend()) === 'extension') return bridge.sendCommand('clickAt', { x: Number(x), y: Number(y), ...meta() })
   const p = await ensurePage()
+  assertPageAllowed(p)
   const before = p.url()
   const { w, h } = await p.evaluate(() => ({ w: window.innerWidth, h: window.innerHeight }))
   const px = Number(x) <= 1 ? Number(x) * w : Number(x)
@@ -1195,8 +1287,9 @@ export async function browserClickAt({ x, y } = {}) {
 // Playwright backend only for now (the active backend when dev-mode extensions are blocked).
 export async function browserDrag({ fromSelector, toSelector, from, to } = {}) {
   if ((await ensureBrowserBackend()) === 'extension')
-    throw new Error('browser_drag runs on the Playwright backend — set GHOST_BROWSER_BACKEND=playwright.')
+    throw new Error("browser_drag isn't available on the Chrome-extension backend — use browser_click_at on the handle and target, or browser_scroll.")
   const p = await ensurePage()
+  assertPageAllowed(p)
   if (fromSelector && toSelector) {
     await p.locator(fromSelector).first().dragTo(p.locator(toSelector).first())
     return { ...(await actionResult(p)), mode: 'element' }
@@ -1222,6 +1315,7 @@ export async function browserDrag({ fromSelector, toSelector, from, to } = {}) {
 export async function browserScroll({ direction = 'down', amount, selector } = {}) {
   if ((await ensureBrowserBackend()) === 'extension') return bridge.sendCommand('scroll', { direction, amount, selector, ...meta() })
   const p = await ensurePage()
+  assertPageAllowed(p)
   const scrollY = await p.evaluate(
     ({ direction, amount, selector }) => {
       function largestScrollable() {
@@ -1319,6 +1413,7 @@ export async function browserPressKey({ keys, text } = {}) {
     return r
   }
   const p = await ensurePage()
+  assertPageAllowed(p)
   const before = p.url()
   if (hasText) await p.keyboard.type(String(text))
   let submitted = hasText && /\n$/.test(String(text))
@@ -1356,6 +1451,7 @@ export async function browserWaitFor({ selector, text, timeoutMs } = {}) {
     return bridge.sendCommand('waitFor', { selector, text, timeoutMs: ms, ...meta() }, ms + 6000)
   }
   const p = await ensurePage()
+  assertPageAllowed(p)
   const needle = hasText ? String(text).toLowerCase() : null
   const deadline = Date.now() + ms
   while (Date.now() < deadline) {
@@ -1431,22 +1527,33 @@ export async function browserCloseTab() {
 
 // List every open tab — url, title, which window, and whether it's playing audio (audible) — so the
 // agent can see what's open / what's playing and then pin one with browser_use_tab.
+// Tabs on blocked / non-allow-listed sites are listed (so the agent can still pin or close them)
+// but their url and title are redacted.
+function redactBlockedTab(t) {
+  return checkUrl(t.url).ok ? t : { ...t, url: '(blocked site)', title: '', blocked: true }
+}
+
 export async function browserListTabs() {
-  if ((await ensureBrowserBackend()) === 'extension') return bridge.sendCommand('listTabs', { ...meta() }, 15000)
+  if ((await ensureBrowserBackend()) === 'extension') {
+    const r = await bridge.sendCommand('listTabs', { ...meta() }, 15000)
+    return { ...r, tabs: (r?.tabs || []).map(redactBlockedTab) }
+  }
   // Playwright fallback: enumerate the context's pages (no per-tab audible signal here).
   await ensurePage()
   const pages = context.pages().filter((pg) => !pg.isClosed())
   const tabs = await Promise.all(
-    pages.map(async (pg) => ({
-      tabId: idOf(pg),
-      windowId: 0,
-      url: pg.url(),
-      title: await pg.title().catch(() => ''),
-      active: pg === page,
-      audible: false,
-      muted: false,
-      focusedWindow: pg === page
-    }))
+    pages.map(async (pg) =>
+      redactBlockedTab({
+        tabId: idOf(pg),
+        windowId: 0,
+        url: pg.url(),
+        title: await pg.title().catch(() => ''),
+        active: pg === page,
+        audible: false,
+        muted: false,
+        focusedWindow: pg === page
+      })
+    )
   )
   return { tabs }
 }

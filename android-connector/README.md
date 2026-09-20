@@ -36,8 +36,12 @@ the JDK 21 install, `ANDROID_HOME` → `~/Android/Sdk`.)
 ## Install + connect
 1. **Sideload** `app-debug.apk` (enable "install unknown apps" for your file manager/browser).
 2. Open **Ghost-Prime** on the phone and set **Bridge host** to your computer's LAN IP (same Wi-Fi),
-   port `8731`, token `ghost-local` (match the app's `.env` / extension settings).
+   port `8731`, and the **private token** you set as `GHOST_BRIDGE_TOKEN` in the app's `.env` (the
+   same value goes in the extension settings).
 3. On the computer, run the app with the bridge reachable off-loopback: `GHOST_BRIDGE_HOST=0.0.0.0`.
+   A private `GHOST_BRIDGE_TOKEN` is REQUIRED for this — with the default `ghost-local` token the
+   app refuses `0.0.0.0` and binds `127.0.0.1` instead (the phone won't be able to connect), because
+   anyone on the network who could reach the port would be able to run tasks through the agent.
 4. In the app, tap through: **1 Enable Accessibility → 2 Grant screen capture → 3 Start connector**.
 5. The phone now appears as a named device (e.g. *Pixel 8*) in Mission Control.
 

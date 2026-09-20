@@ -26,6 +26,10 @@ const brains = new Map() // channelId -> 'auto' | 'gemini' | 'claude' (per-chann
 
 const MAX_HISTORY = 20 // messages kept per channel for context
 const DISCORD_LIMIT = 1900 // stay under Discord's 2000-char message cap
+// Headroom balanceFences() needs to reopen (```lang\n, lang capped at FENCE_LANG_MAX) and close (\n```)
+// a fence inside one part without pushing it past the cap.
+const FENCE_PAD = 30
+const FENCE_LANG_MAX = 20
 // Past this many chars (~2 messages) a reply goes out as a .txt attachment instead of many chunks.
 const FILE_THRESHOLD = DISCORD_LIMIT * 2
 const ATTACH_MAX_BYTES = 256 * 1024 // cap per inbound text attachment we'll read (256 KB)
@@ -89,7 +93,7 @@ function chunk(text, size = DISCORD_LIMIT) {
       for (let i = 0; i < line.length; i += size) out.push(line.slice(i, i + size))
       continue
     }
-    if (buf.length + line.length + 1 > size) {
+    if (buf && buf.length + line.length + 1 > size) {
       out.push(buf)
       buf = ''
     }
@@ -118,7 +122,7 @@ function balanceFences(parts) {
     }
     if (open) {
       s += '\n```'
-      carryLang = lang
+      carryLang = lang.slice(0, FENCE_LANG_MAX) // cap so a junk "fence" line can't balloon the next part
     } else {
       carryLang = null
     }
@@ -156,9 +160,24 @@ async function readTextAttachments(msg) {
   return blocks
 }
 
-export async function startDiscord() {
+let stopped = false // set by stopDiscord() so a pending login retry can't recreate a client after quit
+let retryTimer = null
+let retryWake = null // resolver for the pending sleep, so stopDiscord() can wake the loop and let it exit
+const sleep = (ms) =>
+  new Promise((r) => {
+    retryWake = r
+    retryTimer = setTimeout(() => {
+      retryTimer = null
+      retryWake = null
+      r()
+    }, ms)
+  })
+
+// onStatus (optional): ({ state: 'online' | 'retrying' | 'error', detail }) => void, for a future UI pill.
+export async function startDiscord({ onStatus } = {}) {
   const token = process.env.DISCORD_BOT_TOKEN
   if (!token) return // not configured — silent no-op
+  stopped = false
 
   let discord
   try {
@@ -167,41 +186,79 @@ export async function startDiscord() {
     console.warn('[discord] discord.js not available:', e?.message || e)
     return
   }
-  const { Client, GatewayIntentBits, Partials, ActivityType } = discord
+  // discord.js v14 exports the error-code enum as DiscordjsErrorCodes (older builds: ErrorCodes).
+  const { Client, GatewayIntentBits, Partials, ActivityType, DiscordjsErrorCodes: ErrorCodes = discord.ErrorCodes } = discord
   AttachmentBuilder = discord.AttachmentBuilder
+  // Bad token / missing privileged intent won't fix itself — don't retry those. A disallowed intent
+  // surfaces from @discordjs/ws as a plain Error with no code, so match its message too.
+  const FATAL = new Set([ErrorCodes.TokenInvalid, ErrorCodes.DisallowedIntents])
+  const isFatal = (e) =>
+    FATAL.has(e?.code) || e?.status === 401 || /disallowed intents|invalid intents|sharding is required/i.test(e?.message || '')
+  const report = (state, detail) => {
+    try {
+      onStatus?.({ state, detail })
+    } catch {}
+  }
 
   if (!allowedIds().length) {
     console.warn('[discord] DISCORD_BOT_TOKEN is set but DISCORD_ALLOWED_USER_IDS is empty — the bot will refuse every message until you add your Discord user id.')
   }
 
-  client = new Client({
-    intents: [
-      GatewayIntentBits.Guilds,
-      GatewayIntentBits.GuildMessages,
-      GatewayIntentBits.DirectMessages,
-      GatewayIntentBits.MessageContent // privileged — enable "Message Content Intent" in the Discord dev portal
-    ],
-    partials: [Partials.Channel, Partials.Message] // needed to receive DMs
-  })
+  // Login with exponential backoff: at app launch the network is often not up yet (laptop wake, DNS
+  // blip) and discord.js gives up after one failed gateway fetch. Once connected it reconnects itself.
+  let delay = 5_000
+  while (!stopped) {
+    const c = new Client({
+      intents: [
+        GatewayIntentBits.Guilds,
+        GatewayIntentBits.GuildMessages,
+        GatewayIntentBits.DirectMessages,
+        GatewayIntentBits.MessageContent // privileged — enable "Message Content Intent" in the Discord dev portal
+      ],
+      partials: [Partials.Channel, Partials.Message], // needed to receive DMs
+      // Model output quotes untrusted web pages / files — never let it ping @everyone/@here/roles.
+      // Only the allowlisted owner(s) stay mentionable; replies still notify the person we reply to.
+      allowedMentions: { parse: [], users: allowedIds(), repliedUser: true }
+    })
 
-  client.once('ready', () => {
-    console.log(`[discord] online as ${client.user?.tag}`)
+    c.once('clientReady', () => {
+      console.log(`[discord] online as ${c.user?.tag}`)
+      report('online', c.user?.tag)
+      try {
+        c.user.setActivity('Ghost-Prime', { type: ActivityType.Listening })
+      } catch {}
+    })
+    c.on('error', (e) => console.error('[discord] client error:', e?.message || e))
+    c.on('messageCreate', (msg) => handleMessage(msg).catch((e) => console.error('[discord]', e?.message || e)))
+    client = c
+
     try {
-      client.user.setActivity('Ghost-Prime', { type: ActivityType.Listening })
-    } catch {}
-  })
-  client.on('error', (e) => console.error('[discord] client error:', e?.message || e))
-  client.on('messageCreate', (msg) => handleMessage(msg).catch((e) => console.error('[discord]', e?.message || e)))
-
-  try {
-    await client.login(token)
-  } catch (e) {
-    console.error('[discord] login failed:', e?.message || e)
-    client = null
+      await c.login(token)
+      return // connected — @discordjs/ws handles reconnects from here
+    } catch (e) {
+      client = null // login() already destroyed the client on failure
+      if (isFatal(e)) {
+        console.error('[discord] login failed permanently:', e?.message || e)
+        report('error', e?.message || String(e))
+        return
+      }
+      if (stopped) return
+      console.warn(`[discord] login failed (${e?.code || e?.message || e}) — retrying in ${delay / 1000}s`)
+      report('retrying', e?.message || String(e))
+      await sleep(delay)
+      delay = Math.min(delay * 2, 60_000)
+    }
   }
 }
 
 export function stopDiscord() {
+  stopped = true
+  if (retryTimer) {
+    clearTimeout(retryTimer)
+    retryTimer = null
+  }
+  retryWake?.() // wake a pending backoff sleep so the login loop sees `stopped` and exits
+  retryWake = null
   try {
     client?.destroy()
   } catch {}
@@ -313,8 +370,7 @@ async function handleMessage(msg) {
 
 async function respond(msg, content) {
   const channelId = msg.channelId
-  const history = histories.get(channelId) || []
-  const messages = [...history, { role: 'user', content }]
+  const messages = [...(histories.get(channelId) || []), { role: 'user', content }]
   const mode = modes.get(channelId) || DEFAULT_MODE()
 
   // A live placeholder we edit as the agent thinks → acts → types its answer.
@@ -392,6 +448,8 @@ async function respond(msg, content) {
   }
   reply = (reply ?? '').trim() || '(no response)'
 
+  // Re-read the live history (not the copy from before the run) so a !reset issued mid-run sticks.
+  const history = histories.get(channelId) || []
   history.push({ role: 'user', content }, { role: 'assistant', content: reply })
   while (history.length > MAX_HISTORY) history.shift()
   histories.set(channelId, history)
@@ -415,7 +473,9 @@ async function deliver(channel, placeholder, reply) {
     }
   }
 
-  const parts = balanceFences(chunk(reply))
+  // Chunk with fence headroom, then drop any empty parts (Discord rejects blank messages).
+  let parts = balanceFences(chunk(reply, DISCORD_LIMIT - FENCE_PAD)).filter((p) => p.trim())
+  if (!parts.length) parts = ['(no response)']
   if (placeholder) await placeholder.edit(parts[0]).catch(() => channel.send(parts[0]).catch(() => {}))
   else await channel.send(parts[0]).catch(() => {})
   for (let i = 1; i < parts.length; i++) await channel.send(parts[i]).catch(() => {})

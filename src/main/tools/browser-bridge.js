@@ -1,10 +1,18 @@
 import http from 'node:http'
+import { timingSafeEqual } from 'node:crypto'
 import { watch, cpSync, mkdirSync } from 'node:fs'
 
 // Local bridge between Ghost-Prime and its executor clients — your real Chrome (via the extension)
 // and, later, a phone connector app. Transport is plain HTTP long-poll on a loopback/LAN socket:
 // each client repeatedly GETs /poll (identifying itself with id/name/kind), we hand it queued
 // commands, and it POSTs results to /result. Everything is gated by a shared token.
+//
+// LOOPBACK / TOKEN RULE: the token defaults to the public string 'ghost-local' (same as the shipped
+// extension). That is fine on 127.0.0.1, but binding off-loopback (GHOST_BRIDGE_HOST=0.0.0.0 for the
+// host browser / phone) with that token would let anything reaching the port run agent tasks, so
+// startBridge() refuses and falls back to 127.0.0.1 until a private GHOST_BRIDGE_TOKEN is set on
+// both sides. Requests carrying a non-extension Origin are rejected regardless of bind address
+// (browser-page CSRF), and the state-changing POSTs must be application/json.
 //
 // MULTIPLE NAMED DEVICES can connect at once (Chrome · Brave · Pixel). Each device gets its own
 // command queue + held poll, so they never clobber each other; commands route to the SELECTED
@@ -141,10 +149,12 @@ export function sendCommand(cmd, args = {}, timeoutMs = 25000, deviceId = null) 
     const id = `c${++cmdSeq}`
     const timer = setTimeout(() => {
       pending.delete(id)
+      // Never let a timed-out command be handed out on a later poll (device was busy / restarting / suspended).
+      target.queue = target.queue.filter((c) => c.id !== id)
       reject(new Error(`device "${target.name || target.id}" did not respond to "${cmd}" in time`))
     }, timeoutMs)
     pending.set(id, { resolve, reject, timer })
-    target.queue.push({ id, cmd, args })
+    target.queue.push({ id, cmd, args, ts: Date.now() })
     deliverNext(target)
   })
 }
@@ -152,7 +162,7 @@ export function sendCommand(cmd, args = {}, timeoutMs = 25000, deviceId = null) 
 // Fire-and-forget to EVERY connected device (used for 'reload', which restarts the worker).
 function broadcast(cmd, args = {}) {
   for (const d of devices.values()) {
-    d.queue.push({ id: 'fire', cmd, args })
+    d.queue.push({ id: 'fire', cmd, args, ts: Date.now() })
     deliverNext(d)
   }
 }
@@ -191,12 +201,44 @@ export function watchExtensionForReload(dir, deployDir = null) {
   }
 }
 
+// Constant-time token compare (a plain !== leaks the matching prefix length via timing).
+function tokenMatches(given, expected) {
+  if (typeof given !== 'string') return false
+  const a = Buffer.from(given)
+  const b = Buffer.from(expected)
+  return a.length === b.length && timingSafeEqual(a, b)
+}
+
+const isJson = (req) => String(req.headers['content-type'] || '').toLowerCase().startsWith('application/json')
+
+let bridgeInfo = null // { port, host, downgraded } — what startBridge() actually bound
+
+// What the bridge is actually listening on (null before startBridge()). Lets browser.js explain a
+// "not connected" error when the cause is the loopback downgrade below, not a missing extension.
+export function getBridgeInfo() {
+  return bridgeInfo
+}
+
+// Returns { port, host, downgraded } so index.js / the UI can surface a loopback fallback.
 export function startBridge() {
-  if (server) return
+  if (server) return bridgeInfo
   // Read at call time (after dotenv has loaded — module-top would run before .env is applied).
   const port = Number(process.env.GHOST_BRIDGE_PORT || 8731)
   const token = process.env.GHOST_BRIDGE_TOKEN || 'ghost-local'
-  const host = process.env.GHOST_BRIDGE_HOST || '127.0.0.1' // 0.0.0.0 lets a phone / host browser reach it
+  let host = (process.env.GHOST_BRIDGE_HOST || '127.0.0.1').trim() // 0.0.0.0 lets a phone / host browser reach it
+  // Any loopback spelling (LOCALHOST, 127.0.0.2, ::1) is fine with the default token.
+  const h = host.toLowerCase()
+  const isLoopback = h === 'localhost' || h === '::1' || /^127\.\d+\.\d+\.\d+$/.test(h)
+  let downgraded = false
+  if (token === 'ghost-local') {
+    console.warn('[bridge] using the default token "ghost-local" — set a private GHOST_BRIDGE_TOKEN in .env (and the same in the extension / phone app)')
+    if (!isLoopback) {
+      console.error(`[bridge] GHOST_BRIDGE_HOST=${host} with the default token "ghost-local" would let anything that can reach this port run tasks in the agent. Binding to 127.0.0.1 instead — set a private GHOST_BRIDGE_TOKEN (and the same token in the extension / phone app) to enable ${host}.`)
+      host = '127.0.0.1'
+      downgraded = true
+    }
+  }
+  bridgeInfo = { port, host, downgraded }
   server = http.createServer((req, res) => {
     let url
     try {
@@ -204,7 +246,11 @@ export function startBridge() {
     } catch {
       return sendJson(res, 400, { error: 'bad url' })
     }
-    if (url.searchParams.get('token') !== token) return sendJson(res, 403, { error: 'bad token' })
+    if (!tokenMatches(url.searchParams.get('token'), token)) return sendJson(res, 403, { error: 'bad token' })
+    // Browser-page CSRF guard: the extension's worker/panel/options send Origin chrome-extension://…,
+    // the phone app and scripts send none; any other Origin is a web page and gets refused.
+    const origin = req.headers.origin
+    if (origin && !origin.startsWith('chrome-extension://')) return sendJson(res, 403, { error: 'bad origin' })
 
     // A client polls for its next command, identifying itself. Id-less pollers (the older extension)
     // collapse to a single default browser device, so nothing breaks before the extension reports id.
@@ -252,6 +298,7 @@ export function startBridge() {
     }
 
     if (req.method === 'POST' && url.pathname === '/result') {
+      if (!isJson(req)) return sendJson(res, 415, { error: 'expected application/json' })
       let body = ''
       req.on('data', (d) => (body += d))
       req.on('end', () => {
@@ -272,6 +319,7 @@ export function startBridge() {
     }
 
     if (req.method === 'POST' && url.pathname === '/task') {
+      if (!isJson(req)) return sendJson(res, 415, { error: 'expected application/json' })
       let body = ''
       req.on('data', (d) => (body += d))
       req.on('end', () => {
@@ -309,4 +357,5 @@ export function startBridge() {
   })
   server.on('error', (e) => console.error('[bridge] error:', e.message))
   server.listen(port, host, () => console.log(`[ghost] browser bridge listening on ${host}:${port}`))
+  return bridgeInfo
 }

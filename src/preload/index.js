@@ -2,12 +2,17 @@ import { contextBridge, ipcRenderer } from 'electron'
 
 let reqCounter = 0
 
+// Main decides the frame (it has .env; the renderer env doesn't) and passes it via additionalArguments.
+const nativeFrame = process.argv.includes('--ghost-native-frame=1')
+
 // The only bridge between renderer and main. No node, no remote — typed wrappers only.
 contextBridge.exposeInMainWorld('ghost', {
   platform: {
     isLinux: process.platform === 'linux',
-    nativeFrame: process.platform === 'linux' && process.env.GHOST_NATIVE_FRAME === '1'
+    nativeFrame
   },
+  // Main.jsx calls this once its push listeners are attached; main flushes buffered pushes then.
+  uiReady: () => ipcRenderer.send('ui:ready'),
   sendMessage(messages, mode, settings) {
     const requestId = `req_${Date.now()}_${reqCounter++}`
     // Driven via events (chat:delta/done/error); ignore the invoke promise.

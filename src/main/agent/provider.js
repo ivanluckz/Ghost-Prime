@@ -7,12 +7,15 @@ import * as shell from '../tools/shell-sessions.js'
 import * as reminders from '../tools/reminders.js'
 import * as fileUndo from '../tools/file-undo.js'
 import { saveMemory, recallMemories, memoryDigest } from '../memory/db.js'
-import { toolSpecs, executeTool } from '../tools/index.js'
+import { getToolSpecs, executeTool } from '../tools/index.js'
 
-// Pluggable brain providers. Select with GHOST_PROVIDER in .env:
-//   gemini       — Google AI Studio free tier (Gemini 2.5 Flash / Pro) with FULL autonomous tool calling
-//   claude-agent — Claude Agent SDK on your Claude Code login
-//   openrouter   — OpenRouter (OpenAI-compatible)
+// Two chat brains, picked PER TURN by pickBrain() below:
+//   gemini — Google AI Studio free tier (Gemini 2.5 Flash) with full tool calling (src/main/tools)
+//   claude — Claude Agent SDK on the user's Claude Code login, with the in-process MCP servers below
+// Chat selectors: GHOST_BRAIN_MODE=auto|gemini|claude, GHOST_CONTROL_BRAIN=claude|gemini, and the
+// per-turn /brain override. GHOST_PROVIDER / GHOST_FALLBACK_PROVIDER (claude-agent | gemini |
+// openrouter) only choose the model for background work — session auto-summaries and proactive
+// check-ins (summarizeConversation / generateShort) — never a chat reply.
 const OPENAI_PROVIDERS = {
   openrouter: {
     baseURL: 'https://openrouter.ai/api/v1',
@@ -28,9 +31,10 @@ const OPENAI_PROVIDERS = {
   }
 }
 
-// Default brain: gemini (free Google AI Studio key from Jarvis, with full tool-calling support)
-const PROVIDER = process.env.GHOST_PROVIDER || 'gemini'
-const FALLBACK_PROVIDER = process.env.GHOST_FALLBACK_PROVIDER || 'gemini'
+// Summary/proactive backend (default gemini — free). Read at call time so smoke scripts that set
+// env after import, and the env.js load order in src/main/index.js, both work.
+const summaryProvider = () => process.env.GHOST_PROVIDER || 'gemini'
+const summaryFallback = () => process.env.GHOST_FALLBACK_PROVIDER || 'gemini'
 
 
 // Built-in SDK tools the claude-agent brain may use. (Bash is intentionally omitted — shell work
@@ -142,32 +146,54 @@ function refersToCurrentPage(text) {
   return false
 }
 
-const SYSTEM_PROMPT = `You are Ghost-Prime (enhanced with Jarvis Mark-LIII), an autonomous AI desktop assistant running locally on the user's Chrome OS / Crostini Linux machine. You act on their behalf with real tools — you do the work, you don't just advise on how to do it.
+// The system prompt is assembled per brain: the two brains have DIFFERENT tool sets (Claude gets
+// the SDK built-ins + our MCP servers; Gemini gets src/main/tools toolSpecs), so each is told only
+// about tools it can actually call. Shared head/tail, per-brain tools section.
+const SHARED_HEAD = `You are Ghost-Prime (enhanced with Jarvis Mark-LIII), an autonomous AI desktop assistant running locally on the user's Chrome OS / Crostini Linux machine. You act on their behalf with real tools — you do the work, you don't just advise on how to do it.
 
-YOUR TOOLS — all loaded and directly callable this turn:
-- terminal_run — run bash commands in Crostini. Use for build commands, scripts, git, and system utilities.
-- browser_navigate / browser_get_page / browser_get_text / browser_find / browser_click / browser_click_at / browser_hover / browser_fill / browser_screenshot / browser_read_pages — drive the browser (via the Chrome extension bridge or Playwright).
-- browser_list_tabs / browser_use_tab / browser_scroll / browser_press_key / browser_wait_for / browser_go_back / browser_go_forward / browser_reload — browser tab and navigation controls.
-- file_read / file_write / file_edit / file_search / file_grep — inspect, create, edit, search, and grep local files.
-- web_search / web_fetch — perform live web searches and fetch readable page text.
-- memory_save / memory_recall — your long-term memory across sessions (backed by SQLite).
+YOUR TOOLS — all already loaded and directly callable this turn. There is NO step to "load", "search for", "enable", or "initialize" a tool first; when a task needs one, just call it.`
+
+// Claude brain: SDK built-ins + the in-process MCP servers registered in streamChatClaudeAgent.
+function claudeToolsSection() {
+  return `
+- shell_run — run a command in a LIVE terminal the user can see and type into. shell_open / shell_list / shell_read / shell_kill — open extra terminals, list them, read a terminal's latest output, or close one.
+- Read / Write / Edit / Glob / Grep — read and change local files.
+- WebFetch / WebSearch — fetch a URL or search the web for current information.
+- browser_navigate / browser_get_page / browser_get_text / browser_find / browser_click / browser_click_at / browser_hover / browser_fill / browser_screenshot / browser_read_pages / browser_drag — drive the browser (via the Chrome extension bridge or Playwright).
+- browser_list_tabs / browser_use_tab / browser_close_tab / browser_scroll / browser_press_key / browser_wait_for / browser_wait_for_navigation / browser_go_back / browser_go_forward / browser_reload — browser tab and navigation controls. browser_list_browsers / browser_use_browser switch between separate connected browsers/profiles.
+- memory_save / memory_recall — your long-term memory across sessions (supports tags + a ttl for temporary facts).
 - file_write / file_create / file_move / file_delete — REVERSIBLE file changes. When the user might want to undo a change (moving/renaming/deleting/rewriting a file), prefer these over the plain Write tool so undo_last can restore it. undo_last / undo_list — take back the last such change, or show what's undoable. (Use the Edit tool for surgical in-place code edits.)
 - reminder_set / reminder_list / reminder_cancel — schedule a desktop notification for later ("remind me at 5 to…"). Resolve vague times to an absolute time or minutes-from-now yourself.
-- system_volume — get or set volume percentage (0-100), mute, unmute, volume up/down via PulseAudio/pactl.
-- system_brightness — inspect or adjust display screen brightness.
-- system_power — battery status/health/percentage, screen lock, or suspend.
-- system_telemetry — real-time hardware telemetry: CPU usage %, RAM usage, load averages, disk space, and battery.
-- weather_get — live weather report and 3-day forecast for any city or current location.
-- reminder_set / reminder_list / reminder_cancel — schedule desktop notifications with voice alerts.
-- youtube_play — search and play YouTube videos directly in the browser.
-- jarvis_action_run — execute any Python action or plugin from the Jarvis Mark-LIII collection.
-- clipboard_read / clipboard_write / notify_user / screen_screenshot — clipboard, system notifications, and desktop screen captures.
+- clipboard_read / clipboard_write / notify_user — clipboard and desktop notifications.${
+    SCREEN_ENABLED
+      ? '\n- screen_screenshot / screen_type / screen_key / screen_click / launch_app — see and drive native Linux apps beyond the browser.'
+      : ''
+  }
+- You do NOT have the Jarvis one-shot tools on this brain (volume, brightness, battery/power, telemetry, weather, YouTube, Jarvis actions) — use shell_run (pactl, brightnessctl, upower…), WebSearch/WebFetch, or browser_navigate instead, or say so plainly.
+
+TERMINALS (your shell):
+- Run commands with shell_run. It runs in a real terminal the user is watching, and waits for the command to finish before returning its output + exit code. Terminals are PERSISTENT: a cd, an exported variable, or an activated venv carries over to your next shell_run in that terminal.
+- You can keep SEVERAL terminals. Open a dedicated one with shell_open (e.g. one for a dev server, another for commands). Target a specific terminal by passing { terminal: "<id>" } (ids come from shell_list); omit it to use or auto-create your main one.
+- For anything long-running or that never exits — dev servers, watchers, tail -f — call shell_run with { background: true } so it starts and returns immediately instead of hanging. Check on it later with shell_read, and shell_kill it when done.
+- Tidy up after yourself: close terminals and stop processes you started once a task is finished, but LEAVE running anything the user still needs (like a server they asked you to start).`
+}
+
+// Gemini brain: derived from toolSpecs at call time so the list can't drift from what is
+// actually registered (name + first sentence of each description).
+function geminiToolsSection() {
+  const firstSentence = (d) => String(d || '').split(/(?<=\.)\s+/)[0]
+  const lines = getToolSpecs().map((t) => `- ${t.function.name} — ${firstSentence(t.function.description)}`)
+  return `\n${lines.join('\n')}
+- Undo: file_write / file_create / file_move / file_delete are REVERSIBLE — when the user might want to undo a change (moving/renaming/deleting/rewriting a file), use these so undo_last can restore it; undo_list shows what's undoable. Use file_edit for surgical in-place edits (file_edit is not undoable).`
+}
+
+const SHARED_TAIL = `
 
 DRIVING THE BROWSER:
 - Look first: browser_get_page numbers every visible button, link, field and dropdown as [N]. Act on them with browser_click { ref: N } / browser_fill { ref: N, value } — the most reliable way. { text } (visible label) and { selector } (standard CSS) also work.
-- When layout matters or nothing is numbered where you need to click (canvas, maps, icon buttons), take browser_screenshot { annotate: true }: each element's [N] is drawn on the image — click by ref, or browser_click_at { x, y } (0..1 fractions of the image) for anything unnumbered.
+- When layout matters or nothing is numbered where you need to click (canvas, maps, icon buttons), take browser_screenshot { annotate: true }: each element's [N] is drawn on the image — click by ref, or browser_click_at { x, y } (0..1 fractions of the image) for anything unnumbered. Ref numbering and annotate are fully supported on the Playwright backend; on the Chrome-extension backend, if a result says a ref is unknown or annotate is unsupported, fall back to browser_click { text } or browser_click_at { x, y } from a plain screenshot.
 - Every action result tells you where you are now, whether the page changed ("page changed" → refs are stale, call browser_get_page again), and any dialog, download, or new tab it caused. Clicks already wait for the navigation they trigger — you do not need browser_wait_for_navigation after them.
-- Content that appears later (spinners, search results, SPAs): browser_wait_for { text | selector } before acting. Hover menus: browser_hover first. Long pages: browser_find { text } jumps to a phrase; browser_scroll reveals more.
+- Content that appears later (spinners, search results, SPAs): browser_wait_for { text | selector } before acting. Hover menus: browser_hover first. Long pages: browser_find { text } jumps to a phrase; browser_scroll reveals more. (browser_hover / browser_find by ref are fully supported on the Playwright backend; on the extension backend prefer { text }.)
 - Dropdowns / checkboxes: browser_fill with the option's visible text, or "true"/"false". Editors with no form field (Docs, Notion, code editors): click into them, then browser_press_key { text } / { keys }.
 - Research across several pages: browser_read_pages with all the URLs at once.
 - Confirm outcomes from actual results (URL, title, page text) — never assume a click worked.
@@ -176,6 +202,11 @@ HOW TO WORK:
 - Act directly and autonomously. Reversible actions proceed without asking.
 - Ground every progress and success claim in an actual tool result.
 - Be concise and clear: state the outcome first, then any details. Plain, natural language suitable for voice.`
+
+// brain: 'gemini' | 'claude'
+export function buildSystemPrompt(brain) {
+  return SHARED_HEAD + (brain === 'claude' ? claudeToolsSection() : geminiToolsSection()) + SHARED_TAIL
+}
 
 
 // ---------------------------------------------------------------------------
@@ -241,7 +272,7 @@ async function streamChatGeminiAgent({ messages, signal, onDelta, onEvent, model
 
   const systemMessage = {
     role: 'system',
-    content: `${SYSTEM_PROMPT}${memoryContext}${pageContext}\n\nCurrent Autonomy Mode: ${mode.toUpperCase()}. In PLAN mode, do not execute state-modifying actions — lay out an investigation plan first.`
+    content: `${buildSystemPrompt('gemini')}${memoryContext}${pageContext}\n\nCurrent Autonomy Mode: ${mode.toUpperCase()}. In PLAN mode, do not execute state-modifying actions — lay out an investigation plan first.`
   }
 
   const conversation = [
@@ -257,19 +288,27 @@ async function streamChatGeminiAgent({ messages, signal, onDelta, onEvent, model
   let turns = 0
   const MAX_TURNS = 30 // browser tasks routinely take 15+ tool round-trips
   const imageTurns = new Set() // screenshot turns we injected (pruned to the newest few)
+  let exhausted = false // we reached the text-only last round (the notice below blames the budget)
+  let lastFinish = 'unknown' // finish_reason of the final completion, for the empty-reply notice
 
   while (turns < MAX_TURNS) {
     turns++
     if (signal?.aborted) throw new Error('Request aborted')
 
+    // The last allowed round is text-only: otherwise its tools would run and their results could
+    // never be read (no further model call), leaving the user with tool cards and no reply.
+    const isLastTurn = turns >= MAX_TURNS
+    if (isLastTurn) exhausted = true // whatever happens now, the budget is spent
     let res
     try {
       res = await openai.chat.completions.create(
         {
           model: useModel,
-          messages: conversation,
-          tools: toolSpecs,
-          tool_choice: 'auto'
+          messages: isLastTurn
+            ? [...conversation, { role: 'system', content: 'Tool budget exhausted. Do not call tools. Summarise what you did, what succeeded/failed, and what remains.' }]
+            : conversation,
+          tools: getToolSpecs(),
+          tool_choice: isLastTurn ? 'none' : 'auto'
         },
         { signal }
       )
@@ -283,6 +322,7 @@ async function streamChatGeminiAgent({ messages, signal, onDelta, onEvent, model
 
     const choice = res.choices?.[0]
     const assistantMsg = choice?.message
+    lastFinish = choice?.finish_reason || 'unknown'
     if (!assistantMsg) break
 
     // Stream any assistant text content
@@ -327,7 +367,11 @@ async function streamChatGeminiAgent({ messages, signal, onDelta, onEvent, model
         'browser_find',
         'browser_screenshot',
         'browser_list_tabs',
+        'browser_list_browsers',
+        'browser_wait_for',
+        'browser_wait_for_navigation',
         'browser_read_pages',
+        'undo_list',
         'memory_recall',
         'system_telemetry',
         'weather_get',
@@ -354,7 +398,7 @@ async function streamChatGeminiAgent({ messages, signal, onDelta, onEvent, model
       const t0 = Date.now()
       let toolRes
       try {
-        toolRes = await executeTool(name, args)
+        toolRes = await executeTool(name, args, { signal })
       } catch (err) {
         toolRes = { output: `Tool execution failed: ${err.message}`, isError: true }
       }
@@ -400,10 +444,25 @@ async function streamChatGeminiAgent({ messages, signal, onDelta, onEvent, model
     }
   }
 
+  // A Stop that lands after the final reply has already streamed must not throw the reply away
+  // (ipc.js would skip saveMessage on the aborted path).
+  if (signal?.aborted && !fullOutput.trim()) throw new Error('Request aborted')
+  // Belt-and-braces: a provider that ignores tool_choice, or an empty final content, must not end
+  // the turn silently (ipc.js skips persisting an empty reply; Discord shows "(no response)").
+  // Only blame the tool budget when it really ran out — an empty first-turn reply (safety block,
+  // finish_reason length, provider hiccup) gets a truthful notice instead.
+  if (!fullOutput.trim()) {
+    const notice = exhausted
+      ? `*Stopped after ${MAX_TURNS} tool rounds without a final reply. Ask me to continue if the task is unfinished.*` // *…* — no _italic_ rule in the renderer
+      : `*The model returned an empty reply (finish_reason: ${lastFinish}). Please try again.*`
+    onDelta(notice)
+    fullOutput += notice
+  }
+
   return fullOutput
 }
 
-async function streamChatOpenAI({ messages, signal, onDelta, model, provider = PROVIDER }) {
+async function streamChatOpenAI({ messages, signal, onDelta, model, provider = summaryProvider() }) {
   const cfg = getOpenAIConfig(provider)
   const openai = getClient(provider)
   const useModel = model || process.env[cfg.modelEnv] || process.env.GHOST_MODEL || cfg.defaultModel
@@ -584,6 +643,7 @@ async function getBrowserMcpServer() {
           const r = await browser.browserScreenshot({ fullPage, annotate })
           const content = [{ type: 'image', data: r.base64, mimeType: 'image/png' }]
           if (r.marks) content.push({ type: 'text', text: `Numbered elements: ${browser.formatMarks(r.marks)}` })
+          if (typeof r.note === 'string' && r.note) content.push({ type: 'text', text: r.note }) // e.g. annotate unsupported on this backend
           return { content }
         }
       ),
@@ -1214,7 +1274,7 @@ async function streamChatClaudeAgent({ messages, signal, onDelta, onEvent, model
       ...(supportsEffort && !thinkingOff ? { effort: effortVal } : {}), // 'low' = snappy (effort guides thinking)
       ...(thinkingOff ? { thinking: { type: 'disabled' } } : {}),
       systemPrompt:
-        SYSTEM_PROMPT +
+        buildSystemPrompt('claude') +
         memoryContext +
         (CANVA_ENABLED
           ? '\n\nCANVA: Canva tools (mcp__canva__*) are available — use them for Canva design/app tasks. The first call may require the user to authorize Canva.'
@@ -1303,7 +1363,14 @@ async function streamChatClaudeAgent({ messages, signal, onDelta, onEvent, model
       }
     } else if (msg.type === 'result') {
       if (msg.subtype !== 'success' || msg.is_error) {
-        throw new Error((typeof msg.result === 'string' && msg.result) || `claude-agent failed (${msg.subtype})`)
+        // SDKResultError carries the reason in `errors: string[]` (no `result`); a success-with-
+        // is_error carries a `result` string. Surface it so the user sees why and so
+        // isClaudeUnavailable() can match not-logged-in / usage-limit text and fall over.
+        const detail =
+          (Array.isArray(msg.errors) && msg.errors.filter(Boolean).join('\n')) ||
+          (typeof msg.result === 'string' && msg.result) ||
+          ''
+        throw new Error(detail ? `${detail} (${msg.subtype})` : `claude-agent failed (${msg.subtype})`)
       }
       if (!streamed && typeof msg.result === 'string' && msg.result) {
         onDelta(msg.result)
@@ -1324,7 +1391,7 @@ function isClaudeUnavailable(err) {
 }
 
 function fallbackReady() {
-  const cfg = OPENAI_PROVIDERS[FALLBACK_PROVIDER]
+  const cfg = OPENAI_PROVIDERS[summaryFallback()]
   return !!(cfg && process.env[cfg.apiKeyEnv])
 }
 
@@ -1353,7 +1420,7 @@ function isHardTask(text) {
 // Jarvis one-shot controls (volume, brightness, battery, weather, telemetry, YouTube, reminders,
 // clipboard) exist only on the Gemini path, so those stay there. Set GHOST_CONTROL_BRAIN=gemini to
 // keep everything on the free brain.
-const CONTROL_BRAIN = (process.env.GHOST_CONTROL_BRAIN || 'claude').toLowerCase()
+const controlBrain = () => (process.env.GHOST_CONTROL_BRAIN || 'claude').toLowerCase() // call-time: see summaryProvider() above
 function isGeminiOnlyControl(t) {
   return /\b(volume|mute|unmute|louder|quieter|brightness|brighter|dimmer|battery|charg(?:e|ing)|weather|forecast|temperature|cpu|ram|memory usage|disk space|telemetry|system stats|remind(?:er|ers)?|youtube|play (?:a |the |some |me )?(?:song|video|music|track)|lock (?:the |my )?screen|suspend|clipboard|notify me)\b/i.test(
     t
@@ -1393,39 +1460,53 @@ export function pickBrain(opts = {}) {
   if (contentHasImage(c)) return 'gemini' // a dropped image: only the Gemini path takes it as input
   const text = contentToPlain(c)
   if (isHardTask(text)) return 'claude'
-  if (CONTROL_BRAIN === 'claude' && isComputerControl(text)) return 'claude'
+  // Jarvis one-shots exist only on Gemini. Checked AFTER isHardTask so a coding ask that merely
+  // mentions cpu/memory/battery/temperature ("refactor this so CPU usage stays flat") keeps the
+  // stronger brain.
+  if (isGeminiOnlyControl(text)) return 'gemini'
+  if (controlBrain() === 'claude' && isComputerControl(text)) return 'claude'
   return 'gemini'
 }
 
 function runBrain(opts, brain) {
-  return brain === 'claude' ? streamChatClaudeAgent(opts) : streamChatGeminiAgent({ ...opts, provider: 'gemini' })
+  if (brain === 'claude') return streamChatClaudeAgent(opts)
+  // `model` is the Claude alias from /model (sonnet|opus|haiku), effort/thinking are Claude-only —
+  // never send them to Gemini (it would 404 on model "opus").
+  const { model, effort, thinking, ...rest } = opts
+  return streamChatGeminiAgent({ ...rest, provider: 'gemini' })
 }
 
 export async function streamChat(opts) {
   const brain = pickBrain(opts)
   opts.onEvent?.({ kind: 'brain', brain }) // tell the UI which brain is answering
   let streamedAny = false
+  let usedTools = false
   const onDelta = (t) => {
     streamedAny = true
     opts.onDelta?.(t)
   }
+  const onEvent = (ev) => {
+    if (ev?.kind === 'tool_use') usedTools = true
+    opts.onEvent?.(ev)
+  }
   try {
-    return await runBrain({ ...opts, onDelta }, brain)
+    return await runBrain({ ...opts, onDelta, onEvent }, brain)
   } catch (err) {
-    if (opts.signal?.aborted || streamedAny) throw err // never double-answer
+    // never double-answer, and never replay a turn whose tools already ran (side effects would repeat)
+    if (opts.signal?.aborted || streamedAny || usedTools) throw err
     if (!isClaudeUnavailable(err)) throw err // only availability errors fall over to the other brain
     const other = brain === 'claude' ? 'gemini' : 'claude'
     const reason = (err?.message || String(err)).split('\n')[0].slice(0, 160)
     console.warn(`[ghost] ${brain} unavailable → ${other}: ${reason}`)
     opts.onEvent?.({ kind: 'brain', brain: other, fallback: true })
-    opts.onDelta?.(`_⚡ ${brain} was unavailable (${reason}). Using ${other} for this reply._\n\n`)
-    return await runBrain({ ...opts, onDelta }, other)
+    opts.onDelta?.(`*⚡ ${brain} was unavailable (${reason}). Using ${other} for this reply.*\n\n`) // *…* — the renderer has no _italic_ rule
+    return await runBrain({ ...opts, onDelta, onEvent }, other)
   }
 }
 
 // ---------------------------------------------------------------------------
 // Session auto-summary: distill a finished chat into a few DURABLE, cross-session facts.
-// Deliberately cheap — Haiku, no tools, no thinking, tiny output — and never throws (returns []
+// Deliberately cheap — Haiku, no tools, no thinking, tiny output — and never throws (returns null
 // on any failure) so it can't disrupt session switching or app quit. See memory/auto-summary.js.
 // ---------------------------------------------------------------------------
 const SUMMARY_SYSTEM = `You distill a chat between a user and the Ghost-Prime agent into DURABLE facts worth remembering in FUTURE, unrelated chats.
@@ -1491,7 +1572,8 @@ async function summarizeViaOpenAI(systemPrompt, prompt, signal, provider) {
   return res.choices?.[0]?.message?.content || ''
 }
 
-// messages: [{role, content}]. known: facts already saved (won't be repeated). Returns string[].
+// messages: [{role, content}]. known: facts already saved (won't be repeated). Returns string[],
+// or null when the model call failed / came back blank (so the caller can retry later).
 export async function summarizeConversation(messages, { signal, known = [] } = {}) {
   if (!Array.isArray(messages) || messages.length === 0) return []
   const transcript = messages
@@ -1502,20 +1584,21 @@ export async function summarizeConversation(messages, { signal, known = [] } = {
   const prompt = `CHAT TRANSCRIPT:\n${transcript}${knownBlock}\n\nReturn the JSON array of durable facts.`
   try {
     let text = ''
-    if (PROVIDER === 'claude-agent') {
+    if (summaryProvider() === 'claude-agent') {
       try {
         text = await summarizeViaClaude(SUMMARY_SYSTEM, prompt, signal)
       } catch (e) {
-        if (isClaudeUnavailable(e) && fallbackReady()) text = await summarizeViaOpenAI(SUMMARY_SYSTEM, prompt, signal, FALLBACK_PROVIDER)
+        if (isClaudeUnavailable(e) && fallbackReady()) text = await summarizeViaOpenAI(SUMMARY_SYSTEM, prompt, signal, summaryFallback())
         else throw e
       }
     } else {
-      text = await summarizeViaOpenAI(SUMMARY_SYSTEM, prompt, signal, PROVIDER)
+      text = await summarizeViaOpenAI(SUMMARY_SYSTEM, prompt, signal, summaryProvider())
     }
+    if (!String(text || '').trim()) return null // blank/aborted reply: "didn't get an answer", not "nothing durable"
     return parseFacts(text)
   } catch (e) {
     if (process.env.GHOST_DEBUG) console.warn('[auto-summary] summarize failed:', e?.message || e)
-    return []
+    return null // null = call failed (caller retries next time); [] = model genuinely found nothing durable
   }
 }
 
@@ -1523,15 +1606,15 @@ export async function summarizeConversation(messages, { signal, known = [] } = {
 // check-ins. Never throws — returns '' on any failure so background timers can't crash.
 export async function generateShort(systemPrompt, prompt) {
   try {
-    if (PROVIDER === 'claude-agent') {
+    if (summaryProvider() === 'claude-agent') {
       try {
         return (await summarizeViaClaude(systemPrompt, prompt)).trim()
       } catch (e) {
-        if (isClaudeUnavailable(e) && fallbackReady()) return (await summarizeViaOpenAI(systemPrompt, prompt, undefined, FALLBACK_PROVIDER)).trim()
+        if (isClaudeUnavailable(e) && fallbackReady()) return (await summarizeViaOpenAI(systemPrompt, prompt, undefined, summaryFallback())).trim()
         throw e
       }
     }
-    return (await summarizeViaOpenAI(systemPrompt, prompt, undefined, PROVIDER)).trim()
+    return (await summarizeViaOpenAI(systemPrompt, prompt, undefined, summaryProvider())).trim()
   } catch (e) {
     if (process.env.GHOST_DEBUG) console.warn('[proactive] generate failed:', e?.message || e)
     return ''

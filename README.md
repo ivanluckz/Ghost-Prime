@@ -18,8 +18,11 @@ sessions** — wrapped in a Higgsfield-generated cinematic intro.
 - **Streaming chat** with **Markdown** rendering (code blocks, lists, links), stop/abort mid-stream.
 - **Autonomy modes — Shift+Tab** to cycle (like Claude Code): **PLAN** (read-only) → **AUTO**
   (each action approved) → **FULL** (no checks). Shown in the top bar.
-- **Tools the agent can use:** `Bash`, `Read`, `Write`, `Edit`, `Glob`, `Grep`, `WebFetch`,
-  `WebSearch`, plus a **persistent, visible browser** (navigate / read / click / fill / screenshot).
+- **Tools the agent can use:** live persistent terminals (`shell_run` — there is no `Bash` tool; shell
+  work runs in terminals you can watch), `Read`, `Write`, `Edit`, `Glob`, `Grep`, `WebFetch`,
+  `WebSearch`, reversible file ops + undo, reminders, clipboard, plus a **persistent, visible browser**
+  (navigate / read / click / fill / screenshot). The Gemini brain gets the equivalent set from
+  `src/main/tools` (plus the Jarvis one-shots: volume, brightness, battery, weather, YouTube).
 - **Live tool feed** — each tool call shows a typed glyph, args, elapsed time, collapsible output,
   and **inline screenshots** from the browser.
 - **Mission Control layout** — a right-hand **Activity** panel shows live browser status, the running
@@ -46,8 +49,9 @@ ghost-prime            # start from any terminal  (also: stop | status | -f for 
 npm run dev            # dev mode with HMR
 ```
 
-The default brain (`GHOST_PROVIDER=claude-agent`) needs the **`claude` CLI installed and logged in**
-on this machine — no API key. That's it.
+Out of the box you need **both** a free `GEMINI_API_KEY` (plain chat / vision turns) and the
+**`claude` CLI installed and logged in** (hard and computer-control turns) — no paid API key. Pin a
+single brain with `GHOST_BRAIN_MODE` if you only have one (see below).
 
 ### Voice setup (local, free)
 
@@ -59,19 +63,27 @@ on this machine — no API key. That's it.
 
 ### Switching the brain (`.env`)
 
-```dotenv
-GHOST_PROVIDER=claude-agent          # claude-agent | gemini | openrouter
-CLAUDE_AGENT_MODEL=haiku             # pin a standard-context model (1M needs usage credits)
+Ghost-Prime routes **every chat turn between two brains**: **Gemini** (free AI Studio key — plain
+chat, dropped images, Jarvis controls) and **Claude** (`claude` CLI login — hard/long tasks and
+computer-control turns). **Both brains have tool use** (terminal, browser, files, memory). If one
+brain is unavailable (rate limit / auth) the turn falls over to the other.
 
-# Free alternates (OpenAI-compatible):
-OPENROUTER_API_KEY=sk-or-v1-xxxx
-OPENROUTER_MODEL=openai/gpt-oss-120b:free
+```dotenv
+GHOST_BRAIN_MODE=auto                # auto | gemini | claude — auto = per-turn heuristic
+GHOST_CONTROL_BRAIN=claude           # claude | gemini — where browser/terminal/file/app turns go
+CLAUDE_AGENT_MODEL=sonnet            # sonnet | opus | haiku for the Claude brain
 GEMINI_API_KEY=                      # https://aistudio.google.com/apikey (free tier)
 GEMINI_MODEL=gemini-2.5-flash
+
+# Background work ONLY (session auto-summaries, proactive check-ins) — never chat:
+GHOST_PROVIDER=gemini                # claude-agent | gemini | openrouter
+GHOST_FALLBACK_PROVIDER=gemini       # backup for those calls when GHOST_PROVIDER=claude-agent
+OPENROUTER_API_KEY=                  # only used when GHOST_PROVIDER/GHOST_FALLBACK_PROVIDER=openrouter
+OPENROUTER_MODEL=openai/gpt-oss-120b:free
 ```
 
-> Tool use (terminal/browser/memory) is available on the **claude-agent** brain. `gemini` and
-> `openrouter` are chat-only fallbacks.
+> In chat, `/brain auto|gemini|claude` overrides the routing for the session and `/model
+> sonnet|opus|haiku` picks the Claude model. `openrouter` is **not** a chat brain.
 
 ## Scripts
 
@@ -80,13 +92,17 @@ GEMINI_MODEL=gemini-2.5-flash
 | `npm run dev` | Launch in dev (Vite HMR + Electron). |
 | `npm run build` | Build to `out/`, then **auto-commit + push** the current branch (see below). |
 | `npm run rebuild` | Rebuild `better-sqlite3` against Electron's ABI (also on `postinstall`). |
-| `electron scripts/smoke-db.cjs` | Integration test for persistence + memory (temp DB, no LLM, no cost). |
+| `npx electron scripts/smoke-db.cjs` | Integration test for persistence + memory (temp DB, no LLM, no cost). |
 | `node scripts/smoke-claude-agent.mjs` | Headless check that the Claude brain streams. |
 | `node scripts/smoke-claude-agent-tools.mjs` | Exercise the agent's tools (honours `GHOST_TEST_PERMISSION`). |
-| `node scripts/smoke-claude-agent-browser.mjs` | Drive the Playwright browser through the agent. |
+| `GHOST_BROWSER_BACKEND=playwright GHOST_BROWSER_HEADLESS=true node scripts/smoke-claude-agent-browser.mjs` | Drive the Playwright browser through the agent (spends Pro allotment). |
+| `GHOST_BROWSER_BACKEND=playwright GHOST_BROWSER_HEADLESS=true GHOST_BROWSER_CHANNEL=chromium GHOST_BROWSER_PROFILE=isolated node scripts/smoke-browser-click.mjs` | browser_click edge cases (hidden duplicates, iframes, selectors) — no LLM. |
 | `node scripts/smoke-browser-control.mjs` | Browser control layer end to end (refs, annotated screenshots, popups, dialogs, downloads) — no LLM. Prefix with `GHOST_BROWSER_HEADLESS=true GHOST_BROWSER_CHANNEL= GHOST_BROWSER_PROFILE=/tmp/ghost-pw GHOST_BROWSER_BACKEND=playwright`. |
 | `node --import ./scripts/lib/register-electron-stub.mjs scripts/smoke-brain-router.mjs` | Which brain each kind of message routes to (no LLM). |
+| `node --import ./scripts/lib/register-electron-stub.mjs scripts/smoke-gemini-agent.mjs` | Gemini brain + Jarvis tools end to end (free tier). |
 | `node --import ./scripts/lib/register-electron-stub.mjs scripts/smoke-gemini-browser-vision.mjs` | Proves the Gemini brain can see browser screenshots (free tier, same env prefix as above). |
+
+The Playwright-backed smokes need the bundled browser once: `npx playwright install chromium`.
 
 ### Browser control
 
@@ -122,8 +138,8 @@ src/
 ├── main/                    # Electron main process (Node)
 │   ├── index.js             # app lifecycle, BrowserWindow, Crostini GPU/Wayland flags
 │   ├── ipc.js               # chat:* / db:* / voice:* handlers (+ streaming events)
-│   ├── agent/provider.js    # brain router: claude-agent (SDK) | gemini | openrouter
-│   │                        #   + in-process MCP servers for the browser and memory
+│   ├── agent/provider.js    # per-turn brain router: gemini (tools/index.js) | claude (Agent SDK)
+│   │                        #   + in-process MCP servers (shell, browser, memory, files, reminders…)
 │   ├── tools/               # browser.js (Playwright, persistent+visible), terminal.js
 │   ├── voice/index.js       # arecord -> Whisper, and Piper/espeak-ng -> aplay
 │   └── memory/db.js         # better-sqlite3: sessions, messages, memories
@@ -140,12 +156,15 @@ main → renderer over IPC (`chat:delta` / `chat:tool` / `chat:done` / `chat:err
 
 ## Crostini notes & gotchas
 
-- **GPU:** Wayland's GBM stack can't allocate scanout buffers, which crash-loops the GPU process
-  (`exit_code=8704`). `src/main/index.js` forces software rendering
-  (`disableHardwareAcceleration` + `--disable-gpu`). Re-`npm run build` after main-process changes.
-- **Native modules** must match Electron's ABI — `better-sqlite3` is rebuilt on `postinstall`.
-  The Whisper transcriber runs as a separate Node process (`ELECTRON_RUN_AS_NODE=1`) so its
-  `onnxruntime-node` stays out of Electron.
+- **GPU:** hardware acceleration is **on by default** (`GHOST_GPU=on`, needed for the three.js
+  core). If the window black-screens or the GPU process crash-loops on launch (`exit_code=8704` —
+  Wayland's GBM stack can't allocate scanout buffers), set `GHOST_GPU=off` in `.env` to fall back to
+  software rendering. Re-`npm run build` after main-process changes.
+- **Native modules** must match Electron's ABI — `better-sqlite3` **and `node-pty`** are rebuilt on
+  `postinstall` (`npm run rebuild` does it again by hand). The Whisper transcriber runs as a
+  separate Node process (`ELECTRON_RUN_AS_NODE=1`) so its `onnxruntime-node` stays out of Electron.
+- **Voice provider:** `GHOST_VOICE_PROVIDER=local|gemini` — defaults to `gemini` when a
+  `GEMINI_API_KEY` is set (free-tier STT/TTS), otherwise `local` (Whisper + espeak-ng/Piper).
 - **OS-level screen/desktop control is not viable here** — ChromeOS's compositor lacks
   `wlr-screencopy`, and `/dev/uinput` is root-only. The agent's "hands" are the Playwright browser
   and the terminal, not global mouse/keyboard. (So, no, it can't play an FPS.)

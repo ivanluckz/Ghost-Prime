@@ -50,11 +50,17 @@ function renderInline(text, kp) {
       nodes.push(<em key={`${kp}-${key++}`}>{tok.slice(1, -1)}</em>)
     } else {
       const mm = /\[([^\]]+)\]\(([^)]+)\)/.exec(tok)
-      nodes.push(
-        <a key={`${kp}-${key++}`} href={mm[2]} target="_blank" rel="noreferrer">
-          {mm[1]}
-        </a>
-      )
+      const href = mm[2].trim()
+      // Only web/mail links become anchors; anything else (javascript:, file:, …) renders literally.
+      if (/^(https?:|mailto:)/i.test(href)) {
+        nodes.push(
+          <a key={`${kp}-${key++}`} href={href} target="_blank" rel="noreferrer noopener">
+            {mm[1]}
+          </a>
+        )
+      } else {
+        nodes.push(tok)
+      }
     }
     last = m.index + tok.length
   }
