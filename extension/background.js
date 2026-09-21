@@ -12,11 +12,30 @@ const base = () => `http://${cfg.host || '127.0.0.1'}:${cfg.port}`
 const q = (path) => `${base()}${path}?token=${encodeURIComponent(cfg.token)}`
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 
-async function loadCfg() {
+// bridge-config.json is written next to the deployed copy by the app (`npm run ext:deploy` / the
+// launch-time mirror) with the host/port/token from .env — so a fresh install connects without
+// the options page. Values saved in the options page still win.
+async function fileDefaults() {
   try {
-    cfg = await chrome.storage.sync.get(DEFAULTS)
+    const r = await fetch(chrome.runtime.getURL('bridge-config.json'))
+    if (!r.ok) return {}
+    const j = await r.json()
+    const out = {}
+    if (typeof j.host === 'string' && j.host) out.host = j.host
+    if (Number(j.port)) out.port = Number(j.port)
+    if (typeof j.token === 'string' && j.token) out.token = j.token
+    return out
   } catch {
-    cfg = { ...DEFAULTS }
+    return {}
+  }
+}
+
+async function loadCfg() {
+  const defaults = { ...DEFAULTS, ...(await fileDefaults()) }
+  try {
+    cfg = await chrome.storage.sync.get(defaults)
+  } catch {
+    cfg = { ...defaults }
   }
 }
 

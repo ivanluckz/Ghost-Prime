@@ -31,3 +31,6 @@ android-connector/build/
 android-connector/app/build/
 android-connector/local.properties
 android-connector/.kotlin/
+
+# Generated next to the DEPLOYED extension only (holds the bridge token); never inside extension/
+extension/bridge-config.json

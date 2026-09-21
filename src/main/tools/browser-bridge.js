@@ -1,4 +1,5 @@
 import http from 'node:http'
+import { writeBridgeConfig } from './ext-config.js'
 import { timingSafeEqual } from 'node:crypto'
 import { watch, cpSync, mkdirSync } from 'node:fs'
 
@@ -229,6 +230,7 @@ export function watchExtensionForReload(dir, deployDir = null) {
     try {
       mkdirSync(deployDir, { recursive: true })
       cpSync(dir, deployDir, { recursive: true })
+      writeBridgeConfig(deployDir) // keep the deployed copy's connection defaults in step with .env
     } catch (e) {
       console.warn(`[bridge] couldn't mirror extension → ${deployDir}: ${e.message}`)
     }

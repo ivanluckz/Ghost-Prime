@@ -18,7 +18,13 @@ function updateTokenWarn() {
   w.style.display = isDefault ? 'block' : 'none'
 }
 
-chrome.storage.sync.get(DEFAULTS).then((c) => {
+// Prefill from bridge-config.json (written by the app next to the deployed copy) when nothing is saved.
+const fileDefaults = () =>
+  fetch(chrome.runtime.getURL('bridge-config.json'))
+    .then((r) => (r.ok ? r.json() : {}))
+    .then((j) => ({ ...(j.host ? { host: j.host } : {}), ...(Number(j.port) ? { port: Number(j.port) } : {}), ...(j.token ? { token: j.token } : {}) }))
+    .catch(() => ({}))
+fileDefaults().then((fd) => chrome.storage.sync.get({ ...DEFAULTS, ...fd })).then((c) => {
   $('host').value = c.host
   $('port').value = c.port
   $('token').value = c.token
