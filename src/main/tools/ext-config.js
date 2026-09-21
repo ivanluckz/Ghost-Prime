@@ -10,8 +10,11 @@ export function bridgeConfigForExtension(env = process.env) {
   const bindHost = (env.GHOST_BRIDGE_HOST || '127.0.0.1').trim()
   const token = (env.GHOST_BRIDGE_TOKEN || 'ghost-local').trim()
   const offLoopback = bindHost === '0.0.0.0' && token !== 'ghost-local'
+  // GHOST_BRIDGE_EXT_HOST pins what the extension dials (e.g. 127.0.0.1 when Chrome OS port
+  // forwarding maps the host's localhost:8731 into the container).
+  const pinned = (env.GHOST_BRIDGE_EXT_HOST || '').trim()
   return {
-    host: offLoopback ? 'penguin.linux.test' : '127.0.0.1',
+    host: pinned || (offLoopback ? 'penguin.linux.test' : '127.0.0.1'),
     port: Number(env.GHOST_BRIDGE_PORT) || 8731,
     token
   }

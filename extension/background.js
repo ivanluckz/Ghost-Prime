@@ -38,12 +38,10 @@ async function loadCfg() {
   } catch {
     cfg = { ...defaults }
   }
-  // A saved value that is still the factory default (127.0.0.1 / ghost-local) was never really
-  // chosen — let the app-written config win over it, so a token or host change in .env takes
-  // effect on reload without visiting the options page. A deliberately customised value stays.
-  for (const k of ['host', 'port', 'token']) {
-    if (fromFile[k] != null && cfg[k] === DEFAULTS[k]) cfg[k] = fromFile[k]
-  }
+  // The app-written config is the single source of truth when present: it mirrors the app's own
+  // .env, so a host/token change there takes effect on reload — no stale value saved in the
+  // options page can leave the two sides disagreeing.
+  for (const k of ['host', 'port', 'token']) if (fromFile[k] != null) cfg[k] = fromFile[k]
 }
 
 // Stable per-install identity for the bridge's device registry, so two browsers / profiles running

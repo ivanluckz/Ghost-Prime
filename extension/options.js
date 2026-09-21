@@ -26,7 +26,7 @@ const fileDefaults = () =>
     .catch(() => ({}))
 fileDefaults()
   .then((fd) => chrome.storage.sync.get({ ...DEFAULTS, ...fd }).then((c) => {
-    for (const k of ['host', 'port', 'token']) if (fd[k] != null && c[k] === DEFAULTS[k]) c[k] = fd[k] // file beats untouched defaults
+    for (const k of ['host', 'port', 'token']) if (fd[k] != null) c[k] = fd[k] // the app-written config is authoritative
     return c
   }))
   .then((c) => {
