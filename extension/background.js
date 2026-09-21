@@ -31,11 +31,18 @@ async function fileDefaults() {
 }
 
 async function loadCfg() {
-  const defaults = { ...DEFAULTS, ...(await fileDefaults()) }
+  const fromFile = await fileDefaults()
+  const defaults = { ...DEFAULTS, ...fromFile }
   try {
     cfg = await chrome.storage.sync.get(defaults)
   } catch {
     cfg = { ...defaults }
+  }
+  // A saved value that is still the factory default (127.0.0.1 / ghost-local) was never really
+  // chosen — let the app-written config win over it, so a token or host change in .env takes
+  // effect on reload without visiting the options page. A deliberately customised value stays.
+  for (const k of ['host', 'port', 'token']) {
+    if (fromFile[k] != null && cfg[k] === DEFAULTS[k]) cfg[k] = fromFile[k]
   }
 }
 

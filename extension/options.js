@@ -24,7 +24,12 @@ const fileDefaults = () =>
     .then((r) => (r.ok ? r.json() : {}))
     .then((j) => ({ ...(j.host ? { host: j.host } : {}), ...(Number(j.port) ? { port: Number(j.port) } : {}), ...(j.token ? { token: j.token } : {}) }))
     .catch(() => ({}))
-fileDefaults().then((fd) => chrome.storage.sync.get({ ...DEFAULTS, ...fd })).then((c) => {
+fileDefaults()
+  .then((fd) => chrome.storage.sync.get({ ...DEFAULTS, ...fd }).then((c) => {
+    for (const k of ['host', 'port', 'token']) if (fd[k] != null && c[k] === DEFAULTS[k]) c[k] = fd[k] // file beats untouched defaults
+    return c
+  }))
+  .then((c) => {
   $('host').value = c.host
   $('port').value = c.port
   $('token').value = c.token
