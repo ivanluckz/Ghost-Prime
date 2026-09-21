@@ -1,4 +1,6 @@
-import { homedir } from 'node:os'
+import { homedir, tmpdir } from 'node:os'
+import { mkdirSync, writeFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { clipboard, Notification, BrowserWindow } from 'electron'
 import OpenAI from 'openai'
 import * as browser from '../tools/browser.js'
@@ -108,6 +110,13 @@ const SYSTEM_SERVER = 'ghost-system'
 const SYSTEM_TOOL_NAMES = ['clipboard_read', 'clipboard_write', 'notify_user'].map((n) => `mcp__${SYSTEM_SERVER}__${n}`)
 
 // The user's Android phone (android-connector app over the bridge) — see, tap, swipe, type, open apps.
+// Jarvis one-shots (volume, brightness, battery, weather, YouTube, telemetry, Jarvis actions) used
+// to exist only on the Gemini path; this exposes the same dispatcher to Claude so
+// GHOST_BRAIN_MODE=claude loses nothing.
+const JARVIS_SERVER = 'ghost-jarvis'
+const JARVIS_TOOLS = ['system_volume', 'system_brightness', 'system_power', 'system_telemetry', 'weather_get', 'youtube_play', 'jarvis_action_run']
+const JARVIS_TOOL_NAMES = JARVIS_TOOLS.map((n) => `mcp__${JARVIS_SERVER}__${n}`)
+
 const PHONE_SERVER = 'ghost-phone'
 const PHONE_TOOL_NAMES = ['phone_screenshot', 'phone_ui', 'phone_tap', 'phone_swipe', 'phone_type', 'phone_key', 'phone_open_app'].map(
   (n) => `mcp__${PHONE_SERVER}__${n}`
@@ -1135,6 +1144,41 @@ async function getPhoneMcpServer() {
 }
 
 // ---------------------------------------------------------------------------
+// Jarvis MCP server — the Gemini-side toolSpecs re-exposed to Claude, executed through the same
+// dispatcher (tools/index.js) so both brains share one implementation.
+// ---------------------------------------------------------------------------
+let jarvisMcpServer = null
+async function getJarvisMcpServer() {
+  if (jarvisMcpServer) return jarvisMcpServer
+  const { createSdkMcpServer, tool } = await import('@anthropic-ai/claude-agent-sdk')
+  const { z } = await import('zod')
+  // zod shape from the OpenAI-style JSON schema each spec already carries (strings/numbers/enums/objects).
+  const shapeOf = (schema) => {
+    const out = {}
+    for (const [k, v] of Object.entries(schema?.properties || {})) {
+      let t = v.enum ? z.enum(v.enum) : v.type === 'number' || v.type === 'integer' ? z.number() : v.type === 'boolean' ? z.boolean() : v.type === 'object' ? z.record(z.string(), z.any()) : z.string()
+      if (v.description) t = t.describe(v.description)
+      out[k] = (schema.required || []).includes(k) ? t : t.optional()
+    }
+    return out
+  }
+  const specs = getToolSpecs().filter((t) => JARVIS_TOOLS.includes(t.function.name))
+  jarvisMcpServer = createSdkMcpServer({
+    name: JARVIS_SERVER,
+    version: '1.0.0',
+    tools: specs.map((spec) =>
+      tool(spec.function.name, spec.function.description, shapeOf(spec.function.parameters), async (args) => {
+        const r = await executeTool(spec.function.name, args || {})
+        const content = [{ type: 'text', text: r.output || 'Done' }]
+        if (r.image) content.unshift({ type: 'image', data: String(r.image).split(',')[1] || '', mimeType: 'image/png' })
+        return { content, isError: !!r.isError }
+      })
+    )
+  })
+  return jarvisMcpServer
+}
+
+// ---------------------------------------------------------------------------
 // System MCP server — local-machine conveniences: clipboard + desktop notifications.
 // ---------------------------------------------------------------------------
 let systemMcpServer = null
@@ -1361,11 +1405,27 @@ async function streamChatClaudeAgent({ messages, signal, onDelta, onEvent, model
   const thinkingOff = thinking ? String(thinking).toLowerCase() === 'off' : !envBool('CLAUDE_AGENT_THINKING', true)
   // Flatten any rich (image) content to text — the Agent SDK prompt is a string, so images dropped
   // into the chat are noted but not shown on the Claude brain (they DO work on the Gemini brain).
+  // The Agent SDK prompt is text, so a dropped image is written to a file and Claude looks at it
+  // with its Read tool (which renders images) — vision without the Gemini path.
+  const imgDir = join(tmpdir(), 'ghost-prime-attachments')
+  let imgSeq = 0
+  const spillImage = (url) => {
+    const m = /^data:image\/(png|jpe?g|webp|gif);base64,(.+)$/i.exec(String(url || ''))
+    if (!m) return '[image attached]'
+    try {
+      mkdirSync(imgDir, { recursive: true })
+      const file = join(imgDir, `img-${Date.now()}-${++imgSeq}.${m[1].toLowerCase().replace('jpeg', 'jpg')}`)
+      writeFileSync(file, Buffer.from(m[2], 'base64'))
+      return `[Image attached — view it with the Read tool: ${file}]`
+    } catch {
+      return '[image attached]'
+    }
+  }
   const flat = (c) =>
     typeof c === 'string'
       ? c
       : Array.isArray(c)
-        ? c.map((p) => (p?.type === 'text' ? p.text : p?.type === 'image_url' ? '[image attached]' : '')).filter(Boolean).join(' ')
+        ? c.map((p) => (p?.type === 'text' ? p.text : p?.type === 'image_url' ? spillImage(p.image_url?.url) : '')).filter(Boolean).join(' ')
         : String(c ?? '')
   const transcript = messages
     .map((m) => `${m.role === 'user' ? 'User' : 'Assistant'}: ${flat(m.content)}`)
@@ -1382,6 +1442,7 @@ async function streamChatClaudeAgent({ messages, signal, onDelta, onEvent, model
   const shellServer = await getShellMcpServer()
   const systemServer = await getSystemMcpServer()
   const phoneServer = await getPhoneMcpServer()
+  const jarvisServer = await getJarvisMcpServer()
   const filesServer = await getFilesMcpServer()
   const remindersServer = await getRemindersMcpServer()
   const screenServer = SCREEN_ENABLED ? await getScreenMcpServer() : null
@@ -1431,6 +1492,7 @@ async function streamChatClaudeAgent({ messages, signal, onDelta, onEvent, model
         ...MEMORY_TOOL_NAMES,
         ...SYSTEM_TOOL_NAMES,
         ...PHONE_TOOL_NAMES,
+        ...JARVIS_TOOL_NAMES,
         ...FILES_TOOL_NAMES,
         ...REMINDER_TOOL_NAMES,
         ...(CANVA_ENABLED ? [`mcp__${CANVA_SERVER}`] : []), // allow all Canva tools
@@ -1442,6 +1504,7 @@ async function streamChatClaudeAgent({ messages, signal, onDelta, onEvent, model
         [SHELL_SERVER]: shellServer,
         [SYSTEM_SERVER]: systemServer,
         [PHONE_SERVER]: phoneServer,
+        [JARVIS_SERVER]: jarvisServer,
         [FILES_SERVER]: filesServer,
         [REMINDER_SERVER]: remindersServer,
         // External stdio server (the @canva/cli MCP). Tools are deferred behind tool-search by
@@ -1604,6 +1667,8 @@ export function isComputerControl(text) {
 export function pickBrain(opts = {}) {
   const ov = String(opts.brain || '').toLowerCase()
   if (ov === 'gemini' || ov === 'claude') return ov
+  // GHOST_BRAIN_MODE=claude is a full override: Claude has the Jarvis tools and file-backed image
+  // viewing, so nothing needs Gemini except speech and background summaries.
   const mode = String(process.env.GHOST_BRAIN_MODE || 'auto').toLowerCase()
   if (mode === 'gemini' || mode === 'claude') return mode
   const lastUser = [...(opts.messages || [])].reverse().find((m) => m.role === 'user')
