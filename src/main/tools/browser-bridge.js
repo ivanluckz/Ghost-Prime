@@ -1,5 +1,5 @@
 import http from 'node:http'
-import { writeBridgeConfig } from './ext-config.js'
+import { writeBridgeConfig, writeBridgeConfigs } from './ext-config.js'
 import { timingSafeEqual } from 'node:crypto'
 import { watch, cpSync, mkdirSync } from 'node:fs'
 
@@ -232,6 +232,11 @@ function broadcast(cmd, args = {}, kind = null) {
 export function watchExtensionForReload(dir, deployDir = null) {
   // Mirror the project's extension/ into a shared folder so it loads from a restart-safe path.
   const mirror = () => {
+    try {
+      writeBridgeConfigs(dir, null) // the source folder may be what Chrome loaded — keep its config current too
+    } catch (e) {
+      console.warn(`[bridge] couldn't write ${dir}/bridge-config.json: ${e.message}`)
+    }
     if (!deployDir) return
     try {
       mkdirSync(deployDir, { recursive: true })

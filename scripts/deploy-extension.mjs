@@ -8,7 +8,7 @@ import { cpSync, mkdirSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import dotenv from 'dotenv'
-import { writeBridgeConfig } from '../src/main/tools/ext-config.js'
+import { writeBridgeConfigs } from '../src/main/tools/ext-config.js'
 
 dotenv.config() // so `npm run ext:deploy` picks up GHOST_EXT_DEPLOY straight from .env
 const dest = process.env.GHOST_EXT_DEPLOY
@@ -20,7 +20,7 @@ const src = join(dirname(fileURLToPath(import.meta.url)), '..', 'extension')
 try {
   mkdirSync(dest, { recursive: true })
   cpSync(src, dest, { recursive: true })
-  writeBridgeConfig(dest) // host/port/token from .env → the extension connects without typing anything
+  writeBridgeConfigs(src, dest) // host/port/token from .env → the extension connects without typing anything (source folder too, gitignored)
   console.log(`Copied extension → ${dest} (bridge-config.json written from .env)\nNow Load unpacked from there in chrome://extensions (once); it'll persist across restarts.`)
 } catch (e) {
   console.error(`Could not copy to ${dest}: ${e.message}`)

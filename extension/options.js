@@ -26,7 +26,7 @@ const fileDefaults = () =>
     .catch(() => ({}))
 fileDefaults()
   .then((fd) => chrome.storage.sync.get({ ...DEFAULTS, ...fd }).then((c) => {
-    for (const k of ['host', 'port', 'token']) if (fd[k] != null) c[k] = fd[k] // the app-written config is authoritative
+    if (!c.custom) for (const k of ['host', 'port', 'token']) if (fd[k] != null) c[k] = fd[k] // app-written config wins until the user saves here
     return c
   }))
   .then((c) => {
@@ -50,6 +50,7 @@ $('reveal').addEventListener('click', () => {
 $('save').addEventListener('click', async () => {
   await chrome.storage.sync.set({
     ...vals(),
+    custom: true, // saved on purpose: these now beat the app-written bridge-config.json
     glow: $('glow').checked,
     quietDebugger: $('quietDebugger').checked
   })

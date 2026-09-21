@@ -7,7 +7,7 @@
 // watchdog on a tab wedged by a load-time alert.
 // Run: node --import ./scripts/lib/register-electron-stub.mjs scripts/smoke-extension-e2e.mjs
 import { createServer } from 'node:http'
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdtempSync, rmSync, cpSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -23,7 +23,11 @@ process.env.GHOST_PAGE_CONTEXT = 'off'
 const bridge = await import('../src/main/tools/browser-bridge.js')
 const browser = await import('../src/main/tools/browser.js')
 
-const EXT = join(dirname(fileURLToPath(import.meta.url)), '..', 'extension')
+// Load a COPY of extension/ without bridge-config.json: that file points a real install at the live
+// app's bridge (host/port/private token), which is exactly what this test must not touch.
+const EXT_SRC = join(dirname(fileURLToPath(import.meta.url)), '..', 'extension')
+const EXT = mkdtempSync(join(tmpdir(), 'ghost-ext-src-'))
+cpSync(EXT_SRC, EXT, { recursive: true, filter: (p) => !p.endsWith('bridge-config.json') })
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 let pass = 0
 let fail = 0

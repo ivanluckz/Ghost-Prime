@@ -13,15 +13,23 @@ export function bridgeConfigForExtension(env = process.env) {
   // GHOST_BRIDGE_EXT_HOST pins what the extension dials (e.g. 127.0.0.1 when Chrome OS port
   // forwarding maps the host's localhost:8731 into the container).
   const pinned = (env.GHOST_BRIDGE_EXT_HOST || '').trim()
-  return {
-    host: pinned || (offLoopback ? 'penguin.linux.test' : '127.0.0.1'),
-    port: Number(env.GHOST_BRIDGE_PORT) || 8731,
-    token
-  }
+  const host = pinned || (offLoopback ? 'penguin.linux.test' : '127.0.0.1')
+  // `hosts` lets the extension probe candidates and keep the one that answers — the same folder
+  // may be loaded in the Linux Chrome (127.0.0.1) or the Chrome OS host browser (penguin.linux.test).
+  const hosts = [...new Set([host, '127.0.0.1', ...(offLoopback ? ['penguin.linux.test'] : [])])]
+  return { host, hosts, port: Number(env.GHOST_BRIDGE_PORT) || 8731, token }
 }
 
 export function writeBridgeConfig(deployDir, env = process.env) {
   const file = join(deployDir, 'bridge-config.json')
   writeFileSync(file, JSON.stringify(bridgeConfigForExtension(env), null, 2))
   return file
+}
+
+// The SOURCE folder can be "Load unpacked" too (that is where this user's Chrome loads it from), so
+// it needs the same file — it is gitignored there, which is what keeps the token out of the repo.
+export function writeBridgeConfigs(sourceDir, deployDir, env = process.env) {
+  const out = [writeBridgeConfig(sourceDir, env)]
+  if (deployDir) out.push(writeBridgeConfig(deployDir, env))
+  return out
 }

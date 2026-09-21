@@ -24,6 +24,7 @@ async function fileDefaults() {
     if (typeof j.host === 'string' && j.host) out.host = j.host
     if (Number(j.port)) out.port = Number(j.port)
     if (typeof j.token === 'string' && j.token) out.token = j.token
+    if (Array.isArray(j.hosts)) out.hosts = j.hosts.filter((h) => typeof h === 'string' && h)
     return out
   } catch {
     return {}
@@ -38,10 +39,27 @@ async function loadCfg() {
   } catch {
     cfg = { ...defaults }
   }
-  // The app-written config is the single source of truth when present: it mirrors the app's own
-  // .env, so a host/token change there takes effect on reload — no stale value saved in the
-  // options page can leave the two sides disagreeing.
-  for (const k of ['host', 'port', 'token']) if (fromFile[k] != null) cfg[k] = fromFile[k]
+  // The app-written config mirrors the app's .env, so it wins over whatever this extension had
+  // saved earlier (a stale default token would otherwise sit there "connected" forever) — unless
+  // the user saved the options page deliberately (`custom`), in which case their values win.
+  if (!cfg.custom) for (const k of ['host', 'port', 'token']) if (fromFile[k] != null) cfg[k] = fromFile[k]
+  // The same folder can be loaded in the Linux Chrome (bridge at 127.0.0.1) or in the Chrome OS host
+  // browser (bridge at penguin.linux.test): probe the candidates and keep the first that answers.
+  const candidates = cfg.custom ? [cfg.host] : [...new Set([cfg.host, ...(fromFile.hosts || [])].filter(Boolean))]
+  if (candidates.length > 1) {
+    for (const h of candidates) {
+      try {
+        const ctl = new AbortController()
+        const t = setTimeout(() => ctl.abort(), 1500)
+        const r = await fetch(`http://${h}:${cfg.port}/ping?token=${encodeURIComponent(cfg.token)}`, { signal: ctl.signal })
+        clearTimeout(t)
+        if (r.ok) {
+          cfg.host = h
+          break
+        }
+      } catch {}
+    }
+  }
 }
 
 // Stable per-install identity for the bridge's device registry, so two browsers / profiles running
