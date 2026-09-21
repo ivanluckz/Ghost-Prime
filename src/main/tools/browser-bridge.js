@@ -63,6 +63,12 @@ function sendJson(res, code, obj) {
 }
 
 const deviceConnected = (d) => !!d && Date.now() - d.lastPollAt < STALE_MS
+let lastRefusalLog = 0
+function logRefusal(msg) {
+  if (Date.now() - lastRefusalLog < 10000) return // a polling client retries every second — log once per 10s
+  lastRefusalLog = Date.now()
+  console.warn(`[bridge] refused: ${msg} — the token in the extension/phone must equal GHOST_BRIDGE_TOKEN in .env`)
+}
 
 // DEVICE KINDS: 'browser' (the Chrome extension) and 'phone' (the connector app). They speak
 // different command sets, so anything that routes a command should say which kind it wants — a
@@ -300,7 +306,12 @@ export function startBridge() {
     } catch {
       return sendJson(res, 400, { error: 'bad url' })
     }
-    if (!tokenMatches(url.searchParams.get('token'), token)) return sendJson(res, 403, { error: 'bad token' })
+    if (!tokenMatches(url.searchParams.get('token'), token)) {
+      // Say so in the log: a client with a stale token looks "connected" on its own side while the
+      // app never sees it — this line is the tell.
+      if (url.pathname === '/poll') logRefusal(`bad token from ${req.socket.remoteAddress || '?'} (id=${url.searchParams.get('id') || '?'})`)
+      return sendJson(res, 403, { error: 'bad token' })
+    }
     // Browser-page CSRF guard: the extension's worker/panel/options send Origin chrome-extension://…,
     // the phone app and scripts send none; any other Origin is a web page and gets refused.
     const origin = req.headers.origin
@@ -317,6 +328,7 @@ export function startBridge() {
       }
       const wasConnected = deviceConnected(d)
       d.lastPollAt = Date.now()
+      if (!wasConnected) console.log(`[bridge] device connected: ${d.name || url.searchParams.get('name') || id} (${url.searchParams.get('kind') || 'browser'}) from ${req.socket.remoteAddress || '?'}`)
       // Normalise the kind so an unknown/capitalised value can't produce a device that is neither
       // browser nor phone (invisible to every kind-aware route yet still "connected").
       const k = String(url.searchParams.get('kind') || d.kind || KIND_BROWSER).trim().toLowerCase()
