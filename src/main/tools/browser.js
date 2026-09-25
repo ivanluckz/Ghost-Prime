@@ -239,27 +239,48 @@ function resolveProfileDir() {
   return p // an explicit user-data-dir path
 }
 
+// Playwright launch errors are "<headline>\nBrowser logs:\n…\nCall log:\n…". Judge by the headline:
+// the logs can contain unrelated lines (a missing dbus socket says "No such file or directory").
+const launchHeadline = (msg) => String(msg || '').split(/\n\s*(?:Browser logs|Call log|=+ logs =+)/)[0]
+
 // The browser binary itself is missing (channel not installed, bundled Chromium not downloaded).
 const isMissingBrowser = (err) =>
-  /No such file|executable doesn'?t exist|channel .* not found|Chromium distribution|spawn .* ENOENT|is not found at/i.test(err?.message || String(err))
+  /No such file|executable doesn'?t exist|channel .* not found|Chromium distribution|spawn .* ENOENT|is not found at/i.test(launchHeadline(err?.message || String(err)))
 
-// Make launch failures actionable instead of a raw Playwright stack.
+// Make launch failures actionable instead of a raw Playwright stack. Only a real profile lock is
+// called "Chrome is already running": the generic "browser has been closed" means the browser died
+// while starting, and the real cause is in its log (no display, a missing library, out of memory).
 function enrichLaunchError(err, userDataDir) {
-  const msg = err?.message || String(err)
-  if (/ProcessSingleton|SingletonLock|already (running|in use)|Browser closed unexpectedly|Target.*has been closed|Timed out.*(WS|endpoint)|profile.*in use|cannot create.*lock/i.test(msg)) {
+  const msg = (err?.message || String(err)).replace(/\x1b\[[0-9;]*m/g, '')
+  const head = launchHeadline(msg)
+  if (/ProcessSingleton|SingletonLock|already (running|in use)|profile.*in use|Opening in existing browser session|cannot create.*lock/i.test(msg)) {
     return new Error(
       `Couldn't open Chrome with your profile (${userDataDir}) — it looks like Chrome is already ` +
-        'running. Chrome allows only one instance per profile: close all Chrome windows and try ' +
-        'again, or set GHOST_BROWSER_PROFILE=isolated to use a separate Ghost-Prime profile.'
+        'running. Chrome allows only one instance per profile: close all Chrome windows and try again' +
+        (userDataDir === ISOLATED_PROFILE ? '.' : ', or set GHOST_BROWSER_PROFILE=isolated to use a separate Ghost-Prime profile.')
     )
   }
-  if (/No such file|executable doesn'?t exist|channel .* not found|Chromium distribution|spawn .* ENOENT/i.test(msg)) {
+  if (/Missing X server|\$DISPLAY|cannot open display|without having a XServer/i.test(msg)) {
+    return new Error(
+      "Couldn't start the browser: there is no display for its window (no X server / $DISPLAY). Start Ghost-Prime " +
+        'from the Chromebook desktop, or set GHOST_BROWSER_HEADLESS=1 to run the browser without a window.'
+    )
+  }
+  if (/No such file|executable doesn'?t exist|channel .* not found|Chromium distribution|spawn .* ENOENT/i.test(head)) {
     return new Error(
       `Couldn't launch Google Chrome (channel="${CHANNEL}"). Is it installed at /usr/bin/google-chrome? ` +
         'Set GHOST_BROWSER_CHANNEL=chromium to use the bundled browser instead.'
     )
   }
-  return err
+  if (/has been closed|closed unexpectedly|Timed out/i.test(head)) {
+    // The browser died while starting: quote the first telling line of its log.
+    const cause = msg
+      .split('\n')
+      .map((l) => l.replace(/^\s*(?:\[pid=\d+\]\[err\]|<[a-z]+>|-)\s*/i, '').trim())
+      .find((l) => /error while loading shared libraries|out of memory|oom|gpu|crash|fatal|cannot|failed to/i.test(l) && !/dbus|bus\.cc/i.test(l))
+    return new Error(`The browser closed while starting${cause ? `: ${cause.slice(0, 200)}` : ''}. Try again; if it keeps happening, restart Ghost-Prime.`)
+  }
+  return new Error(head.trim())
 }
 
 // ---------------------------------------------------------------------------

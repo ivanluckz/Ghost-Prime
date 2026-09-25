@@ -106,7 +106,15 @@ async function maybeCheckIn() {
     `It is ${part}. What you know about them:\n${digestText()}\n\nWrite the check-in (or SKIP).`
   )
   const clean = (text || '').trim()
-  if (clean && clean.toUpperCase() !== 'SKIP') onMessage?.(clean, { kind: 'checkin' })
+  if (clean && !isSkip(clean)) onMessage?.(clean, { kind: 'checkin' })
+}
+
+// Did the model say "nothing to say"? It rarely answers exactly SKIP: "SKIP.", '"SKIP"', "Skip." or
+// "SKIP — nothing to add" were posted as check-ins (and read aloud). A real sentence that merely
+// starts with "Skip…" ("Skip the snacks today!") is still a check-in.
+export function isSkip(text) {
+  const t = String(text || '').trim()
+  return /^\W*skip\W*$/i.test(t) || /^\W*SKIP\b/.test(t)
 }
 
 // The 5-minute tick only RETRIES a briefing the boot attempt already started for today (failed

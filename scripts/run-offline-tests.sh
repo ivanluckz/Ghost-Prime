@@ -52,6 +52,7 @@ SUITES=(
   "browser-refs|$E|smoke-browser-refs.mjs"
   "browser-crash|$E|smoke-browser-crash.mjs"
   "browser-download|$E|smoke-browser-download.mjs"
+  "browser-launch-error|$E|smoke-browser-launch-error.mjs"
   "phone-tools|$E|smoke-phone-tools.mjs"
   "extension-e2e|$E|smoke-extension-e2e.mjs"
   "bridge||smoke-bridge.mjs"

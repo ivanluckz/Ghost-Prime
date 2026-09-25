@@ -77,5 +77,16 @@ initProactive({ onMessage: () => {} })
 stopProactive()
 check('void callback counts as delivered', (await _briefingIfNewDay()) === true && globalThis.__prefs.lastBriefingDate === today)
 
+// 6. The idle check-in is dropped when the model says it has nothing to say, however it phrases
+//    SKIP (it used to post "SKIP." as a chat message and read it aloud).
+const mod = await import('../src/main/proactive.js')
+check('isSkip is exported', typeof mod.isSkip === 'function')
+if (typeof mod.isSkip === 'function') {
+  for (const t of ['SKIP', 'SKIP.', '"SKIP"', 'Skip.', ' skip ', 'SKIP — nothing useful to add'])
+    check(`"${t}" is a skip`, mod.isSkip(t) === true)
+  for (const t of ['Want me to make a revision plan for chemistry?', 'Skipping lunch again? Remember to eat.', 'Skip the snacks and drink some water!'])
+    check(`"${t}" is a real check-in`, mod.isSkip(t) === false)
+}
+
 console.log(fail ? `smoke-proactive: ${fail} failure(s)` : 'smoke-proactive: all passed')
 process.exit(fail ? 1 : 0)
