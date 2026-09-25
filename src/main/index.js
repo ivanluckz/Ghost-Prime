@@ -113,6 +113,7 @@ let mainWindow = null
 // mounted and subscribed — which happens after the Intro screen, well after app-ready. webContents.send
 // with no listener is silently dropped, so buffer until the renderer says 'ui:ready', then flush.
 let uiReady = false
+let rendererCrashes = [] // times of recent renderer crashes (reload limit)
 const pending = []
 // Returns true when the push was sent or queued for the flush (i.e. it WILL be shown), false once the
 // window is gone for good — callers like the morning briefing use that to decide whether to count
@@ -211,9 +212,27 @@ function createWindow() {
   wc.on('did-fail-load', (_e, code, desc, url) =>
     console.error('[ghost] renderer failed to load:', code, desc, url)
   )
-  wc.on('render-process-gone', (_e, details) =>
+  // The renderer can die (out of memory on the 4 GB Chromebook while Chrome and the Claude CLI also
+  // run). It used to stay a blank window until a restart, and reminders due meanwhile were sent into
+  // the dead page and lost. Now pushes queue again (uiReady=false, flushed on the next ui:ready) and
+  // the window reloads, at most 3 times a minute so a crash loop can't spin.
+  wc.on('render-process-gone', (_e, details) => {
     console.error('[ghost] renderer process gone:', details.reason)
-  )
+    uiReady = false
+    if (details.reason === 'clean-exit') return
+    const now = Date.now()
+    rendererCrashes = rendererCrashes.filter((t) => now - t < 60_000)
+    if (rendererCrashes.length >= 3) {
+      console.error('[ghost] the window keeps crashing: not reloading again (restart Ghost-Prime)')
+      return
+    }
+    rendererCrashes.push(now)
+    setTimeout(() => {
+      if (!mainWindow || mainWindow.isDestroyed()) return
+      console.log('[ghost] reloading the window after a renderer crash')
+      mainWindow.webContents.reload()
+    }, 500)
+  })
 
   // Dev aid: screenshot the rendered UI to a PNG then quit. Gated by env — no effect normally.
   if (process.env.GHOST_CAPTURE) {

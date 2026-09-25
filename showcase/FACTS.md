@@ -266,3 +266,8 @@ Status key:
    reaches the chat after Stop, tools refuse to run, and the next question starts cleanly
    (`smoke-claude-stop` 8 checks, SDK stubbed; `scripts/check-stop-ui.mjs` 4 checks in the design
    preview). Not tried against live Claude: press Stop once during the day-before rehearsal.
+11. **Fixed overnight 25 Sep (window crash):** if the app's window crashed (for example out of memory
+   while Chrome and Claude also run on the 4 GB Chromebook), it stayed blank until a restart, and
+   reminders due meanwhile were lost. It now reloads itself (at most 3 times a minute) and
+   reminders wait for it. Checked by crashing the built app's window under Xvfb
+   (`scripts/check-renderer-crash.mjs`, 5 checks).
