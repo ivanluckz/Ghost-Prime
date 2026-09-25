@@ -64,7 +64,7 @@ Status key:
 | Quick PC controls (volume, brightness, battery, weather, play YouTube) | "What's my battery?", "turn the volume down", "weather in Kigali" | "Jarvis" one-shot tools (adapted from the third-party MARK LIII project; see §7) | **WORKING** for battery: on 25 Sep Gemini called `system_power` and reported the real battery level. Weather: `smoke-weather.mjs` **10/10** against a mocked wttr.in (added overnight 25 Sep; fixed "undefined°C" for unknown places and a raw parser error); the live service was not re-checked. The others are manual only. Volume/brightness depend on what ChromeOS lets the Linux container change. |
 | Clipboard and desktop notifications | "Copy this", "notify me when done" | Electron clipboard and Notification | **WORKING (manual)**. No test. |
 | Message it from Discord (remote control from a phone) | DMs the bot; `!mode`, `!brain`, `!stop`, `!status` | discord.js bot inside the app (online only while the app runs), locked to an allow-list of user IDs | **WORKING (manual)**. Commits `19e1089`, `e2c96d7`, `09c8480`. `smoke-run-slot.mjs` **33/33** on 25 Sep proves Discord and desktop runs queue safely without clashing. The bot itself has no automated test. |
-| Autonomy modes (Shift+Tab) | Cycles PLAN → AUTO → FULL AUTO | PLAN blocks state-changing tools; AUTO/FULL differ per brain (see §5) | **WORKING (manual)**. The plan gate is in `provider.js`; there is no dedicated test. |
+| Autonomy modes (Shift+Tab) | Cycles PLAN → AUTO → FULL AUTO | PLAN blocks state-changing tools on both brains; AUTO/FULL differ per brain (see §5) | **WORKING (manual) + automated test 25 Sep** (`smoke-plan-mode`, 29 checks, SDK stubbed). ⚠ The Claude-brain PLAN gate was **fixed overnight 25 Sep** (§5): re-run Demo 7 live the day before. |
 | Presenter (big-text) mode for a projector | Starts with `bin/ghost-showcase`, or type `/showcase` | Bar, conversation and composer scaled ~1.45× (more on wide screens), simpler bar, chat history hidden, starts in AUTO; the mic shows a big "Listening…" / "Turning your speech into text…" pill and a plain-English note when voice fails | **BUILT, NOT TRIED ON THE CHROMEBOOK** (added overnight 25 Sep). Checked in the design preview at 1366×768, 1280×800 and half-screen 683×768, and in the built Electron app under Xvfb (flag reaches the UI, badge says AUTO). Try it on the real projector before the 29th. |
 | Scheduled tasks and "Ask Ghost" from outside the app | `node scripts/run-task.mjs "…"` from cron | POST to the bridge's `/task` endpoint | **WORKING**. `smoke-bridge.mjs` **6/6** on 25 Sep covers `/task` and token enforcement. |
 | Canva design tools | "Make a poster in Canva" | Canva's MCP server wired into the Claude brain | **BUILT, NOT VERIFIED** (`0d1b3c6`). Needs Canva sign-in. **Do not claim.** |
@@ -127,8 +127,14 @@ Status key:
 ## 5. Safety and privacy facts
 
 **Autonomy modes (Shift+Tab in the app, `!mode` on Discord):**
-- **PLAN** is read-only. On the Gemini brain, any tool that is not on a fixed read-only list is
-  skipped with a notice. On the Claude brain, the SDK's `plan` permission mode applies.
+- **PLAN** is read-only. Both brains use one read-only list (`src/main/agent/plan-gate.js`): reading
+  pages, files, memory, weather, battery, volume level. Anything else is skipped with a notice.
+  **Fixed overnight 25 Sep:** before, the Claude brain only had the SDK's `plan` mode, which blocks its
+  built-in Write/Edit but still ran every always-allowed Ghost tool (file_delete, shell_run, …), so
+  PLAN relied on the model choosing not to act. Now, in PLAN mode, those tools are removed, the rest
+  are checked per call, and the prompt says PLAN is on. Tested offline with the SDK stubbed
+  (`smoke-plan-mode`, 29 checks). **Not yet run against live Claude:** do Demo 7 once the day before.
+  Reading the battery in PLAN mode now works on the Gemini brain too (it was wrongly skipped).
 - **AUTO**: on the Claude brain, the SDK's automatic permission classifier decides for each action.
   On the Gemini brain, AUTO runs tools **without asking**, exactly like FULL.
 - **FULL AUTO** runs everything with no checks.

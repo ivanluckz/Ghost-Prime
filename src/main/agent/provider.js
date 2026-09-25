@@ -14,6 +14,7 @@ import { saveMemory, recallMemories, memoryDigest, getRunContext, setRunContext 
 import { getToolSpecs, executeTool } from '../tools/index.js'
 import { envBool } from '../env.js'
 import { errorDetail } from './friendly-error.js'
+import { claudePlanOptions, isReadOnlyCall, planModeMessage } from './plan-gate.js'
 
 // Two chat brains, picked PER TURN by pickBrain() below:
 //   gemini — Google AI Studio free tier (Gemini 2.5 Flash) with full tool calling (src/main/tools)
@@ -154,6 +155,10 @@ export function claudeToolNames({ screen = SCREEN_ENABLED } = {}) {
 const SCREEN_TOOL_NAMES = ['screen_screenshot', 'screen_type', 'screen_key', 'screen_click', 'launch_app'].map(
   (n) => `mcp__${SCREEN_SERVER}__${n}`
 )
+
+// Added to the Claude brain's system prompt in PLAN mode (the base prompt says "act directly").
+const planNote = (surface) =>
+  `\n\nPLAN mode is ON (read-only, chosen by the user). You can look things up and read pages and files, but anything that changes the computer is switched off: files, the terminal, clicking or typing in the browser, reminders, memory, settings. Do not try those tools. Answer with a short numbered plan of exactly what you would do, then tell the user to ${surface === 'discord' ? 'send `!mode auto`' : 'press Shift+Tab to AUTO'} if they want it done.`
 
 // UI autonomy mode (cycled with Shift+Tab) → SDK permission mode.
 const MODE_TO_PERMISSION = { plan: 'plan', auto: 'auto', full: 'bypassPermissions' }
@@ -442,37 +447,10 @@ async function streamChatGeminiAgent({ messages, signal, onDelta, onEvent, model
         args = {}
       }
 
-      const readOnlyTools = [
-        'file_read',
-        'file_search',
-        'file_grep',
-        'phone_screenshot',
-        'phone_ui',
-        'browser_get_page',
-        'browser_get_text',
-        'browser_find',
-        'browser_screenshot',
-        'browser_list_tabs',
-        'browser_list_browsers',
-        'browser_wait_for',
-        'browser_wait_for_navigation',
-        'browser_read_pages',
-        'undo_list',
-        'memory_recall',
-        'system_telemetry',
-        'weather_get',
-        'reminder_list',
-        'clipboard_read',
-        'web_search',
-        'web_fetch'
-      ]
-
-      if (mode === 'plan' && !readOnlyTools.includes(name)) {
-        // How to leave plan mode differs per surface: the desktop cycles with Shift+Tab, Discord
-        // has the !mode command — the model relays this text to the user, so it must be right.
-        const howToSwitch =
-          getRunContext()?.surface === 'discord' ? 'Switch with `!mode auto` or `!mode full` to execute.' : 'Switch to AUTO or FULL mode with Shift+Tab to execute.'
-        const planMsg = `[PLAN MODE: Skipping execution of state-changing tool "${name}". ${howToSwitch}]`
+      // PLAN mode: only read-only calls run (one list for both brains, see plan-gate.js). The model
+      // relays the skip message, which names the way to switch on this surface.
+      if (mode === 'plan' && !isReadOnlyCall(name, args)) {
+        const planMsg = planModeMessage(name, getRunContext()?.surface)
         onEvent?.({ kind: 'tool_use', id: callId, name, input: args })
         onEvent?.({ kind: 'tool_result', id: callId, output: planMsg, isError: true, durationMs: 1 })
         conversation.push({
@@ -1523,6 +1501,8 @@ async function streamChatClaudeAgent({ messages, signal, onDelta, onEvent, model
     }
   }
 
+  const planMode = permissionMode === 'plan'
+  const toolNames = claudeToolNames({ screen: !!screenServer })
   const response = query({
     prompt: pageContext + transcript,
     options: {
@@ -1532,14 +1512,16 @@ async function streamChatClaudeAgent({ messages, signal, onDelta, onEvent, model
       systemPrompt:
         buildSystemPrompt('claude') +
         memoryContext +
-        (CANVA_ENABLED
+        (CANVA_ENABLED && !planMode
           ? '\n\nCANVA: Canva tools (mcp__canva__*) are available — use them for Canva design/app tasks. The first call may require the user to authorize Canva.'
-          : ''),
+          : '') +
+        (planMode ? planNote(getRunContext()?.surface) : ''),
       includePartialMessages: true,
-      allowedTools: [
-        ...claudeToolNames({ screen: !!screenServer }),
-        ...(CANVA_ENABLED ? [`mcp__${CANVA_SERVER}`] : []) // allow all Canva tools
-      ],
+      // PLAN mode: only read-only tools are auto-approved, the rest are removed or checked per call
+      // (plan-gate.js). The SDK's own plan mode only blocks its built-in Write/Edit.
+      ...(planMode
+        ? claudePlanOptions(toolNames, { surface: getRunContext()?.surface, extraDisallowed: CANVA_ENABLED ? [`mcp__${CANVA_SERVER}`] : [] })
+        : { allowedTools: [...toolNames, ...(CANVA_ENABLED ? [`mcp__${CANVA_SERVER}`] : [])] }), // `mcp__canva` = all Canva tools
       mcpServers: {
         [BROWSER_SERVER]: browserServer,
         [MEMORY_SERVER]: memoryServer,
