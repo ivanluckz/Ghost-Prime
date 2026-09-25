@@ -1,1 +1,834 @@
-/* shell — design pass overrides/additions (loaded after styles.css). */
+/* shell — design pass overrides/additions (loaded after styles.css).
+   The frame around the conversation: command bar (top), chat history (left), composer (bottom).
+   Goals: one aligned frame (shared bar height, gutters and surface), one icon language, calm motion.
+   Cheap on Crostini: these panels drop backdrop-filter (the aurora behind them animates, so a blur
+   would be recomputed every frame) and nothing here animates filters or box-shadows. Accent tints
+   use color-mix() on --cyan so the Settings accent picker still recolours them. */
+
+:root {
+  /* Topbar outer height. Side-panel heads are this minus their panel's 1px top border, so the
+     three horizontal rules under the bar / history head / activity head meet in one line. */
+  --shell-bar-h: 52px;
+  --shell-ctl-h: 32px; /* every control cluster in the bar and the history head */
+  /* Opaque-feeling glass: the same recipe as the activity panel, so all three read as one set. */
+  --shell-surface: linear-gradient(160deg, rgba(255, 255, 255, 0.075), rgba(255, 255, 255, 0.015) 55%),
+    rgba(9, 13, 27, 0.8);
+  --shell-line: rgba(255, 255, 255, 0.08);
+  --shell-hover: rgba(255, 255, 255, 0.07);
+  --shell-on: color-mix(in srgb, var(--cyan) 14%, transparent);
+  --shell-on-brd: color-mix(in srgb, var(--cyan) 34%, transparent);
+  --shell-ink-meta: #7c8ab0; /* timestamps/counts: brighter than --ink-faint so they pass on glass */
+  --shell-guide: #2b3552; /* tree lines — opaque so overlapping segments never double up */
+  --shell-drop: 0 12px 32px -14px rgba(0, 0, 0, 0.7);
+}
+
+/* ---------- Layout ---------- */
+/* The side panels were height:100% PLUS 24px of vertical margin, so .main overflowed and the clipped
+   .window-shell scrolled 12px: the top gutter vanished and the panels' bottom corners were cut off.
+   Letting flex stretch them (stretch honours margins) keeps a true 12px gutter all round. */
+.main > aside {
+  height: auto;
+}
+
+/* ============================================================
+   COMMAND BAR
+   ============================================================ */
+.topbar {
+  height: var(--shell-bar-h);
+  padding: 0 10px 0 18px;
+  gap: 16px;
+  background: var(--shell-surface);
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  box-shadow: var(--inset-hi), var(--shell-drop);
+}
+
+/* One quiet static rail along the bottom edge replaces the two animated streaks. */
+.topbar::after {
+  display: none;
+}
+.topbar::before {
+  left: 18px;
+  right: 18px;
+  height: 1px;
+  opacity: 0.55;
+  filter: none;
+  animation: none;
+  background: linear-gradient(90deg, transparent, var(--cyan) 30%, var(--violet) 70%, transparent);
+  background-size: 100% 100%;
+}
+
+.topbar-drag {
+  gap: 0;
+}
+
+/* Wordmark: plain ink + one accent, no animated gradient or glow filter. */
+.brand {
+  font-size: 13.5px;
+  font-weight: 700;
+  letter-spacing: 0.2em;
+  color: var(--ink);
+  background: none;
+  -webkit-background-clip: border-box;
+  background-clip: border-box;
+  animation: none;
+  filter: none;
+}
+.brand-word {
+  color: var(--ink);
+}
+.brand-accent {
+  display: inline;
+  background: linear-gradient(90deg, var(--cyan), var(--violet));
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+/* The mark is a static faceted diamond — it echoes the 3D Core instead of spinning beside it. */
+.brand-mark {
+  width: 11px;
+  height: 11px;
+  margin: 0 13px 0 2px;
+  border-radius: 2.5px;
+  transform: rotate(45deg);
+  background: linear-gradient(135deg, var(--cyan) 0%, var(--cyan) 48%, var(--violet) 52%, var(--magenta));
+  box-shadow:
+    0 0 0 1px rgba(255, 255, 255, 0.18),
+    0 0 12px color-mix(in srgb, var(--cyan) 45%, transparent);
+  animation: none;
+}
+
+.brand-version {
+  margin-left: 12px;
+  padding: 3px 8px;
+  border-color: var(--shell-line);
+  background: transparent;
+  color: var(--ink-faint);
+}
+
+/* Live status: sits with the identity, divided from it by a hairline. */
+.status {
+  flex: 0 0 auto;
+  margin-left: 14px;
+  padding-left: 14px;
+  height: 16px;
+  gap: 8px;
+  border-left: 1px solid var(--shell-line);
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  color: var(--ink-dim);
+  white-space: nowrap;
+}
+.status::before {
+  flex: 0 0 auto;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--mint) 18%, transparent);
+}
+.status-busy {
+  color: var(--cyan);
+  text-shadow: none;
+}
+.status-busy::before {
+  background: var(--cyan);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--cyan) 20%, transparent);
+}
+
+.topbar-right {
+  gap: 10px;
+}
+
+/* Mode pill: tinted by the mode itself, so FULL AUTO reads as "live wire" at a glance. */
+.topbar-right .mode {
+  --mode-c: var(--error);
+  height: var(--shell-ctl-h);
+  padding: 0 12px 0 11px;
+  gap: 8px;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  color: var(--ink);
+  border-color: color-mix(in srgb, var(--mode-c) 36%, transparent);
+  background: color-mix(in srgb, var(--mode-c) 8%, transparent);
+  box-shadow: none;
+}
+.topbar-right .mode-plan {
+  --mode-c: var(--blue);
+}
+.topbar-right .mode-auto {
+  --mode-c: var(--mint);
+}
+.mode-dot {
+  width: 7px;
+  height: 7px;
+  animation: none;
+  box-shadow: 0 0 0 3px color-mix(in srgb, currentColor 22%, transparent);
+}
+.mode-label-short {
+  display: none;
+}
+.mode-hint {
+  display: inline;
+  margin-left: 2px;
+  padding-left: 9px;
+  border-left: 1px solid var(--shell-line);
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0;
+  color: var(--ink-faint);
+  opacity: 1;
+}
+
+/* Tool strip: one capsule of borderless icon buttons (sound | view | settings) instead of six
+   separately bordered tiles. "On" = accent tint + accent icon; off = dim icon. */
+.tb-tools {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  height: var(--shell-ctl-h);
+  padding: 2px;
+  border: 1px solid var(--shell-line);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.025);
+}
+.tb-sep {
+  flex: 0 0 auto;
+  width: 1px;
+  height: 14px;
+  margin: 0 3px;
+  background: var(--shell-line);
+}
+.topbar-right .tb-tools .voice-toggle {
+  position: relative;
+  width: 30px;
+  height: 26px;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  box-shadow: none;
+  color: var(--ink-dim);
+  transition: background-color 140ms var(--ease-out), color 140ms var(--ease-out);
+}
+.topbar-right .tb-tools .voice-toggle:hover:not(:disabled) {
+  transform: none;
+  background: var(--shell-hover);
+  color: var(--ink);
+}
+.topbar-right .tb-tools .voice-toggle.on {
+  background: var(--shell-on);
+  color: var(--cyan);
+  box-shadow: inset 0 0 0 1px var(--shell-on-brd);
+}
+.topbar-right .tb-tools .voice-toggle.on:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--cyan) 20%, transparent);
+  color: var(--cyan);
+}
+.topbar-right .tb-tools .voice-toggle:disabled {
+  opacity: 0.35;
+}
+.topbar-right .tb-tools .voice-toggle:focus-visible {
+  box-shadow: var(--ring);
+}
+/* Live-terminal badge: a mint dot cut out of the button with a ring in the bar's colour. */
+.term-badge {
+  top: 3px;
+  right: 4px;
+  width: 6px;
+  height: 6px;
+  box-shadow: 0 0 0 2px #0d1222;
+}
+
+/* Window controls: borderless, set apart from the tools by a hairline. */
+.win-controls {
+  gap: 2px;
+  margin-left: 0;
+}
+.win-controls::before {
+  content: '';
+  width: 1px;
+  height: 18px;
+  margin-right: 8px;
+  background: var(--shell-line);
+}
+.win-btn {
+  width: 30px;
+  height: 30px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--ink-dim);
+  transition: background-color 140ms var(--ease-out), color 140ms var(--ease-out);
+}
+.win-btn:hover {
+  transform: none;
+  box-shadow: none;
+  background: var(--shell-hover);
+  color: var(--ink);
+}
+.win-close:hover {
+  background: #d9425c;
+  color: #fff;
+  box-shadow: none;
+}
+
+/* Narrower panes shed the least useful pieces first, and never clip the window controls. The base
+   sheet's own steps are restated here so this file owns the whole sequence. */
+@container pane (max-width: 900px) {
+  .brand-version { display: none; }
+  .mode-hint { display: none; }
+}
+@container pane (max-width: 820px) {
+  .topbar { padding: 0 8px 0 16px; gap: 12px; }
+  .status { font-size: 10.5px; gap: 8px; }
+}
+@container pane (max-width: 700px) {
+  .status-label { display: none; }
+  .status { margin-left: 12px; padding-left: 12px; gap: 0; }
+  .brand-accent { display: inline; }
+}
+@container pane (max-width: 600px) {
+  .brand-accent { display: none; }
+  .topbar-right { gap: 6px; }
+  .mode-label { display: none; }
+  .mode-label-short { display: inline; }
+}
+@container pane (max-width: 500px) {
+  .brand-word { display: none; }
+  .brand-mark { margin-right: 0; }
+  .status { margin-left: 10px; padding-left: 10px; }
+  .topbar { padding-left: 14px; gap: 8px; }
+  .topbar-right .mode { padding: 0 9px; }
+  .topbar-right .tb-tools .voice-toggle { width: 26px; }
+  .tb-sep { margin: 0 1px; }
+  .win-btn { width: 26px; }
+  .win-controls::before { margin-right: 4px; }
+}
+
+/* ============================================================
+   HISTORY SIDEBAR
+   ============================================================ */
+.sidebar {
+  background: var(--shell-surface);
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  box-shadow: var(--inset-hi), var(--shell-drop);
+}
+/* Seam toward the console: kept, but static and quieter. */
+.sidebar::after {
+  top: 10%;
+  bottom: 10%;
+  opacity: 0.5;
+  box-shadow: none;
+}
+
+.sidebar-head {
+  height: calc(var(--shell-bar-h) - 1px);
+  padding: 0 10px;
+  gap: 8px;
+  border-bottom-color: var(--shell-line);
+}
+.sidebar.collapsed .sidebar-head {
+  justify-content: center;
+  padding: 0;
+}
+
+.sidebar-collapse {
+  width: var(--shell-ctl-h);
+  height: var(--shell-ctl-h);
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border-radius: 10px;
+  border-color: var(--shell-line);
+  background: transparent;
+  color: var(--ink-dim);
+  transition: background-color 140ms var(--ease-out), color 140ms var(--ease-out);
+}
+.sidebar-collapse:hover {
+  border-color: var(--glass-brd);
+  background: var(--shell-hover);
+  color: var(--ink);
+  box-shadow: none;
+}
+
+/* New chat: an accent-tinted command row (icon · label · shortcut), not a gradient slab. */
+.btn-new {
+  height: var(--shell-ctl-h);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 0 7px 0 10px;
+  border-radius: 10px;
+  border-color: var(--shell-on-brd);
+  background: var(--shell-on);
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 600;
+  box-shadow: none;
+  transition: background-color 140ms var(--ease-out), border-color 140ms var(--ease-out);
+}
+.btn-new svg {
+  flex: 0 0 auto;
+  color: var(--cyan);
+}
+.btn-new-label {
+  flex: 1;
+  min-width: 0;
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.btn-new-kbd {
+  flex: 0 0 auto;
+  padding: 3px 5px;
+  border-radius: 5px;
+  border: 1px solid var(--shell-line);
+  background: rgba(0, 0, 0, 0.22);
+  font: 500 10px/1 var(--mono);
+  color: var(--ink-dim);
+}
+.btn-new:hover {
+  transform: none;
+  box-shadow: none;
+  border-color: color-mix(in srgb, var(--cyan) 55%, transparent);
+  background: color-mix(in srgb, var(--cyan) 20%, transparent);
+}
+
+.sidebar-list {
+  padding: 8px;
+  gap: 2px;
+}
+
+/* ---------- Rows ---------- */
+/* The row (not just the title button) is the hover/active surface, so the disclosure caret and the
+   hover actions sit inside the highlight. */
+.session-row {
+  align-items: center;
+  border-radius: 10px;
+  transition: background-color 120ms var(--ease-out);
+}
+.session-row:hover {
+  background: rgba(255, 255, 255, 0.045);
+}
+.session-row.is-active {
+  background: color-mix(in srgb, var(--cyan) 10%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--cyan) 26%, transparent);
+}
+/* Active rail on the row's left edge (replaces the glowing rail inside the button). */
+.session-row.is-active::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 11px;
+  bottom: 11px;
+  width: 2px;
+  border-radius: 0 2px 2px 0;
+  background: var(--cyan);
+  pointer-events: none;
+}
+.session-item.active::before {
+  display: none;
+}
+
+.session-row .session-item,
+.session-item {
+  gap: 2px;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+}
+.session-item:hover,
+.session-item.active {
+  background: transparent;
+  border-color: transparent;
+}
+/* Room for the hover actions is only taken while they show, so titles use the full width. */
+.session-row:hover .session-item,
+.session-row:focus-within .session-item {
+  padding-right: 64px;
+}
+.session-row:has(.confirming) .session-item {
+  padding-right: 100px;
+}
+
+.session-title {
+  font-size: 13px;
+  line-height: 1.35;
+  color: #c8d2ec;
+}
+.session-row:hover .session-title,
+.session-item.active .session-title {
+  color: var(--ink);
+}
+.session-item.active .session-title {
+  font-weight: 600;
+}
+.session-meta {
+  font-size: var(--text-xs);
+  line-height: 1.3;
+  color: var(--shell-ink-meta);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.session-kids {
+  color: var(--ink-dim);
+}
+
+/* Hover actions (branch · delete) share one right-aligned cluster. */
+.session-actions {
+  position: absolute;
+  right: 6px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  opacity: 0;
+  transition: opacity 120ms var(--ease-out);
+}
+.session-row:hover .session-actions,
+.session-row:focus-within .session-actions,
+.session-actions:has(.confirming) {
+  opacity: 1;
+}
+.session-actions > .session-sub,
+.session-actions > .session-del {
+  position: static;
+  transform: none;
+  opacity: 1;
+  width: 26px;
+  height: 26px;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  color: var(--ink-dim);
+  transition: background-color 120ms var(--ease-out), color 120ms var(--ease-out);
+}
+.session-actions > .session-sub:hover {
+  color: var(--cyan);
+  background: var(--shell-on);
+  border-color: transparent;
+}
+.session-actions > .session-del:hover {
+  color: var(--error);
+  background: rgba(255, 93, 122, 0.14);
+  border-color: transparent;
+  box-shadow: none;
+}
+.session-actions > .session-del.confirming {
+  width: auto;
+  padding: 0 9px;
+  color: #fff;
+  background: #c93a55;
+  border-color: transparent;
+}
+
+/* ---------- Sub-chat tree ---------- */
+.session-twisty,
+.session-twisty-spacer {
+  width: 20px;
+}
+.session-twisty {
+  height: 26px;
+  margin-left: 2px;
+  padding: 0;
+  border-radius: 6px;
+  color: var(--ink-faint);
+  transition: color 120ms var(--ease-out), background-color 120ms var(--ease-out);
+}
+.session-twisty:hover {
+  color: var(--ink);
+  background: var(--shell-hover);
+}
+.session-twisty svg {
+  transition: transform 160ms var(--ease-out);
+}
+.session-twisty.open svg {
+  transform: rotate(90deg);
+}
+.session-twisty-spacer {
+  margin-left: 2px;
+}
+
+/* Children hang off a guide line dropped from the parent's caret (caret centre = 2px + 20px/2). */
+.session-children {
+  position: relative;
+  margin-left: 12px;
+  padding-left: 4px;
+}
+/* Deep trees stop indenting after four levels so titles keep their room. */
+.session-children .session-children .session-children .session-children {
+  margin-left: 0;
+}
+.session-children > .session-branch {
+  position: relative;
+}
+/* A continuous guide past every child that has a sibling below it… */
+.session-children > .session-branch:not(:last-child)::before {
+  content: '';
+  position: absolute;
+  left: -4px;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: var(--shell-guide);
+  pointer-events: none;
+}
+/* …and a rounded elbow into each child row, starting up under the parent's caret. */
+.session-children > .session-branch > .session-row::before {
+  content: '';
+  position: absolute;
+  left: -4px;
+  top: -8px;
+  height: calc(50% + 8px);
+  width: 11px;
+  border-left: 1px solid var(--shell-guide);
+  border-bottom: 1px solid var(--shell-guide);
+  border-bottom-left-radius: 7px;
+  pointer-events: none;
+}
+.session-children .session-row.is-active::after {
+  left: 1px;
+}
+
+/* ---------- Empty history ---------- */
+.sidebar-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 36px 16px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--shell-ink-meta);
+}
+.sidebar-empty svg {
+  margin-bottom: 6px;
+  color: var(--ink-faint);
+}
+.sidebar-empty-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink-dim);
+}
+.sidebar-empty-sub {
+  max-width: 24ch;
+}
+
+/* Smaller windows: a slimmer history column leaves the conversation its room. */
+@media (max-width: 1100px) {
+  .sidebar { flex-basis: 232px; width: 232px; }
+}
+@media (max-width: 960px) {
+  .sidebar { flex-basis: 212px; width: 212px; }
+  .btn-new-kbd { display: none; }
+}
+/* Re-assert the collapsed width over the breakpoints above. */
+.sidebar.collapsed {
+  flex-basis: 56px;
+  width: 56px;
+}
+
+/* ============================================================
+   COMPOSER
+   ============================================================ */
+/* Horizontal padding is left to the base sheet so the composer lines up with the message column
+   (same clamp(), same narrow-pane step); only the old extra 14px side margin goes. */
+.chat-input {
+  margin: 0;
+  padding-top: 8px;
+  padding-bottom: 12px;
+  gap: 0;
+  row-gap: 8px;
+}
+
+.composer {
+  flex: 1 1 100%;
+  min-width: 0;
+  display: flex;
+  align-items: flex-end;
+  gap: 4px;
+  padding: 5px;
+  border-radius: 16px;
+  border: 1px solid var(--glass-brd);
+  background: var(--shell-surface);
+  box-shadow: var(--inset-hi), var(--shell-drop);
+  transition: border-color 160ms var(--ease-out), box-shadow 160ms var(--ease-out);
+}
+.composer:focus-within {
+  border-color: color-mix(in srgb, var(--cyan) 55%, transparent);
+  box-shadow:
+    var(--inset-hi),
+    0 0 0 3px color-mix(in srgb, var(--cyan) 13%, transparent),
+    var(--shell-drop);
+}
+
+/* The textarea becomes a borderless field inside the box. Its 1px transparent border stays: the
+   auto-grow code in ChatInput adds 2px for it. 40px = one 21px line + padding + border. */
+.chat-input .composer textarea {
+  flex: 1;
+  min-width: 0;
+  min-height: 40px;
+  max-height: 190px;
+  padding: 8.5px 8px;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  background: transparent;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  box-shadow: none;
+  font-size: var(--text-md);
+  line-height: 1.5;
+}
+.chat-input .composer textarea:focus {
+  border-color: transparent;
+  box-shadow: none;
+}
+.chat-input .composer textarea::placeholder {
+  color: #6f7da3;
+}
+
+.composer .btn {
+  height: 40px;
+  align-self: flex-end;
+  border-radius: 11px;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+.composer .btn::before {
+  display: none; /* no sheen sweep — the composer stays still while you type */
+}
+
+.composer .btn-mic {
+  flex: 0 0 auto;
+  width: 40px;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  overflow: visible;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  color: var(--ink-dim);
+  transition: background-color 140ms var(--ease-out), color 140ms var(--ease-out);
+}
+.composer .btn-mic:not(:disabled):hover {
+  background: var(--shell-hover);
+  color: var(--ink);
+  box-shadow: none;
+}
+.composer .btn-mic.mic-listening {
+  animation: none;
+  color: #ffb3c1;
+  background: rgba(255, 93, 122, 0.16);
+  box-shadow: inset 0 0 0 1px rgba(255, 93, 122, 0.6);
+}
+/* Listening ping: a ring that scales out (transform/opacity only). */
+.composer .btn-mic.mic-listening::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  border: 1.5px solid var(--error);
+  pointer-events: none;
+  animation: shell-ping 1.2s var(--ease-out) infinite;
+}
+@keyframes shell-ping {
+  from {
+    transform: scale(1);
+    opacity: 0.7;
+  }
+  to {
+    transform: scale(1.35);
+    opacity: 0;
+  }
+}
+.mic-dots {
+  font-size: 16px;
+  line-height: 1;
+}
+
+.composer .btn-send {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 15px 0 12px;
+  border: 0;
+  background: linear-gradient(180deg, color-mix(in srgb, var(--cyan) 82%, #fff), var(--cyan));
+  color: #03141b;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  text-shadow: none;
+  box-shadow: 0 6px 18px -8px color-mix(in srgb, var(--cyan) 75%, transparent);
+  transition: filter 0s, transform 140ms var(--ease-out), background-color 140ms var(--ease-out);
+}
+.composer .btn-send:not(:disabled):hover {
+  transform: translateY(-1px);
+  box-shadow: 0 8px 20px -8px color-mix(in srgb, var(--cyan) 85%, transparent);
+}
+.composer .btn-send:not(:disabled):active {
+  transform: none;
+}
+/* Nothing to send: a neutral key, not a washed-out gradient. */
+.composer .btn-send:disabled {
+  opacity: 1;
+  cursor: default;
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--ink-faint);
+  box-shadow: inset 0 0 0 1px var(--shell-line);
+}
+
+/* Key hints under the box. */
+.input-hint {
+  gap: 18px;
+  color: var(--shell-ink-meta);
+}
+.input-hint kbd {
+  border-color: var(--shell-line);
+  background: rgba(255, 255, 255, 0.04);
+}
+@container pane (max-width: 820px) {
+  .input-hint span:nth-child(4) { display: none; }
+}
+@container pane (max-width: 560px) {
+  .input-hint { gap: 12px; }
+  .composer .btn-send { padding: 0; width: 40px; justify-content: center; }
+  .btn-send-label { display: none; }
+}
+
+/* Slash-command menu: same surface as the composer, aligned to its edges. */
+.cmd-menu {
+  left: clamp(16px, 9%, 120px);
+  right: clamp(16px, 9%, 120px);
+  bottom: calc(100% - 4px);
+  padding: 5px;
+  border-color: var(--glass-brd);
+  background: rgba(9, 13, 27, 0.97);
+  box-shadow: var(--inset-hi), var(--shadow);
+}
+@container pane (max-width: 820px) {
+  .cmd-menu { left: 18px; right: 18px; }
+}
+.cmd-item:hover {
+  background: var(--shell-on);
+}
+
+/* Attachments + drop notes line up with the composer too. */
+.attach-row {
+  padding: 0 clamp(16px, 9%, 120px) 2px;
+}
+.drop-note {
+  margin: 0 clamp(16px, 9%, 120px) 4px;
+}
+@container pane (max-width: 820px) {
+  .attach-row { padding-left: 18px; padding-right: 18px; }
+  .drop-note { margin-left: 18px; margin-right: 18px; }
+}

@@ -1,0 +1,440 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ghost-Prime Pitch Card</title>
+<meta name="description" content="Printable A4 presenter card: the 30-second Ghost-Prime pitch and the seven most important judge answers, matched to showcase/FACTS.md.">
+<style>
+  @font-face {
+    font-family: "Inter";
+    src: url("fonts/inter-latin-var.woff2") format("woff2");
+    font-weight: 100 900;
+    font-style: normal;
+    font-display: block;
+  }
+  @font-face {
+    font-family: "JetBrains Mono";
+    src: url("fonts/jetbrains-mono-latin-var.woff2") format("woff2");
+    font-weight: 100 800;
+    font-style: normal;
+    font-display: block;
+  }
+
+  :root {
+    --paper: #ffffff;
+    --ink: #0d1326;
+    --ink-2: #3c4763;
+    --ink-3: #66708a;
+    --rule: #d9deea;
+    --wash: #f2f5fb;
+    --accent: #007a94;        /* print-safe version of the app's cyan */
+    --accent-wash: #e6f5f8;
+    --violet: #5a3fd6;
+    --warn: #a8213a;
+    --warn-wash: #fbecef;
+    --desk: #e9ecf3;          /* screen-only background around the sheets */
+    --shadow: 0 1px 2px rgba(13, 19, 38, .08), 0 8px 28px rgba(13, 19, 38, .10);
+    --sans: "Inter", system-ui, "Segoe UI", Roboto, Arial, sans-serif;
+    --mono: "JetBrains Mono", ui-monospace, Menlo, Consolas, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) { --desk: #10141f; --shadow: 0 8px 28px rgba(0, 0, 0, .5); }
+  }
+  :root[data-theme="dark"] { --desk: #10141f; --shadow: 0 8px 28px rgba(0, 0, 0, .5); }
+
+  @page { size: A4 portrait; margin: 0; }
+
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    background: var(--desk);
+    color: var(--ink);
+    font-family: var(--sans);
+    font-feature-settings: "cv11", "ss01";
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  .sheet {
+    width: 210mm;
+    height: 297mm;
+    margin: 24px auto;
+    padding: 13mm 15mm 11mm;
+    background: var(--paper);
+    box-shadow: var(--shadow);
+    display: flex;
+    flex-direction: column;
+    position: relative;
+    overflow: hidden;
+  }
+  .sheet::before {             /* brand bar: the app's cyan-to-violet glow, toned for paper */
+    content: "";
+    position: absolute;
+    inset: 0 0 auto 0;
+    height: 3.2mm;
+    background: linear-gradient(90deg, #00b8d4 0%, #3d8bf2 45%, #7c5cff 100%);
+  }
+
+  /* ---------- header ---------- */
+  .top {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 6mm;
+    font-family: var(--mono);
+    font-size: 8.5pt;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+    color: var(--ink-3);
+    padding-top: 1mm;
+  }
+  .top b { color: var(--ink); font-weight: 700; letter-spacing: .14em; }
+  .who {
+    margin-top: 2.2mm;
+    font-size: 10.5pt;
+    color: var(--ink-2);
+  }
+  .who span { font-weight: 600; color: var(--ink); }
+
+  h1 {
+    margin: 7mm 0 1.2mm;
+    font-size: 27pt;
+    line-height: 1.05;
+    font-weight: 800;
+    letter-spacing: -.02em;
+  }
+  .sub {
+    margin: 0 0 6mm;
+    font-size: 10.5pt;
+    color: var(--ink-3);
+  }
+
+  /* ---------- page 1: the pitch ---------- */
+  .pitch p {
+    margin: 0 0 4.2mm;
+    font-size: 19.5pt;
+    line-height: 1.38;
+    letter-spacing: -.005em;
+    text-wrap: pretty;
+  }
+  .pitch strong { font-weight: 700; }
+  .ph {                                   /* [YOUR NAME]-style placeholders */
+    font-weight: 700;
+    color: var(--violet);
+  }
+  .cue {
+    display: inline-block;
+    font-family: var(--mono);
+    font-size: .52em;
+    font-weight: 600;
+    letter-spacing: .1em;
+    text-transform: uppercase;
+    color: var(--accent);
+    background: var(--accent-wash);
+    border: 1px solid #b5e0e8;
+    border-radius: 99px;
+    padding: .18em .7em .14em;
+    vertical-align: .32em;
+    margin-left: .15em;
+  }
+
+  .short {
+    margin: 2mm 0 0;
+    padding: 3.6mm 4.5mm;
+    background: var(--wash);
+    border-radius: 2.5mm;
+    font-size: 12.5pt;
+    line-height: 1.45;
+  }
+  .label {
+    display: block;
+    font-family: var(--mono);
+    font-size: 8pt;
+    font-weight: 600;
+    letter-spacing: .12em;
+    text-transform: uppercase;
+    color: var(--ink-3);
+    margin-bottom: 1.4mm;
+  }
+
+  .lower {
+    margin-top: auto;
+    display: grid;
+    grid-template-columns: 1.08fr 1fr;
+    gap: 5mm;
+  }
+  .box {
+    border: 1px solid var(--rule);
+    border-radius: 2.5mm;
+    padding: 3.6mm 4.5mm 3.2mm;
+  }
+  .box.never { border-color: #efc3cc; background: var(--warn-wash); }
+  .box.never .label { color: var(--warn); }
+  .box ul { margin: 0; padding: 0; list-style: none; }
+  .box li {
+    font-size: 10.5pt;
+    line-height: 1.38;
+    padding-left: 4.2mm;
+    position: relative;
+    margin-bottom: 1.1mm;
+  }
+  .box.never li::before {
+    content: "\00d7";
+    position: absolute;
+    left: 0;
+    top: -.05em;
+    font-weight: 800;
+    color: var(--warn);
+  }
+  .box li em { font-style: normal; color: var(--ink-3); }
+
+  .nums {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 2.4mm 3mm;
+  }
+  .num b {
+    display: block;
+    font-size: 17pt;
+    font-weight: 800;
+    line-height: 1.05;
+    letter-spacing: -.02em;
+    color: var(--accent);
+    font-variant-numeric: tabular-nums;
+  }
+  .num span { font-size: 9pt; line-height: 1.3; color: var(--ink-2); }
+
+  .setup {
+    margin-top: 4mm;
+    font-size: 10pt;
+    color: var(--ink-2);
+    line-height: 1.4;
+  }
+  .setup b { color: var(--ink); }
+
+  .foot {
+    margin-top: 4mm;
+    padding-top: 2.6mm;
+    border-top: 1px solid var(--rule);
+    display: flex;
+    justify-content: space-between;
+    gap: 4mm;
+    font-family: var(--mono);
+    font-size: 7.5pt;
+    letter-spacing: .04em;
+    color: var(--ink-3);
+  }
+
+  /* ---------- page 2: answers ---------- */
+  .back h1 { font-size: 23pt; margin: 5.5mm 0 1mm; }
+  .back .sub { margin-bottom: 3.6mm; }
+  .qa { display: flex; flex-direction: column; gap: 2.2mm; }
+  .q {
+    display: grid;
+    grid-template-columns: 9mm 1fr;
+    column-gap: 2mm;
+    padding-bottom: 2.2mm;
+    border-bottom: 1px solid var(--rule);
+  }
+  .q:last-child { border-bottom: 0; padding-bottom: 0; }
+  .q .n {
+    font-family: var(--mono);
+    font-size: 15pt;
+    font-weight: 700;
+    color: var(--accent);
+    line-height: 1.15;
+  }
+  .q h2 {
+    margin: 0 0 1mm;
+    font-size: 13.8pt;
+    line-height: 1.2;
+    font-weight: 750;
+    letter-spacing: -.01em;
+  }
+  .q p {
+    margin: 0;
+    font-size: 11.6pt;
+    line-height: 1.37;
+    color: var(--ink);
+    text-wrap: pretty;
+  }
+  .q p strong { font-weight: 680; }
+  .q .note {
+    margin-top: 1mm;
+    font-size: 9.5pt;
+    color: var(--ink-3);
+  }
+  .rule-strip {
+    margin-top: auto;
+    flex-shrink: 0;
+    padding: 3.4mm 4.5mm;
+    border-radius: 2.5mm;
+    background: var(--accent-wash);
+    font-size: 11pt;
+    line-height: 1.4;
+  }
+  .rule-strip b { color: var(--accent); }
+
+  /* ---------- screen only: fit narrow screens ---------- */
+  @media screen and (max-width: 840px) {
+    .sheet {
+      width: auto;
+      height: auto;
+      margin: 16px;
+      padding: 28px 16px 16px;
+    }
+    .pitch p { font-size: 20px; }
+    h1 { font-size: 28px; }
+    .lower { grid-template-columns: 1fr; }
+    .top, .foot { flex-direction: column; gap: 4px; }
+    .q p { font-size: 16px; }
+    .q h2 { font-size: 18px; }
+  }
+
+  @media print {
+    body { background: #fff; }
+    .sheet { margin: 0; box-shadow: none; break-after: page; }
+    .sheet:last-child { break-after: auto; }
+  }
+</style>
+</head>
+<body>
+
+<!-- ======================= FRONT: THE 30-SECOND PITCH ======================= -->
+<section class="sheet" aria-label="Front: the 30-second pitch">
+  <div class="top">
+    <span><b>Ghost-Prime</b> &middot; pitch card &middot; front</span>
+    <span>Rwanda Innovation Showcase &middot; 29 Sep 2026</span>
+  </div>
+  <div class="who">Presenter: <span class="ph">[YOUR NAME]</span> &middot; <span class="ph">[YOUR CLASS]</span> &middot; <span class="ph">[SCHOOL]</span></div>
+
+  <h1>The 30-second pitch</h1>
+  <p class="sub">About 80 words. Smile, slow down, and point at the screen.</p>
+
+  <div class="pitch">
+    <p>Hi! I&rsquo;m <span class="ph">[YOUR NAME]</span>. <span class="cue">pause</span></p>
+    <p>This is <strong>Ghost-Prime</strong>, a voice assistant I built on a <strong>school Chromebook</strong>.</p>
+    <p>You just talk to it, and <strong>it does the job for you</strong>. It opens websites, clicks and types, tidies files, sets reminders, and reads the answers out loud. <span class="cue">pause</span></p>
+    <p>It&rsquo;s for anyone who finds computers hard: slow typers, people who can&rsquo;t read small screens, and busy teachers. There are <strong>no pay-per-use bills</strong>.</p>
+    <p>Want to see it? Tell me a topic, and <strong>I&rsquo;ll ask it to look it up on Wikipedia</strong>.</p>
+  </div>
+
+  <div class="short">
+    <span class="label">10-second version, for a crowd</span>
+    &ldquo;This is Ghost-Prime. You talk, and it uses the computer for you. I built it on a school Chromebook. Want to see?&rdquo;
+  </div>
+
+  <div class="lower">
+    <div class="box never">
+      <span class="label">Never claim</span>
+      <ul>
+        <li>It controls a real phone. <em>Tested only on a simulated phone.</em></li>
+        <li>&ldquo;Just say hey Ghost.&rdquo; <em>Wake word not installed.</em></li>
+        <li>&ldquo;It always asks first.&rdquo; <em>Nothing asks yet.</em></li>
+        <li>&ldquo;Completely free&rdquo; or &ldquo;works offline.&rdquo;</li>
+        <li>It speaks Kinyarwanda, or controls any app.</li>
+        <li>&ldquo;It&rsquo;s the first&rdquo; or &ldquo;the only one.&rdquo;</li>
+      </ul>
+    </div>
+    <div class="box">
+      <span class="label">Numbers you can quote</span>
+      <div class="nums">
+        <div class="num"><b>3 months</b><span>17 June to 25 Sep 2026</span></div>
+        <div class="num"><b>58</b><span>saved versions (commits)</span></div>
+        <div class="num"><b>64</b><span>tools the Claude brain can use</span></div>
+        <div class="num"><b>244 / 0</b><span>checks passed / failed, 25 Sep</span></div>
+      </div>
+    </div>
+  </div>
+
+  <p class="setup"><b>At the table:</b> mode <b>AUTO</b> (never FULL AUTO) &middot; Site access <b>strict</b>: only <b>wikipedia.org</b> and <b>example.com</b> &middot; <b>you</b> speak visitors&rsquo; requests into the mic (voice goes to Google, and the free tier has a daily limit) &middot; children <b>watch</b>; the AI services are for over-18s (qa.md, question 16).</p>
+
+  <div class="foot">
+    <span>Every line matches showcase/FACTS.md, checked 25 Sep 2026</span>
+    <span>Answers overleaf &middot; all 22 in qa.md</span>
+  </div>
+</section>
+
+<!-- ======================= BACK: THE SIX KEY ANSWERS ======================= -->
+<section class="sheet back" aria-label="Back: the seven most important answers">
+  <div class="top">
+    <span><b>Ghost-Prime</b> &middot; pitch card &middot; back</span>
+    <span>Say 2&ndash;3 sentences, then stop</span>
+  </div>
+
+  <h1>Top 7 questions</h1>
+  <p class="sub">Short, true answers. Full versions and follow-ups are in qa.md.</p>
+
+  <div class="qa">
+    <div class="q">
+      <div class="n">1</div>
+      <div>
+        <h2>Chromebooks already have dictation and read-aloud. What&rsquo;s new?</h2>
+        <p>Those tools <strong>type your words or read text aloud</strong>, but you still do every step. With Ghost-Prime, <strong>one sentence becomes a whole job</strong>: it opens the site, searches, reads and explains, or moves files and can undo that. It runs on a <strong>school Chromebook</strong> with no pay-per-use bill, <strong>shows every step</strong>, and works <strong>alongside</strong> those tools, not instead of them.</p>
+        <p class="note">Tech judges often ask this first. Never say &ldquo;the first&rdquo; or &ldquo;the only one&rdquo;.</p>
+      </div>
+    </div>
+
+    <div class="q">
+      <div class="n">2</div>
+      <div>
+        <h2>How much does it cost to run?</h2>
+        <p><strong>No pay-per-use bills and no servers.</strong> Voice and quick answers use Google&rsquo;s <strong>Gemini free tier</strong>. Harder jobs use <strong>Claude</strong>, on a subscription I already had. If its allowance runs out, it <strong>pauses and never charges extra</strong>. It can also run on the free tier alone (weaker at long jobs; still testing).</p>
+      </div>
+    </div>
+
+    <div class="q">
+      <div class="n">3</div>
+      <div>
+        <h2>Is it safe? What if it does something wrong?</h2>
+        <p>It can make mistakes, like any AI. So <strong>every step shows live</strong>, file changes have <strong>undo</strong> (&ldquo;undo that&rdquo;), and I can <strong>limit which websites</strong> it opens. <strong>PLAN</strong> mode only looks and never changes anything, and I don&rsquo;t use FULL AUTO in public. <strong>Not yet:</strong> an &ldquo;Are you sure?&rdquo; pop-up before big actions. That&rsquo;s next.</p>
+      </div>
+    </div>
+
+    <div class="q">
+      <div class="n">4</div>
+      <div>
+        <h2>Is it private?</h2>
+        <p><strong>Chats, memories and files stay on the Chromebook.</strong> Requests go to <strong>Anthropic</strong> or <strong>Google</strong>. <strong>Voice recordings go to Google</strong> unless I use offline voice, and the free tier can use them to improve Google&rsquo;s products. So: <strong>don&rsquo;t tell it anything private.</strong></p>
+      </div>
+    </div>
+
+    <div class="q">
+      <div class="n">5</div>
+      <div>
+        <h2>What did YOU build?</h2>
+        <p>Google and Anthropic make the <strong>AI brains</strong>. I built <strong>everything around them</strong>: the app, voice, browser, terminal and file tools, memory, reminders, the brain-picker and the phone app. I <strong>designed it, decided what it should do, tested it</strong>, and used an <strong>AI coding assistant (Claude Code)</strong> to write much of the code.</p>
+        <p class="note">Credit: quick controls adapted from MARK LIII JARVIS by FatihMakes. Edit to match exactly what you did.</p>
+      </div>
+    </div>
+
+    <div class="q">
+      <div class="n">6</div>
+      <div>
+        <h2>Can it work in Kinyarwanda?</h2>
+        <p><strong>Not yet.</strong> The app is in English, the offline speech model is English-only, and the offline voice has no Kinyarwanda. Typing in Kinyarwanda might partly work, but <strong>I haven&rsquo;t tested it</strong>. It needs Kinyarwanda <strong>speech recognition</strong>, a Kinyarwanda <strong>voice</strong>, a <strong>translated app</strong>, and Kinyarwanda <strong>keywords</strong> for the brain-picker.</p>
+      </div>
+    </div>
+
+    <div class="q">
+      <div class="n">7</div>
+      <div>
+        <h2>Does the phone part work?</h2>
+        <p><strong>Built, not finished.</strong> The Android app lets Ghost-Prime see the phone screen as a numbered list and tap, swipe and type. It <strong>passes all its tests on a simulated phone</strong>, but I <strong>haven&rsquo;t run it on my real Galaxy A05 yet</strong>. That&rsquo;s my next step.</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="rule-strip">
+    <b>Don&rsquo;t know?</b> &ldquo;Good question. I haven&rsquo;t tested that yet.&rdquo; Then write it down.
+  </div>
+
+  <div class="foot">
+    <span>Every line matches showcase/FACTS.md, checked 25 Sep 2026</span>
+    <span><span class="ph">[YOUR NAME]</span> &middot; <span class="ph">[SCHOOL]</span></span>
+  </div>
+</section>
+
+</body>
+</html>

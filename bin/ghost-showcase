@@ -1,0 +1,80 @@
+#!/usr/bin/env bash
+# Ghost-Prime: SHOWCASE launcher (Rwanda Innovation Showcase, 29 Sep 2026).
+#
+#   bin/ghost-showcase             start Ghost-Prime in the foreground with showcase-safe settings
+#   bin/ghost-showcase --restart   quit a running Ghost-Prime first, then start (one command at the booth)
+#
+# It exports safe overrides BEFORE launch. The app loads .env with dotenv, which never overwrites a
+# variable that is already set, so these beat .env without editing it (.env stays off the screen).
+# Then it hands over to `bin/ghost-prime -f` (display/Ozone setup, first-run build, logs to this
+# terminal; Ctrl+C quits).
+#
+# The browser is ALWAYS Ghost-Prime's own Playwright window (GHOST_BROWSER_BACKEND=playwright): the
+# tested path (showcase/FACTS.md §8.2). The .env value (`extension`) and the app's `auto` default are
+# both ignored here: the school blocks developer-mode extensions, and auto-switching is not a tested path.
+#
+# Pass-through: anything else you set on the command line still wins over .env too, e.g.
+#   GHOST_VOICE_PROVIDER=local bin/ghost-showcase        offline voice (Whisper + espeak-ng)
+#   GHOST_BRAIN_MODE=auto bin/ghost-showcase             battery/weather/reminders go to Gemini
+#   GHOST_BROWSER_PROFILE=default bin/ghost-showcase     drive your own Linux Chrome profile instead
+#   GHOST_BROWSER_BACKEND=extension bin/ghost-showcase   bonus B2 ONLY, and only if the extension was
+#                                                        tested end to end on the real Chromebook first
+# See showcase/demo/DEMO.md for the full runbook.
+set -uo pipefail
+
+GHOST_DIR="$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)"
+ELECTRON="$GHOST_DIR/node_modules/electron/dist/electron"
+is_running() { pgrep -f "$ELECTRON \\." >/dev/null 2>&1; }
+
+if [ "${1:-}" = "--restart" ]; then
+  shift
+  if is_running; then
+    echo "ghost-showcase: quitting the running Ghost-Prime first…"
+    "$GHOST_DIR/bin/ghost-prime" stop
+    for _ in $(seq 1 20); do
+      is_running || break
+      sleep 0.5
+    done
+  fi
+fi
+
+# A second launch only brings the already-open window to the front (single-instance lock), so the
+# settings below would silently NOT apply. Refuse instead of pretending.
+if is_running; then
+  echo "ghost-showcase: Ghost-Prime is already running WITHOUT the showcase settings." >&2
+  echo "  Quit it and start again in one step:   bin/ghost-showcase --restart" >&2
+  exit 1
+fi
+
+# --- showcase-safe overrides (these beat .env) -------------------------------------------------
+# Browser: Ghost-Prime's own visible browser (Playwright), the tested path (FACTS §8.2). Not `auto`:
+# the switch to the extension is untested, and the school blocks developer-mode extensions anyway.
+export GHOST_BROWSER_BACKEND="${GHOST_BROWSER_BACKEND:-playwright}"
+# Only matters if someone overrides the backend: never spawn an extra Chrome window and wait ~12 s
+# for an extension that will not come.
+export GHOST_BROWSER_AUTOLAUNCH=0
+# Drive a separate, clean browser profile: no personal tabs, accounts or bookmarks on the projector,
+# and no clash with a Linux Chrome window that is already open.
+export GHOST_BROWSER_PROFILE="${GHOST_BROWSER_PROFILE:-isolated}"
+# No surprise morning briefings / idle check-ins in the middle of the pitch.
+export GHOST_PROACTIVE=0
+# No background Gemini summary calls when you switch chats (saves free-tier quota for speech).
+export GHOST_AUTO_SUMMARIZE=0
+# Canva tools off (not verified; also saves tokens and start-up time).
+export GHOST_CANVA=0
+# Discord relay off: nobody can send it tasks from outside during the demo.
+export DISCORD_BOT_TOKEN=
+# Presenter flag for the UI (big-text presenter mode will read this later).
+export GHOST_SHOWCASE=1
+
+echo "ghost-showcase: starting Ghost-Prime with showcase settings"
+echo "  browser=$GHOST_BROWSER_BACKEND (profile: $GHOST_BROWSER_PROFILE, no auto-launch) · proactive=off · auto-summarize=off · canva=off · discord=off"
+if [ "$GHOST_BROWSER_BACKEND" != playwright ]; then
+  echo "  WARNING: browser=$GHOST_BROWSER_BACKEND is NOT the tested path. For the demos, open a new terminal" >&2
+  echo "           tab and run plain 'bin/ghost-showcase --restart' (it uses browser=playwright)." >&2
+fi
+[ -n "${GHOST_VOICE_PROVIDER:-}" ] && echo "  voice provider (from your command line): $GHOST_VOICE_PROVIDER"
+[ -n "${GHOST_BRAIN_MODE:-}" ] && echo "  brain mode (from your command line): $GHOST_BRAIN_MODE"
+echo "  remember: Shift+Tab to AUTO, then /voice on   (checklist: showcase/demo/DEMO.md)"
+
+exec "$GHOST_DIR/bin/ghost-prime" -f "$@"

@@ -1,1 +1,536 @@
-/* chat — design pass overrides/additions (loaded after styles.css). */
+/* chat — design pass overrides/additions (loaded after styles.css).
+   The message thread: column + rhythm, role row, bubbles, error and system notes, the empty state,
+   and the Markdown blocks. Bubbles repaint on every streamed token, so nothing here uses
+   backdrop-filter, blur or animated shadows — flat translucent fills and static edges only. */
+
+:root {
+  --chat-col: 800px; /* thread column on wide panes: ~80ch of body text */
+  --chat-fill: rgba(9, 13, 26, 0.55); /* dark glass base: mutes the aurora behind the text */
+  --chat-sheen: linear-gradient(180deg, rgba(255, 255, 255, 0.045), rgba(255, 255, 255, 0.018));
+  --chat-brd: rgba(255, 255, 255, 0.1);
+  --chat-edge: inset 0 1px 0 0 rgba(255, 255, 255, 0.06); /* quiet top light, not --inset-hi */
+  --chat-code: #060a14; /* opaque so the code scroll-hint covers can match it exactly */
+}
+
+/* ---------- Thread column + rhythm ---------- */
+.messages {
+  gap: 12px;
+  padding-top: 24px;
+}
+
+/* Wide panes centre a readable column instead of letting lines run ~130 characters. Narrow panes
+   keep the base gutter (the base sheet's own container query). */
+@container pane (min-width: 821px) {
+  .messages {
+    padding-inline: max(clamp(16px, 9%, 120px), calc((100% - var(--chat-col)) / 2));
+  }
+}
+
+/* A user message opens a new turn: extra air above it groups each ask with its answer. */
+.messages > .msg-user:not(:first-child) {
+  margin-top: 12px;
+}
+
+/* ---------- Role row ---------- */
+.msg {
+  gap: 6px;
+}
+
+.msg-role {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 18px;
+  padding: 0 2px;
+  font-size: var(--text-xs);
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  color: var(--ink-dim);
+}
+
+/* Brand mark: same conic gem as the top bar, minus the glow. */
+.msg-assistant .msg-role::before {
+  width: 10px;
+  height: 10px;
+  margin: 0;
+  border-radius: 3px;
+  box-shadow: none;
+}
+
+/* The right-aligned cyan bubble already says "you"; keep the word for screen readers only,
+   unless a parallel-task track dot needs the row. */
+.msg-user:not(.msg-tracked) .msg-role {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.msg-user .msg-role {
+  justify-content: flex-end;
+}
+
+.msg-role .brain-tag {
+  margin-left: 0;
+  padding: 2px 6px;
+  border-radius: 5px;
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  line-height: 1.2;
+}
+
+.msg-role .brain-gemini {
+  border-color: rgba(122, 162, 247, 0.28);
+}
+
+.msg-role .brain-claude {
+  border-color: rgba(255, 150, 90, 0.28);
+}
+
+/* ---------- Bubbles ---------- */
+.msg-content {
+  padding: 12px 16px;
+  border-radius: var(--r-md);
+  border-color: var(--chat-brd);
+  background: var(--chat-sheen), var(--chat-fill);
+  box-shadow: var(--chat-edge);
+  line-height: 1.65;
+  overflow-wrap: anywhere; /* long URLs/paths wrap instead of widening the bubble */
+}
+
+.msg-assistant .msg-content {
+  border-top-left-radius: 4px;
+}
+
+/* One accent per reply: a static cyan->violet rail sitting on the left border. */
+.msg-assistant .msg-content::before {
+  left: -1px;
+  top: 12px;
+  bottom: 12px;
+  width: 2px;
+  background: linear-gradient(180deg, var(--cyan), var(--violet));
+  box-shadow: none;
+}
+
+.msg-user .msg-content {
+  max-width: min(80%, 600px);
+  border-top-right-radius: 4px;
+  border-color: rgba(0, 230, 255, 0.26);
+  background: linear-gradient(180deg, rgba(0, 230, 255, 0.13), rgba(0, 230, 255, 0.07)), var(--chat-fill);
+  color: #f4fbff;
+}
+
+/* Live reply: a steady cyan edge plus a blinking caret after the newest text. Static border, and
+   the caret animates opacity only, so streaming stays cheap. */
+.msg-assistant.msg-streaming .msg-content {
+  border-color: rgba(0, 230, 255, 0.32);
+  box-shadow: var(--chat-edge);
+}
+
+.msg-streaming .md > .md-p:last-child::after,
+.msg-streaming .md > .md-h:last-child::after,
+.msg-streaming .md > :is(.md-ul, .md-ol):last-child > li:last-child::after {
+  content: '';
+  display: inline-block;
+  width: 7px;
+  height: 1.05em;
+  margin-left: 3px;
+  vertical-align: -0.16em;
+  border-radius: 1px;
+  background: var(--cyan);
+  animation: chat-caret 1.05s steps(1) infinite;
+}
+
+@keyframes chat-caret {
+  50% {
+    opacity: 0;
+  }
+}
+
+/* Parallel-task tracks: the accent is set inline on .msg; carry it onto the bubble's left edge
+   (the bubble's own border colour used to win, so the track colour never showed). */
+.msg-tracked .msg-content {
+  border-left-color: inherit;
+}
+
+.msg-tracked .msg-content::before {
+  display: none;
+}
+
+/* ---------- Failed replies ---------- */
+.msg-error .msg-content {
+  color: var(--ink);
+  border-color: rgba(255, 93, 122, 0.34);
+  background: linear-gradient(180deg, rgba(255, 93, 122, 0.08), rgba(255, 93, 122, 0.035)), var(--chat-fill);
+}
+
+.msg-error .msg-content::before {
+  background: var(--error);
+}
+
+.msg-failure {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  color: #ffd7df;
+}
+
+/* A partial answer above the failure gets a hairline divider. */
+.md + .msg-failure {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid rgba(255, 93, 122, 0.2);
+}
+
+.msg-failure-icon {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  margin-top: 2px; /* centre on the first line of text (14px x 1.65) */
+  border-radius: 50%;
+  border: 1px solid rgba(255, 93, 122, 0.55);
+  background: rgba(255, 93, 122, 0.16);
+  color: var(--error);
+  font: 700 11px/1 var(--font-sans);
+}
+
+.msg-failure-text {
+  min-width: 0;
+}
+
+/* ---------- System notes (/command confirmations, reminders, queue notices) ---------- */
+/* A centred timeline marker with hairlines either side, not a bubble: it's the app talking. */
+.sys-note {
+  align-self: stretch;
+  max-width: none;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 2px 0;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  font-size: var(--text-sm);
+  line-height: 1.5;
+  color: var(--ink-dim);
+  text-align: center;
+}
+
+.sys-note::before,
+.sys-note::after {
+  content: '';
+  flex: 1 1 24px;
+  min-width: 24px;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.12));
+}
+
+.sys-note::after {
+  background: linear-gradient(270deg, transparent, rgba(255, 255, 255, 0.12));
+}
+
+/* ---------- Empty state ---------- */
+.empty {
+  width: 100%;
+  padding-bottom: 12px;
+}
+
+.hero-core {
+  margin-bottom: 4px;
+}
+
+.empty-title {
+  margin-bottom: 8px;
+  font-size: clamp(22px, 4cqi, 28px);
+  font-weight: 750;
+  letter-spacing: -0.025em;
+  text-shadow: none;
+}
+
+.empty-sub {
+  margin-bottom: 24px;
+  max-width: 44ch;
+  line-height: 1.5;
+}
+
+/* Two columns of suggestion cards when there's room, one when the pane is narrow. */
+.empty-examples {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 8px;
+  max-width: 560px;
+}
+
+/* Flat glass: no backdrop-filter (it re-blurred the animated aurora every frame), no inset
+   accent stripe, no sweep beam — the glyph tile is the single accent. */
+.example-chip {
+  gap: 12px;
+  min-height: 56px;
+  padding: 10px 14px 10px 12px;
+  border-radius: 12px;
+  border-color: rgba(255, 255, 255, 0.09);
+  background: var(--chat-sheen), var(--chat-fill);
+  box-shadow: var(--chat-edge);
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  font-size: var(--text-sm);
+  line-height: 1.45;
+  color: var(--ink);
+}
+
+.example-chip::after {
+  display: none;
+}
+
+.chip-glyph {
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  font-size: 12px;
+  background: rgba(0, 230, 255, 0.08);
+  border-color: rgba(0, 230, 255, 0.2);
+  box-shadow: none;
+}
+
+.chip-go {
+  font-weight: 600;
+}
+
+.example-chip:hover {
+  transform: translateY(-1px);
+  border-color: rgba(0, 230, 255, 0.36);
+  background: linear-gradient(180deg, rgba(0, 230, 255, 0.07), rgba(0, 230, 255, 0.025)), var(--chat-fill);
+  box-shadow: var(--chat-edge);
+}
+
+.example-chip:hover .chip-glyph {
+  color: var(--cyan);
+  border-color: rgba(0, 230, 255, 0.42);
+  background: rgba(0, 230, 255, 0.14);
+  box-shadow: none;
+}
+
+.example-chip:focus-visible {
+  box-shadow: var(--ring);
+}
+
+/* ---------- Markdown ---------- */
+.md {
+  gap: 10px;
+  min-width: 0;
+}
+
+.md-p {
+  line-height: 1.65;
+}
+
+.md strong {
+  font-weight: 650;
+  color: #fff;
+}
+
+/* Headings: a compact scale anchored on the 14px body (h3..h6 tags, level classes 1-4). */
+.md-h {
+  margin: 6px 0 -2px;
+  line-height: 1.3;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+  color: #fff;
+}
+
+.md > .md-h:first-child {
+  margin-top: 0;
+}
+
+.md-h1 {
+  font-size: 17px;
+}
+
+.md-h2 {
+  font-size: var(--text-lg);
+}
+
+.md-h3 {
+  font-size: var(--text-md);
+}
+
+.md-h4 {
+  font-size: var(--text-xs);
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--ink-dim);
+}
+
+/* Lists */
+.md-ul,
+.md-ol {
+  padding-left: 22px;
+  gap: 6px;
+  line-height: 1.6;
+}
+
+.md-ul > li,
+.md-ol > li {
+  padding-left: 4px;
+}
+
+.md-ul > li::marker {
+  color: rgba(0, 230, 255, 0.75);
+}
+
+.md-ol > li::marker {
+  color: var(--ink-dim);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.md li > .md-ul,
+.md li > .md-ol {
+  margin-top: 6px;
+}
+
+.md li .md-ul {
+  list-style-type: circle;
+}
+
+/* Inline code, links, rules */
+.md-code {
+  font-size: 0.86em;
+  padding: 1px 5px;
+  border-radius: 5px;
+  border-color: rgba(255, 255, 255, 0.1);
+  background: rgba(2, 5, 12, 0.55);
+}
+
+.md a {
+  border-bottom-color: rgba(0, 230, 255, 0.35);
+  transition: border-color 140ms var(--ease-out);
+}
+
+.md a:hover {
+  text-shadow: none;
+  border-bottom-color: var(--cyan);
+}
+
+.md a:focus-visible {
+  outline: none;
+  border-radius: 3px;
+  box-shadow: var(--ring);
+}
+
+.md-hr {
+  width: 100%;
+  height: 1px;
+  margin: 4px 0;
+  border: 0;
+  background: var(--hairline);
+}
+
+/* Blockquote: violet (links and code own cyan), holds any blocks. */
+.md-quote {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 8px 14px;
+  border-left: 2px solid rgba(124, 92, 255, 0.75);
+  border-radius: 0 var(--r-sm) var(--r-sm) 0;
+  background: rgba(124, 92, 255, 0.08);
+  color: #c7d1ee;
+}
+
+/* Tables: scroll sideways inside their own frame rather than widening the bubble. */
+.md-table-wrap {
+  max-width: 100%;
+  overflow-x: auto;
+  border: 1px solid var(--chat-brd);
+  border-radius: var(--r-sm);
+  background: rgba(2, 5, 12, 0.4);
+}
+
+.md-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+  line-height: 1.45;
+  white-space: normal;
+  overflow-wrap: normal;
+  font-variant-numeric: tabular-nums;
+}
+
+.md-table th,
+.md-table td {
+  padding: 8px 12px;
+  text-align: left;
+  vertical-align: top;
+}
+
+.md-table th {
+  font-size: var(--text-xs);
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-dim);
+  background: rgba(255, 255, 255, 0.04);
+  border-bottom: 1px solid var(--chat-brd);
+  white-space: nowrap;
+}
+
+.md-table td {
+  border-bottom: 1px solid var(--hairline);
+}
+
+.md-table tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.md-table tbody tr:hover td {
+  background: rgba(255, 255, 255, 0.025);
+}
+
+/* Fenced code */
+.md-codeblock {
+  min-width: 0;
+  max-width: 100%;
+  border-color: var(--chat-brd);
+  border-radius: var(--r-sm);
+  background: var(--chat-code);
+  box-shadow: none;
+}
+
+.md-codebar {
+  padding: 4px 6px 4px 12px;
+  border-bottom-color: var(--hairline);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.md-copy {
+  padding: 2px 8px;
+  border-radius: 6px;
+  font-size: var(--text-xs);
+}
+
+/* Long lines scroll sideways. The cover layers ("local") travel with the code and hide the cyan
+   edge hints ("scroll") until there is more code off that side — a pure-CSS overflow cue. */
+.md-codeblock .md-pre {
+  padding: 12px 14px;
+  overflow-x: auto;
+  white-space: pre;
+  background:
+    linear-gradient(90deg, var(--chat-code) 40%, rgba(6, 10, 20, 0)) left / 28px 100% no-repeat local,
+    linear-gradient(270deg, var(--chat-code) 40%, rgba(6, 10, 20, 0)) right / 28px 100% no-repeat local,
+    linear-gradient(90deg, rgba(0, 230, 255, 0.16), rgba(0, 230, 255, 0)) left / 16px 100% no-repeat scroll,
+    linear-gradient(270deg, rgba(0, 230, 255, 0.16), rgba(0, 230, 255, 0)) right / 16px 100% no-repeat scroll,
+    var(--chat-code);
+}
+
+.md-pre code {
+  font-size: var(--text-sm);
+  line-height: 1.6;
+}

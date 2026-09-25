@@ -1,1 +1,573 @@
-/* activity — design pass overrides/additions (loaded after styles.css). */
+/* activity — design pass overrides/additions (loaded after styles.css).
+   Mission Control, right-hand panel. One "live" accent (cyan) marks everything that is in flight, so
+   idle vs busy reads at a glance; idle slots keep the busy rows' footprint so nothing jumps.
+   Cheap on Crostini: no backdrop blur, no animated filters/shadows — only transform/opacity move. */
+
+:root {
+  --act-pad: 16px;
+  --act-line: rgba(255, 255, 255, 0.08);
+  --act-surface: rgba(255, 255, 255, 0.035);
+  /* Between --ink-dim and --ink-faint: secondary copy that must still read on the dark glass. */
+  --act-ink-soft: #8391b9;
+  --act-live: var(--cyan);
+  --act-live-soft: rgba(0, 230, 255, 0.1);
+  --act-live-brd: rgba(0, 230, 255, 0.4);
+}
+
+/* ---------- Panel material ---------- */
+/* No backdrop-filter here (unlike the sidebar): the panel hosts the gem canvas, which repaints every
+   frame, and a feed that updates while streaming — re-blurring the backdrop under Crostini's software
+   compositor would cost a full-panel blur per frame. A denser tint gives the same glass read. */
+.activity {
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  background:
+    linear-gradient(160deg, rgba(255, 255, 255, 0.075), rgba(255, 255, 255, 0.015) 55%),
+    rgba(9, 13, 27, 0.8);
+}
+
+/* ---------- Header ---------- */
+.activity-head {
+  gap: 10px;
+  padding: 14px 12px 14px var(--act-pad);
+  border-bottom-color: var(--act-line);
+}
+.activity-title {
+  letter-spacing: 0.2em;
+  color: var(--ink);
+}
+/* Model · mode is metadata, not a second title: a quiet mono chip. */
+.act-config {
+  padding: 3px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--act-line);
+  background: var(--act-surface);
+  font: 500 10.5px/1.2 var(--mono);
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--act-ink-soft);
+  max-width: 130px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.act-close {
+  border-radius: 8px;
+  transition: color 150ms var(--ease-out), border-color 150ms var(--ease-out), background 150ms var(--ease-out);
+}
+
+/* Header status dot: a hollow ring at rest, a solid dot with an expanding ping while busy.
+   The ping scales a ring (transform/opacity) instead of animating box-shadow. */
+.act-pulse {
+  position: relative;
+  background: transparent;
+  box-shadow: inset 0 0 0 1.5px var(--ink-faint);
+}
+.act-pulse.live {
+  background: var(--act-live);
+  box-shadow: 0 0 8px rgba(0, 230, 255, 0.55);
+  animation: none;
+}
+.act-pulse.live::after,
+.act-browser.active .act-browser-dot::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  border: 1.5px solid var(--act-live);
+  animation: act-ping 1.6s var(--ease-out) infinite;
+}
+@keyframes act-ping {
+  from { transform: scale(1); opacity: 0.8; }
+  to { transform: scale(2.6); opacity: 0; }
+}
+
+/* ---------- Body rhythm ---------- */
+.activity-body {
+  padding: 12px var(--act-pad) 20px;
+  gap: 20px;
+}
+.act-section {
+  gap: 8px;
+}
+/* Section labels end in a fading hairline so each block has a clear top edge without boxing it. */
+.act-label {
+  min-height: 18px;
+  gap: 8px;
+  color: var(--ink-faint);
+}
+.act-label::after {
+  content: '';
+  order: 1;
+  flex: 1;
+  height: 1px;
+  background: linear-gradient(90deg, var(--act-line), transparent);
+}
+/* Counts are passive information — neutral, not accent-coloured. */
+.act-count {
+  min-width: 18px;
+  padding: 0 5px;
+  border-color: var(--act-line);
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--ink-dim);
+  font: 600 10px/1 var(--mono);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Idle placeholders take the same footprint as the rows they stand in for (dashed = empty slot). */
+.act-slot {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 42px;
+  padding: 0 12px;
+  border-radius: var(--r-sm);
+  border: 1px dashed rgba(255, 255, 255, 0.11);
+  font-size: var(--text-sm);
+  color: var(--ink-faint);
+}
+.act-slot::before {
+  content: '';
+  flex: 0 0 auto;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  box-shadow: inset 0 0 0 1.5px currentColor;
+}
+
+/* ---------- Gem block ---------- */
+/* The canvas's own drop-shadow filter re-runs on every rendered frame; here a static radial glow and a
+   "pedestal" ellipse sit behind the gem instead, which paint once. */
+.act-core {
+  position: relative;
+  padding: 4px 0 0;
+}
+.act-core .ghost-core {
+  position: relative;
+  z-index: 1;
+}
+.act-core .ghost-core canvas {
+  filter: none;
+}
+.act-core::before,
+.act-core::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  pointer-events: none;
+  transition: opacity 400ms var(--ease-out);
+}
+.act-core::before {
+  top: 4px;
+  width: 200px;
+  height: 132px;
+  transform: translateX(-50%);
+  background: radial-gradient(closest-side, rgba(0, 230, 255, 0.14), rgba(124, 92, 255, 0.05) 60%, transparent);
+  opacity: 0.8;
+}
+.act-core::after {
+  top: 120px;
+  width: 132px;
+  height: 20px;
+  transform: translateX(-50%);
+  border-radius: 50%;
+  background: radial-gradient(closest-side, rgba(0, 230, 255, 0.3), rgba(0, 230, 255, 0.06) 70%, transparent);
+  opacity: 0.55;
+}
+.act-core.live::before,
+.act-core.live::after {
+  opacity: 1;
+}
+
+/* Status caption under the gem: a small pill so idle vs busy is legible, not a whisper. */
+.act-core-cap {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  width: max-content;
+  margin: 4px auto 0;
+  padding: 5px 11px 5px 9px;
+  border-radius: 999px;
+  border: 1px solid var(--act-line);
+  background: rgba(255, 255, 255, 0.03);
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1;
+  letter-spacing: 0.18em;
+  color: var(--ink-faint);
+  transition: color 200ms ease, border-color 200ms ease, background 200ms ease;
+}
+.act-core-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  box-shadow: inset 0 0 0 1.5px currentColor;
+}
+.act-core.live .act-core-cap {
+  color: var(--act-live);
+  border-color: var(--act-live-brd);
+  background: var(--act-live-soft);
+}
+.act-core.live .act-core-dot {
+  background: currentColor;
+  animation: act-blink 1.2s ease-in-out infinite;
+}
+@keyframes act-blink {
+  50% { opacity: 0.3; }
+}
+
+/* ---------- Browser card ---------- */
+.act-browser {
+  gap: 12px;
+  padding: 10px 12px;
+  border-color: var(--act-line);
+  background: var(--act-surface);
+  transition: border-color 180ms ease, background 180ms ease;
+}
+.act-browser.active {
+  border-color: var(--act-live-brd);
+  background: linear-gradient(135deg, rgba(0, 230, 255, 0.11), rgba(0, 230, 255, 0.03));
+  box-shadow: none;
+}
+/* The dot becomes an icon tile; its centre dot (::before) lights up and pings while acting. */
+.act-browser-dot,
+.act-browser.active .act-browser-dot {
+  position: relative;
+  width: 30px;
+  height: 30px;
+  display: grid;
+  place-items: center;
+  border-radius: 9px;
+  border: 1px solid var(--act-line);
+  background: rgba(255, 255, 255, 0.05);
+  box-shadow: none;
+  animation: none;
+}
+.act-browser-dot::before {
+  content: '';
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--ink-faint);
+}
+.act-browser.active .act-browser-dot {
+  border-color: var(--act-live-brd);
+  background: var(--act-live-soft);
+}
+.act-browser.active .act-browser-dot::before {
+  background: var(--act-live);
+  box-shadow: 0 0 8px rgba(0, 230, 255, 0.7);
+}
+.act-browser.active .act-browser-dot::after {
+  inset: 10px;
+}
+.act-browser-text {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+/* Idle is dimmed; only the acting state earns the bright accent. */
+.act-browser-state {
+  font-size: var(--text-sm);
+  color: var(--ink-dim);
+}
+.act-browser.active .act-browser-state {
+  color: var(--act-live);
+}
+.act-browser-target {
+  font-size: var(--text-xs);
+  color: var(--act-ink-soft);
+}
+
+/* ---------- Now running ---------- */
+.act-run {
+  position: relative;
+  overflow: hidden;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 8px 12px 12px;
+  border-color: var(--act-live-brd);
+  background: linear-gradient(135deg, rgba(0, 230, 255, 0.12), rgba(0, 230, 255, 0.035));
+}
+.act-run > .tool-spinner {
+  flex: 0 0 auto;
+  margin-top: 3px;
+}
+.act-run-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+/* The whole point of this row is the task — let it wrap to two lines instead of a 25-char stub. */
+.act-run-prompt {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  white-space: normal;
+  font-size: var(--text-sm);
+  line-height: 1.4;
+  color: var(--ink);
+}
+.act-run-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--act-live);
+}
+.act-run-meta .act-elapsed {
+  font: 500 10.5px/1 var(--mono);
+  letter-spacing: 0;
+  color: var(--ink-dim);
+}
+.act-run-meta .act-elapsed::before {
+  content: '·';
+  margin-right: 6px;
+  color: var(--ink-faint);
+}
+
+/* Stop reads as "stop" (■), not "dismiss" (✕) — distinct from the queue's remove buttons. */
+.act-stop {
+  width: 26px;
+  height: 26px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(3, 5, 12, 0.35);
+  color: var(--ink-dim);
+}
+.act-stop-ico {
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+  background: currentColor;
+}
+.act-stop:hover {
+  color: #fff;
+  border-color: rgba(255, 93, 122, 0.6);
+  background: rgba(255, 93, 122, 0.35);
+}
+
+/* Indeterminate progress along the card's bottom edge — a translating highlight (transform only). */
+.act-run-bar {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 2px;
+  overflow: hidden;
+  background: rgba(0, 230, 255, 0.1);
+}
+.act-run-bar::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 45%;
+  background: linear-gradient(90deg, transparent, var(--act-live), transparent);
+  transform: translateX(-100%);
+  animation: act-scan 1.8s ease-in-out infinite;
+}
+@keyframes act-scan {
+  to { transform: translateX(225%); }
+}
+
+/* ---------- Queue ---------- */
+.act-queued {
+  gap: 10px;
+  padding: 7px 6px 7px 10px;
+  border-color: var(--act-line);
+  background: transparent;
+  font-size: var(--text-sm);
+  color: var(--ink-dim);
+}
+.act-pos {
+  width: 20px;
+  height: 20px;
+  border-radius: 6px;
+  border-color: var(--act-line);
+  background: rgba(255, 255, 255, 0.05);
+  font: 600 10px/1 var(--mono);
+  color: var(--act-ink-soft);
+}
+.act-x {
+  width: 24px;
+  height: 24px;
+  border-radius: 7px;
+  color: var(--ink-faint);
+  transition: color 140ms var(--ease-out), background 140ms var(--ease-out), border-color 140ms var(--ease-out);
+}
+.act-x:hover {
+  color: #fff;
+  background: rgba(255, 93, 122, 0.35);
+}
+/* "Clear all" lives at the end of the Queue label: a quiet text button that only turns red on hover
+   (it stops the current task too, so it shouldn't shout at rest). */
+.act-label .act-clear {
+  order: 2;
+  align-self: center;
+  margin: 0;
+  padding: 3px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--act-line);
+  background: transparent;
+  color: var(--act-ink-soft);
+  font: 600 10px/1.2 var(--font-sans);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.act-label .act-clear:hover {
+  color: #ffd7df;
+  border-color: rgba(255, 93, 122, 0.55);
+  background: rgba(255, 93, 122, 0.14);
+  box-shadow: none;
+}
+
+/* ---------- Tool feed (timeline) ---------- */
+.act-feed {
+  gap: 0;
+}
+.act-tool {
+  --k: #8a93a6; /* kind colour; set per kind below */
+  position: relative;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 6px 8px 6px 4px;
+  border: none;
+  border-radius: var(--r-sm);
+  background: transparent;
+  font-size: var(--text-sm);
+  color: var(--ink-dim);
+}
+/* Track segment from this node down to the next one; the node's opaque fill hides the join. */
+.act-tool::before {
+  content: '';
+  position: absolute;
+  left: 15.5px;
+  top: 30px;
+  bottom: -6px;
+  width: 1px;
+  background: var(--act-line);
+}
+.act-tool:last-child::before {
+  display: none;
+}
+.act-tool.tool-terminal { --k: var(--mint); }
+.act-tool.tool-file { --k: var(--blue); }
+.act-tool.tool-search,
+.act-tool.tool-memory { --k: var(--violet); }
+.act-tool.tool-web,
+.act-tool.tool-media,
+.act-tool.tool-phone { --k: var(--magenta); }
+.act-tool.tool-browser { --k: var(--cyan); }
+.act-tool.tool-system,
+.act-tool.tool-jarvis { --k: #ffb454; }
+.act-tool.tool-reminder,
+.act-tool.tool-weather { --k: #e0af68; }
+/* Status overrides the kind colour — declared after the kinds so it wins the cascade (the base sheet
+   had .err before the kind rules, so a failed shell_run kept its green rail). */
+.act-tool.running {
+  --k: var(--act-live);
+  background: rgba(0, 230, 255, 0.06);
+  color: var(--ink);
+}
+.act-tool.err {
+  --k: var(--error);
+  background: rgba(255, 93, 122, 0.07);
+}
+
+.act-tool-node {
+  flex: 0 0 auto;
+  position: relative;
+  z-index: 1;
+  width: 24px;
+  height: 24px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  border: 1px solid color-mix(in srgb, var(--k) 45%, transparent);
+  /* Opaque so the timeline track stops at the node's edge. */
+  background: color-mix(in srgb, var(--k) 14%, #0b1020);
+  color: var(--k);
+  font-size: 11px;
+  line-height: 1;
+}
+.act-tool.err .act-tool-node {
+  font-size: 10px;
+  font-weight: 700;
+}
+.act-tool-node .tool-spinner {
+  width: 10px;
+  height: 10px;
+  border-width: 1.5px;
+}
+.act-tool-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding-top: 1px;
+}
+.act-tool-top {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+.act-tool-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: 12px;
+  line-height: 1.35;
+  font-weight: 600;
+  color: var(--ink);
+}
+.act-tool.err .act-tool-name {
+  color: #ffb3c2;
+}
+.act-tool-dur {
+  font: 500 10.5px/1.35 var(--mono);
+  color: var(--ink-faint);
+}
+.act-tool-live {
+  color: var(--act-live);
+}
+.act-tool-arg {
+  display: block;
+  font-size: 10.5px;
+  line-height: 1.4;
+  color: var(--act-ink-soft);
+}
+
+/* ---------- Motion preferences ---------- */
+/* The base sheet collapses every animation to a single frame; the looping indicators here are
+   switched off outright so nothing is left mid-pulse, and the progress bar shows as a static fill. */
+@media (prefers-reduced-motion: reduce) {
+  .act-pulse.live::after,
+  .act-browser.active .act-browser-dot::after,
+  .act-core.live .act-core-dot {
+    animation: none;
+  }
+  .act-pulse.live::after,
+  .act-browser.active .act-browser-dot::after {
+    display: none;
+  }
+  .act-run-bar::after {
+    width: 100%;
+    opacity: 0.45;
+    transform: none;
+    animation: none;
+  }
+}

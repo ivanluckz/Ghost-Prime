@@ -20,6 +20,20 @@ const COMMANDS = [
 ]
 const NEEDS_ARG = ['/model', '/brain', '/effort', '/thinking', '/mode', '/voice', '/tab', '/mirror', '/site']
 
+// Line icons in the same 16px family as the topbar / sidebar.
+const svg = { width: 18, height: 18, viewBox: '0 0 16 16', fill: 'none', stroke: 'currentColor', strokeWidth: 1.5, strokeLinecap: 'round', strokeLinejoin: 'round', 'aria-hidden': true }
+const IconMic = () => (
+  <svg {...svg}>
+    <rect x="5.75" y="1.75" width="4.5" height="8" rx="2.25" />
+    <path d="M3.5 7.5a4.5 4.5 0 0 0 9 0M8 12v2.25" />
+  </svg>
+)
+const IconSend = () => (
+  <svg {...svg} width={16} height={16} strokeWidth={1.75}>
+    <path d="M8 13V3.5M3.75 7.5 8 3.25l4.25 4.25" />
+  </svg>
+)
+
 // `hasAttachments` lets an attachment-only message go out (Main.send substitutes a default prompt).
 export default function ChatInput({ onSend, busy, hasAttachments = false }) {
   const [value, setValue] = useState('')
@@ -105,34 +119,39 @@ export default function ChatInput({ onSend, busy, hasAttachments = false }) {
           ))}
         </div>
       )}
-      <button
-        type="button"
-        className={`btn btn-mic mic-${voiceState}`}
-        onClick={toggleMic}
-        disabled={voiceState === 'transcribing'}
-        title="Voice input (local Whisper / Gemini)"
-        aria-label="Voice input"
-      >
-        {voiceState === 'transcribing' ? '…' : '🎙'}
-      </button>
-      <textarea
-        ref={taRef}
-        value={value}
-        onChange={(e) => setValue(e.target.value)}
-        onKeyDown={(e) => {
-          // Enter during IME composition (CJK, dead keys) confirms the candidate — never sends.
-          if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent?.isComposing && e.keyCode !== 229) submit(e)
-        }}
-        placeholder={placeholder}
-        rows={1}
-      />
-      <button type="submit" className="btn btn-send" disabled={!canSend}>
-        Send
-      </button>
+      {/* One composer surface: mic, text and Send share a single glass box (focus ring included). */}
+      <div className="composer">
+        <button
+          type="button"
+          className={`btn btn-mic mic-${voiceState}`}
+          onClick={toggleMic}
+          disabled={voiceState === 'transcribing'}
+          title="Voice input (local Whisper / Gemini)"
+          aria-label="Voice input"
+        >
+          {voiceState === 'transcribing' ? <span className="mic-dots" aria-hidden="true">…</span> : <IconMic />}
+        </button>
+        <textarea
+          ref={taRef}
+          value={value}
+          onChange={(e) => setValue(e.target.value)}
+          onKeyDown={(e) => {
+            // Enter during IME composition (CJK, dead keys) confirms the candidate — never sends.
+            if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent?.isComposing && e.keyCode !== 229) submit(e)
+          }}
+          placeholder={placeholder}
+          rows={1}
+        />
+        <button type="submit" className="btn btn-send" disabled={!canSend}>
+          <IconSend />
+          <span className="btn-send-label">Send</span>
+        </button>
+      </div>
       <div className="input-hint" aria-hidden="true">
         <span><kbd>Enter</kbd> send</span>
         <span><kbd>Shift</kbd>+<kbd>Enter</kbd> newline</span>
         <span><kbd>/</kbd> commands</span>
+        <span><kbd>Shift</kbd>+<kbd>Tab</kbd> mode</span>
       </div>
     </form>
   )

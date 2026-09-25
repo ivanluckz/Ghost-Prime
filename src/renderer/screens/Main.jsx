@@ -28,6 +28,52 @@ const MODES = [
   { id: 'full', label: 'FULL AUTO', hint: 'no checks — runs everything' }
 ]
 
+// Topbar line icons: one 16px family (1.5 stroke, currentColor) so every control reads the same and
+// the on/off state comes from the button's colour, not from mismatched emoji glyphs.
+const svg = { width: 16, height: 16, viewBox: '0 0 16 16', fill: 'none', stroke: 'currentColor', strokeWidth: 1.5, strokeLinecap: 'round', strokeLinejoin: 'round', 'aria-hidden': true }
+const Speaker = ({ children }) => (
+  <svg {...svg}>
+    <path d="M2.5 6.25v3.5h2.25L8 12.5v-9L4.75 6.25z" />
+    {children}
+  </svg>
+)
+const IconVoiceOn = () => <Speaker><path d="M10.5 6a2.75 2.75 0 0 1 0 4M12.5 4.25a5.25 5.25 0 0 1 0 7.5" /></Speaker>
+const IconVoiceOff = () => <Speaker><path d="m10.5 6.25 3.5 3.5M14 6.25l-3.5 3.5" /></Speaker>
+const IconSound = ({ off }) => (
+  <svg {...svg}>
+    <path d="M6 11.5V3.25l6.5-1.25v8" />
+    <circle cx="4.25" cy="11.5" r="1.75" />
+    <circle cx="10.75" cy="10" r="1.75" />
+    {off && <path d="M2 2l12 12" />}
+  </svg>
+)
+const IconMirror = () => (
+  <svg {...svg}>
+    <rect x="1.75" y="3" width="8.5" height="7" rx="1.5" />
+    <path d="M12.5 5.5h.25a1.5 1.5 0 0 1 1.5 1.5v4.5a1.5 1.5 0 0 1-1.5 1.5H7a1.5 1.5 0 0 1-1.5-1.5v-.25" />
+  </svg>
+)
+const IconTerminal = () => (
+  <svg {...svg}>
+    <rect x="1.75" y="2.75" width="12.5" height="10.5" rx="2" />
+    <path d="m4.75 6.25 2 1.75-2 1.75M8.5 10h2.75" />
+  </svg>
+)
+const IconActivity = () => (
+  <svg {...svg}>
+    <rect x="1.75" y="2.75" width="12.5" height="10.5" rx="2" />
+    <path d="M9.75 2.75v10.5" />
+    <path d="M11.75 5.5h.5M11.75 7.5h.5" />
+  </svg>
+)
+const IconSettings = () => (
+  <svg {...svg}>
+    <path d="M2.5 4.5h6M11.5 4.5h2M2.5 11.5h2M7.5 11.5h6" />
+    <circle cx="10" cy="4.5" r="1.5" />
+    <circle cx="6" cy="11.5" r="1.5" />
+  </svg>
+)
+
 export default function Main() {
   const [messages, setMessages] = useState([]) // { role:'user'|'assistant'|'tool', reqId, ... }
   const [running, setRunning] = useState({}) // reqId -> { prompt, startedAt } — the single in-flight task
@@ -654,77 +700,94 @@ export default function Main() {
               v{GHOST_VERSION}
               {GHOST_BUILD ? ` · ${GHOST_BUILD}` : ''}
             </span>
+            {/* Live status sits with the identity (left): its label changes length, and here that
+                never shifts the controls on the right. */}
+            <span className={`status ${busy ? 'status-busy' : ''}`} role="status" title={busy ? 'Working' : 'Ready'}>
+              <span className="status-label">
+                {busy ? `working…${queue.length ? ` +${queue.length} queued` : ''}` : queue.length ? `${queue.length} queued` : 'ready'}
+              </span>
+            </span>
           </div>
           <div className="topbar-right">
-            <span className="mode" title={`${modeInfo.hint}  ·  Shift+Tab to switch`}>
+            <span className={`mode mode-${mode}`} title={`${modeInfo.hint}  ·  Shift+Tab to switch`}>
               <span className={`mode-dot ${mode}`} />
-              {modeInfo.label}
+              <span className="mode-label">{modeInfo.label}</span>
+              <span className="mode-label-short">{modeInfo.label.split(' ')[0]}</span>
               <span className="mode-hint">⇧⇥</span>
             </span>
-            <button
-              type="button"
-              className={`voice-toggle ${voiceOut ? 'on' : ''}`}
-              onClick={toggleVoiceOut}
-              disabled={!ttsOk}
-              title={
-                ttsOk
-                  ? voiceOut
-                    ? 'Spoken replies: ON'
-                    : 'Spoken replies: OFF'
-                  : 'Voice output unavailable (no TTS engine)'
-              }
-            >
-              {voiceOut ? '🔊' : '🔇'}
-            </button>
-            <button
-              type="button"
-              className={`voice-toggle ${muted ? '' : 'on'}`}
-              onClick={() => setMutedState(toggleMuted())}
-              title={muted ? 'Sound muted (intro + sfx) — click to unmute' : 'Sound on (intro + sfx) — click to mute'}
-              aria-label="Toggle app sound"
-            >
-              🎵
-            </button>
-            <button
-              type="button"
-              className={`voice-toggle ${mirror ? 'on' : ''}`}
-              onClick={() => changeMirror(!mirror)}
-              title={mirror ? 'Chat mirrors to Chrome side panel: ON' : 'Mirror chat to Chrome side panel'}
-              aria-label="Mirror chat to Chrome"
-            >
-              ⧉
-            </button>
-            <button
-              type="button"
-              className={`voice-toggle ${settingsOpen ? 'on' : ''}`}
-              onClick={() => setSettingsOpen((o) => !o)}
-              title="Settings — browser tab, mirror, site access"
-              aria-label="Settings"
-            >
-              ⚙
-            </button>
-            <button
-              type="button"
-              className={`voice-toggle term-toggle ${termOpen ? 'on' : ''}`}
-              onClick={() => setTermOpen((o) => !o)}
-              title={termOpen ? 'Hide terminal' : 'Show terminal'}
-              aria-label="Toggle terminal"
-            >
-              {'>_'}
-              {shellSessions.some((s) => s.alive) && <span className="term-badge" />}
-            </button>
-            <button
-              type="button"
-              className={`voice-toggle ${activityOpen ? 'on' : ''}`}
-              onClick={() => setActivityOpen((o) => !o)}
-              title={activityOpen ? 'Hide activity panel' : 'Show activity panel'}
-              aria-label="Toggle activity panel"
-            >
-              ◨
-            </button>
-            <span className={`status ${busy ? 'status-busy' : ''}`}>
-              {busy ? `working…${queue.length ? ` +${queue.length} queued` : ''}` : queue.length ? `${queue.length} queued` : 'ready'}
-            </span>
+            {/* One segmented tool strip: sound | view | settings. */}
+            <div className="tb-tools" role="toolbar" aria-label="Window tools">
+              <button
+                type="button"
+                className={`voice-toggle ${voiceOut ? 'on' : ''}`}
+                onClick={toggleVoiceOut}
+                disabled={!ttsOk}
+                aria-label="Spoken replies"
+                aria-pressed={voiceOut}
+                title={
+                  ttsOk
+                    ? voiceOut
+                      ? 'Spoken replies: ON'
+                      : 'Spoken replies: OFF'
+                    : 'Voice output unavailable (no TTS engine)'
+                }
+              >
+                {voiceOut ? <IconVoiceOn /> : <IconVoiceOff />}
+              </button>
+              <button
+                type="button"
+                className={`voice-toggle ${muted ? '' : 'on'}`}
+                onClick={() => setMutedState(toggleMuted())}
+                title={muted ? 'Sound muted (intro + sfx) — click to unmute' : 'Sound on (intro + sfx) — click to mute'}
+                aria-label="Toggle app sound"
+                aria-pressed={!muted}
+              >
+                <IconSound off={muted} />
+              </button>
+              <span className="tb-sep" aria-hidden="true" />
+              <button
+                type="button"
+                className={`voice-toggle ${mirror ? 'on' : ''}`}
+                onClick={() => changeMirror(!mirror)}
+                title={mirror ? 'Chat mirrors to Chrome side panel: ON' : 'Mirror chat to Chrome side panel'}
+                aria-label="Mirror chat to Chrome"
+                aria-pressed={mirror}
+              >
+                <IconMirror />
+              </button>
+              <button
+                type="button"
+                className={`voice-toggle term-toggle ${termOpen ? 'on' : ''}`}
+                onClick={() => setTermOpen((o) => !o)}
+                title={termOpen ? 'Hide terminal' : 'Show terminal'}
+                aria-label="Toggle terminal"
+                aria-pressed={termOpen}
+              >
+                <IconTerminal />
+                {shellSessions.some((s) => s.alive) && <span className="term-badge" />}
+              </button>
+              <button
+                type="button"
+                className={`voice-toggle ${activityOpen ? 'on' : ''}`}
+                onClick={() => setActivityOpen((o) => !o)}
+                title={activityOpen ? 'Hide activity panel' : 'Show activity panel'}
+                aria-label="Toggle activity panel"
+                aria-pressed={activityOpen}
+              >
+                <IconActivity />
+              </button>
+              <span className="tb-sep" aria-hidden="true" />
+              <button
+                type="button"
+                className={`voice-toggle ${settingsOpen ? 'on' : ''}`}
+                onClick={() => setSettingsOpen((o) => !o)}
+                title="Settings — browser tab, mirror, site access"
+                aria-label="Settings"
+                aria-pressed={settingsOpen}
+              >
+                <IconSettings />
+              </button>
+            </div>
             {!window.ghost.platform?.nativeFrame && (
               <div className="win-controls">
                 <button

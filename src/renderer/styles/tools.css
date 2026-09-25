@@ -1,1 +1,330 @@
-/* tools — design pass overrides/additions (loaded after styles.css). */
+/* tools — design pass overrides/additions (loaded after styles.css).
+   Tool calls are the agent's working notes, not the answer: they sit one step quieter than the
+   message bubbles. Each call is a slim row (kind chip · name · argument · duration · status), the
+   output hangs under the name, and consecutive calls merge into one "run" panel so a burst of six
+   calls reads as a list instead of six stacked boxes.
+   Perf: cards stream in and repaint while running, so no blur/backdrop-filter, no animated shadows;
+   the only loop animations are the spinner and a 1px sweep, both transform-only. */
+
+:root {
+  /* Gap between thread items, mirrored from `.messages { gap }` so consecutive calls can close it
+     and join up. Keep in sync if the thread gap changes. */
+  --thread-gap: 18px;
+  --tool-pad-x: 10px;
+  --tool-chip: 22px;
+  --tool-row-gap: 9px;
+  /* Output/screenshot indent: lines the body up with the tool name, past the chip. */
+  --tool-indent: calc(var(--tool-pad-x) + var(--tool-chip) + var(--tool-row-gap));
+  --tool-surface: rgba(255, 255, 255, 0.032);
+  --tool-surface-hover: rgba(255, 255, 255, 0.05);
+  --tool-edge: rgba(255, 255, 255, 0.085);
+  --tool-seam: rgba(255, 255, 255, 0.055);
+}
+
+/* ---------- Kind colours ----------
+   One accent per card, carried by the glyph chip (RGB triplet so it can be tinted with alpha).
+   Mapping matches the Activity rail's tool feed so a call is the same colour in both places. */
+.toolcard {
+  --tk: 138, 147, 166;
+}
+.toolcard.tool-terminal {
+  --tk: 46, 230, 166; /* mint */
+}
+.toolcard.tool-file {
+  --tk: 122, 162, 247; /* blue */
+}
+.toolcard.tool-search,
+.toolcard.tool-memory {
+  --tk: 164, 140, 255; /* violet, lifted so the glyph stays legible on the dark chip */
+}
+.toolcard.tool-web,
+.toolcard.tool-media,
+.toolcard.tool-phone {
+  --tk: 255, 92, 200; /* magenta */
+}
+.toolcard.tool-browser {
+  --tk: 0, 230, 255; /* cyan */
+}
+.toolcard.tool-system,
+.toolcard.tool-jarvis {
+  --tk: 255, 180, 84;
+}
+.toolcard.tool-reminder,
+.toolcard.tool-weather {
+  --tk: 224, 175, 104;
+}
+.toolcard.tool-error {
+  --tk: 255, 93, 122; /* a failed call turns its chip red, whatever its kind */
+}
+
+/* ---------- Card ----------
+   Scoped under .messages so these rules outrank the base sheet's per-kind border-left colours. */
+.messages .toolcard {
+  position: relative;
+  overflow: hidden; /* clips the running sweep and the body to the rounded corners */
+  padding: 0;
+  border: 1px solid var(--tool-edge);
+  border-radius: var(--r-sm);
+  background: var(--tool-surface);
+  box-shadow: none;
+  font-size: var(--text-sm);
+  animation: rise 260ms var(--ease-out) both;
+  transition: border-color 160ms ease;
+}
+
+.messages .toolcard:hover {
+  box-shadow: none;
+  border-color: rgba(255, 255, 255, 0.12);
+}
+
+/* ---------- Grouping ----------
+   A tool card directly after another closes the thread gap and shares its edge, so a run of calls
+   becomes one panel with hairline seams. Only plain siblings join: tracked (parallel-task) cards
+   sit in their own .track-wrap and keep standalone corners. */
+.messages > .toolcard + .toolcard {
+  margin-top: calc(-1 * var(--thread-gap));
+  border-top-color: var(--tool-seam);
+  border-top-left-radius: 0;
+  border-top-right-radius: 0;
+}
+
+.messages > .toolcard:has(+ .toolcard) {
+  border-bottom-width: 0;
+  border-bottom-left-radius: 0;
+  border-bottom-right-radius: 0;
+}
+
+/* ---------- Header row ---------- */
+.toolcard .toolcard-head {
+  display: flex;
+  align-items: center;
+  gap: var(--tool-row-gap);
+  min-height: 38px;
+  padding: 7px var(--tool-pad-x);
+  color: var(--ink-dim);
+  outline: none;
+}
+
+.toolcard.has-body .toolcard-head {
+  cursor: pointer;
+}
+
+.toolcard.has-body .toolcard-head:hover {
+  background: var(--tool-surface-hover);
+}
+
+/* The card clips overflow, so the shared outer focus ring would be cut off — draw it inside. */
+.toolcard .toolcard-head:focus-visible {
+  box-shadow: inset 0 0 0 2px rgba(0, 230, 255, 0.55);
+}
+
+/* Kind chip: the glyph on a tinted square. Emoji glyphs (🌤, 🧠…) keep their own colours. */
+.toolcard .tool-glyph {
+  flex: 0 0 auto;
+  display: inline-grid;
+  place-items: center;
+  width: var(--tool-chip);
+  height: var(--tool-chip);
+  border-radius: 7px;
+  background: rgba(var(--tk), 0.12);
+  box-shadow: inset 0 0 0 1px rgba(var(--tk), 0.24);
+  color: rgb(var(--tk));
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 1;
+}
+
+.toolcard .tool-name {
+  flex: 0 0 auto;
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.005em;
+}
+
+.toolcard .tool-arg {
+  flex: 0 1 auto;
+  min-width: 0;
+  color: #8190b6; /* between --ink-dim and --ink-faint: secondary, but still readable */
+  font-family: var(--mono);
+  font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* key/value pairs for tools whose input has no obvious "main" field */
+.tool-arg-pair + .tool-arg-pair {
+  margin-left: 6px;
+}
+.tool-arg-key {
+  color: var(--ink-faint);
+}
+
+.toolcard .tool-meta {
+  flex: 0 0 auto;
+  margin-left: auto;
+  padding-left: 4px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.toolcard .tool-time {
+  color: var(--ink-faint);
+  font-family: var(--mono);
+  font-size: var(--text-xs);
+}
+
+/* Status sits at the right edge, so a run of calls gives one column of ticks to scan. */
+.toolcard .tool-status {
+  width: 14px;
+  color: var(--mint);
+  font-size: 12px;
+  opacity: 0.8;
+}
+.toolcard.tool-error .tool-status {
+  color: var(--error);
+  opacity: 1;
+  font-weight: 700;
+}
+.toolcard.running .tool-status {
+  opacity: 1;
+}
+
+.toolcard .tool-spinner {
+  width: 12px;
+  height: 12px;
+  border: 1.5px solid rgba(255, 255, 255, 0.14);
+  border-top-color: rgb(var(--tk));
+}
+
+.toolcard .tool-chevron {
+  flex: 0 0 auto;
+  margin-right: -2px;
+  color: var(--ink-faint);
+  transition: transform 160ms var(--ease-out), color 160ms ease;
+}
+.toolcard.is-open .tool-chevron {
+  transform: rotate(90deg);
+}
+.toolcard.has-body .toolcard-head:hover .tool-chevron {
+  color: var(--ink-dim);
+}
+
+/* ---------- Body (output + screenshot) ---------- */
+.toolcard-body {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 0 var(--tool-pad-x) 10px var(--tool-indent);
+}
+
+.toolcard .tool-output {
+  align-self: stretch;
+  margin: 0;
+  padding: 8px 11px;
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.26);
+  color: #a9b8d6;
+  font: 400 12px/1.55 var(--mono);
+  max-height: 212px; /* ~12 lines: long output scrolls instead of pushing the reply off-screen */
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere; /* long URLs/paths wrap instead of forcing a horizontal scrollbar */
+  tab-size: 2;
+}
+
+/* Quiet scrollbar (the base sheet's gradient thumb out-ranks its own "quiet" rule here). */
+.toolcard .tool-output::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.13);
+  background-clip: padding-box;
+}
+.toolcard .tool-output::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 230, 255, 0.4);
+  background-clip: padding-box;
+}
+
+/* Screenshots keep their aspect ratio but are capped in height so one image doesn't fill the
+   thread; they sit left-aligned under the name like the output. */
+.toolcard .tool-shot {
+  display: block;
+  margin: 0;
+  max-width: 100%;
+  max-height: 300px;
+  width: auto;
+  height: auto;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.3);
+}
+
+/* ---------- Error ---------- */
+.messages .toolcard.tool-error {
+  border-color: rgba(255, 93, 122, 0.3);
+  background: rgba(255, 93, 122, 0.05);
+}
+.messages > .toolcard + .toolcard.tool-error {
+  border-top-color: rgba(255, 93, 122, 0.3);
+}
+/* The seam under a failed card goes red too, so the failure is outlined on all four sides. */
+.messages > .toolcard.tool-error + .toolcard {
+  border-top-color: rgba(255, 93, 122, 0.3);
+}
+.toolcard.tool-error .tool-output {
+  border-color: rgba(255, 93, 122, 0.16);
+  background: rgba(255, 93, 122, 0.06);
+  color: #ffc4cf;
+}
+
+/* ---------- Running ----------
+   A 1px sweep along the bottom edge while the call is in flight (transform-only). */
+.messages .toolcard.running::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  width: 40%;
+  height: 1px;
+  pointer-events: none;
+  background: linear-gradient(90deg, transparent, rgba(var(--tk), 0.9), transparent);
+  animation: tool-sweep 1.6s ease-in-out infinite;
+}
+
+@keyframes tool-sweep {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(250%);
+  }
+}
+
+.messages .toolcard.running .tool-name::after {
+  content: '…';
+  margin-left: 1px;
+  color: var(--ink-faint);
+  font-weight: 400;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  /* No sweep: a static full-width hairline still marks the card as live. */
+  .messages .toolcard.running::after {
+    width: 100%;
+    opacity: 0.5;
+    animation: none;
+  }
+}
+
+/* ---------- Narrow widths ---------- */
+@media (max-width: 720px) {
+  :root {
+    --tool-row-gap: 8px;
+  }
+  /* Less indent under the name so the output keeps a usable width. */
+  .toolcard-body {
+    padding-left: var(--tool-pad-x);
+  }
+}

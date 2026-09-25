@@ -4,6 +4,7 @@
 //
 // Scripted replies: send any message to get a streamed answer with tool cards. Include "slow" to
 // keep a tool running (spinner + Activity panel busy), "error" for a failed tool + error reply.
+// Add ?replay=1 to the URL for the showcase offline replay instead (see the bottom of this file).
 import QRCode from 'qrcode'
 
 const listeners = { delta: new Set(), tool: new Set(), done: new Set(), error: new Set() }
@@ -223,6 +224,13 @@ const ghost = {
     speak() {},
     stopSpeaking() {}
   }
+}
+
+// Showcase offline replay (?replay=1 ONLY): scripted demo runs from ./showcase-scenarios.js replace
+// the flight script above. Without the flag nothing below runs and the mock is unchanged.
+if (new URLSearchParams(location.search).get('replay') === '1') {
+  const { installReplay } = await import('./showcase-scenarios.js')
+  installReplay(ghost, { emit, running })
 }
 
 window.ghost = ghost

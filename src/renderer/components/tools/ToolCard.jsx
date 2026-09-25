@@ -100,35 +100,98 @@ function fmtDuration(ms) {
   return ms < 1000 ? `${ms}ms` : `${(ms / 1000).toFixed(1)}s`
 }
 
+// Card-only presentation of the argument summary. When summarizeInput had nothing better than raw
+// JSON ({"ref":4,"value":"Lisbon"}), show the pairs as `key value` instead of braces and quotes;
+// an empty input ({}) shows nothing. The shared summarizeInput (used by the Activity rail) is untouched.
+function argView(input) {
+  const text = summarizeInput(input)
+  let raw = null
+  try {
+    raw = JSON.stringify(input).slice(0, 140)
+  } catch {
+    /* unserialisable input: keep the plain summary */
+  }
+  if (!text || text !== raw || Array.isArray(input)) return { text, pairs: null }
+  const pairs = Object.entries(input).map(([k, v]) => {
+    let val = typeof v === 'string' ? v : JSON.stringify(v)
+    if (typeof val === 'string' && val.length > 60) val = `${val.slice(0, 59)}…`
+    return [k, val ?? String(v)]
+  })
+  return { text: pairs.length ? text : '', pairs }
+}
+
+// Chevron points right when collapsed and rotates down when open (see tools.css).
+const Chevron = () => (
+  <svg className="tool-chevron" viewBox="0 0 12 12" width="12" height="12" aria-hidden="true">
+    <path d="M4.5 2.5 8 6l-3.5 3.5" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+  </svg>
+)
+
 export default function ToolCard({ name, input, output, image, status, isError, durationMs }) {
   const [open, setOpen] = useState(true)
   // Clean up SDK MCP tool names (mcp__ghost-browser__browser_navigate → browser_navigate).
   const displayName = typeof name === 'string' && name.startsWith('mcp__') ? name.split('__').pop() : name
   const meta = TOOL_META[displayName] || { glyph: '∎', kind: 'tool' }
-  const arg = summarizeInput(input)
+  const arg = argView(input)
   const hasBody = !!output || !!image
   const running = status === 'running'
+  const toggle = () => hasBody && setOpen((o) => !o)
+  const cls = [
+    'toolcard',
+    status,
+    `tool-${meta.kind}`,
+    isError && 'tool-error',
+    hasBody && 'has-body',
+    hasBody && open && 'is-open'
+  ]
+    .filter(Boolean)
+    .join(' ')
 
   return (
-    <div className={`toolcard ${status} tool-${meta.kind}${isError ? ' tool-error' : ''}`}>
+    <div className={cls}>
       <div
         className="toolcard-head"
-        onClick={() => hasBody && setOpen((o) => !o)}
-        style={{ cursor: hasBody ? 'pointer' : 'default' }}
+        onClick={toggle}
+        role={hasBody ? 'button' : undefined}
+        tabIndex={hasBody ? 0 : undefined}
+        aria-expanded={hasBody ? open : undefined}
+        onKeyDown={(e) => {
+          if (hasBody && (e.key === 'Enter' || e.key === ' ')) {
+            e.preventDefault()
+            toggle()
+          }
+        }}
       >
-        <span className="tool-status">
-          {running ? <span className="tool-spinner" /> : isError ? '✕' : '✓'}
+        <span className="tool-glyph" aria-hidden="true">
+          {meta.glyph}
         </span>
-        <span className="tool-glyph">{meta.glyph}</span>
         <span className="tool-name">{displayName}</span>
-        {arg && <code className="tool-arg">{arg}</code>}
+        {arg.text && (
+          <code className="tool-arg" title={arg.text}>
+            {arg.pairs
+              ? arg.pairs.map(([k, v], i) => (
+                  <span key={k} className="tool-arg-pair">
+                    {i > 0 && ' '}
+                    <span className="tool-arg-key">{k}</span> {v}
+                  </span>
+                ))
+              : arg.text}
+          </code>
+        )}
         <span className="tool-meta">
           {!running && durationMs != null && <span className="tool-time">{fmtDuration(durationMs)}</span>}
-          {hasBody && <span className="tool-chevron">{open ? '▾' : '▸'}</span>}
+          <span className="tool-status" role="img" aria-label={running ? 'Running' : isError ? 'Failed' : 'Done'}>
+            {running ? <span className="tool-spinner" /> : isError ? '✕' : '✓'}
+          </span>
+          {hasBody && <Chevron />}
         </span>
       </div>
-      {open && image && <img className="tool-shot" src={image} alt="browser screenshot" />}
-      {open && output && <pre className="tool-output">{output}</pre>}
+      {open && hasBody && (
+        <div className="toolcard-body">
+          {image && <img className="tool-shot" src={image} alt="browser screenshot" />}
+          {output && <pre className="tool-output">{output}</pre>}
+        </div>
+      )}
     </div>
   )
 }

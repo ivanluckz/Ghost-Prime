@@ -7,6 +7,8 @@ import { TOOL_META, summarizeInput } from './tools/ToolCard'
 // MCP tool names arrive namespaced (mcp__ghost-browser__browser_click) — show the bare name.
 const cleanName = (n) => (typeof n === 'string' && n.startsWith('mcp__') ? n.split('__').pop() : n)
 const fmtDur = (ms) => (ms == null ? '' : ms < 1000 ? `${ms}ms` : `${(ms / 1000).toFixed(1)}s`)
+// Display-only: the card is narrow, so drop the scheme and "www." (the tooltip keeps the full URL).
+const shortUrl = (u) => (typeof u === 'string' ? u.replace(/^https?:\/\/(www\.)?/, '') : u)
 
 // Live "12s" counter for the in-flight task.
 function Elapsed({ since }) {
@@ -44,7 +46,7 @@ export default function ActivityPanel({
   const targetLabel = browserTarget === 'active' ? 'your current tab' : "Ghost's own tab"
 
   return (
-    <aside className="activity">
+    <aside className={`activity${busy ? ' is-busy' : ''}`}>
       <div className="activity-head">
         <span className={`act-pulse ${busy ? 'live' : ''}`} />
         <span className="activity-title">ACTIVITY</span>
@@ -59,9 +61,12 @@ export default function ActivityPanel({
       </div>
 
       <div className="activity-body">
-        <div className="act-core">
+        <div className={`act-core${busy ? ' live' : ''}`}>
           <GhostCore active={busy} height={132} quality="lite" />
-          <div className="act-core-cap">{busy ? 'thinking…' : 'standby'}</div>
+          <div className="act-core-cap">
+            <span className="act-core-dot" />
+            {busy ? 'thinking…' : 'standby'}
+          </div>
         </div>
 
         <section className="act-section">
@@ -71,7 +76,7 @@ export default function ActivityPanel({
             <div className="act-browser-text">
               <div className="act-browser-state">{browserActive ? 'acting…' : 'idle'}</div>
               <div className="act-browser-target" title={lastUrl || targetLabel}>
-                {lastUrl || targetLabel}
+                {shortUrl(lastUrl) || targetLabel}
               </div>
             </div>
           </div>
@@ -83,17 +88,22 @@ export default function ActivityPanel({
             runEntries.map(([id, t]) => (
               <div className="act-run" key={id}>
                 <span className="tool-spinner" />
-                <span className="act-run-text" title={t.prompt}>
-                  {t.prompt}
-                </span>
-                <Elapsed since={t.startedAt} />
-                <button className="act-x" onClick={() => onStopTask(id)} title="Stop this task" aria-label="Stop this task">
-                  ✕
+                <div className="act-run-main">
+                  <span className="act-run-text act-run-prompt" title={t.prompt}>
+                    {t.prompt}
+                  </span>
+                  <span className="act-run-meta">
+                    running <Elapsed since={t.startedAt} />
+                  </span>
+                </div>
+                <button className="act-x act-stop" onClick={() => onStopTask(id)} title="Stop this task" aria-label="Stop this task">
+                  <span className="act-stop-ico" />
                 </button>
+                <span className="act-run-bar" aria-hidden="true" />
               </div>
             ))
           ) : (
-            <div className="act-idle">Idle — waiting for a task</div>
+            <div className="act-idle act-slot">Idle — waiting for a task</div>
           )}
         </section>
 
@@ -101,6 +111,9 @@ export default function ActivityPanel({
           <section className="act-section">
             <div className="act-label">
               Queue <span className="act-count">{queue.length}</span>
+              <button className="act-clear" onClick={onStopAll} title="Stop the current task and clear the queue">
+                Clear all
+              </button>
             </div>
             {queue.map((q, i) => (
               <div className="act-queued" key={i}>
@@ -113,9 +126,6 @@ export default function ActivityPanel({
                 </button>
               </div>
             ))}
-            <button className="act-clear" onClick={onStopAll} title="Stop the current task and clear the queue">
-              Clear queue
-            </button>
           </section>
         )}
 
@@ -124,26 +134,36 @@ export default function ActivityPanel({
             Tool feed {feed.length > 0 && <span className="act-count">{tools.length}</span>}
           </div>
           {feed.length === 0 ? (
-            <div className="act-idle">No tools run yet</div>
+            <div className="act-idle act-slot">No tools run yet</div>
           ) : (
+            // A vertical timeline, newest first: the node carries the tool's kind colour + glyph (or
+            // the spinner / ✕), the body carries name, duration and the full argument on its own line.
             <div className="act-feed">
               {feed.map((t, i) => {
                 const name = cleanName(t.name)
                 const meta = TOOL_META[name] || { glyph: '∎', kind: 'tool' }
                 const arg = summarizeInput(t.input)
+                const live = t.status === 'running'
                 return (
                   <div className={`act-tool tool-${meta.kind} ${t.status}${t.isError ? ' err' : ''}`} key={t.id || i}>
-                    <span className="act-tool-status">
-                      {t.status === 'running' ? <span className="tool-spinner" /> : t.isError ? '✕' : '✓'}
+                    <span className="act-tool-node" title={live ? 'running' : t.isError ? 'failed' : 'done'}>
+                      {live ? <span className="tool-spinner" /> : t.isError ? '✕' : meta.glyph}
                     </span>
-                    <span className="act-tool-glyph">{meta.glyph}</span>
-                    <span className="act-tool-name">{name}</span>
-                    {arg && (
-                      <span className="act-tool-arg" title={arg}>
-                        {arg}
-                      </span>
-                    )}
-                    {t.status !== 'running' && t.durationMs != null && <span className="act-tool-dur">{fmtDur(t.durationMs)}</span>}
+                    <div className="act-tool-main">
+                      <div className="act-tool-top">
+                        <span className="act-tool-name">{name}</span>
+                        {live ? (
+                          <span className="act-tool-dur act-tool-live">running</span>
+                        ) : (
+                          t.durationMs != null && <span className="act-tool-dur">{fmtDur(t.durationMs)}</span>
+                        )}
+                      </div>
+                      {arg && (
+                        <span className="act-tool-arg" title={arg}>
+                          {arg}
+                        </span>
+                      )}
+                    </div>
                   </div>
                 )
               })}
