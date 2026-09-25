@@ -275,6 +275,11 @@ const pageIds = new WeakMap() // Page -> stable tabId
 const openerOf = new WeakMap() // popup Page -> the Page that opened it (to return to on close)
 const followed = new WeakSet() // popups we've already switched to
 const lastNavAt = new WeakMap() // Page -> timestamp of its last main-frame navigation
+// Page -> { at, req } of its last main-frame navigation REQUEST. On a slow server the request goes out
+// long before the new page commits, and Playwright's click/press time out waiting for that commit:
+// this tells "the action worked, the page is slow" apart from "the action never happened".
+const lastNavReq = new WeakMap()
+const navRequestedSince = (pg, t0) => (lastNavReq.get(pg)?.at || 0) >= t0
 let nextPageId = 1
 let pendingEvents = [] // notable things since the last action result: dialog / download / popup
 
@@ -339,6 +344,9 @@ function trackPage(pg) {
   })
   pg.on('framenavigated', (f) => {
     if (f === pg.mainFrame()) lastNavAt.set(pg, Date.now())
+  })
+  pg.on('request', (req) => {
+    if (req.isNavigationRequest() && req.frame() === pg.mainFrame()) lastNavReq.set(pg, { at: Date.now(), req })
   })
   pg.on('close', () => {
     if (page !== pg) return
@@ -436,8 +444,11 @@ async function ensurePage(retry = true) {
 // no longer waits for that itself), follow any popup it opened, and let the new document reach
 // DOMContentLoaded — so the NEXT tool call sees the page the user would, not the one that just
 // went away. Returns the standard action result.
-async function settle(p, beforeUrl, grace = 600) {
-  const t0 = Date.now()
+// `since`: when the action started. A navigation that already committed DURING the action (a fast
+// link) still counts, and one whose request went out but whose server hasn't answered yet (slow
+// Wi-Fi) is waited for, so the result names the new page instead of the one that's going away.
+async function settle(p, beforeUrl, grace = 600, since = Date.now()) {
+  const t0 = since
   const navP = p
     .waitForEvent('framenavigated', { predicate: (f) => f === p.mainFrame(), timeout: grace })
     .then(() => true, () => false)
@@ -445,7 +456,17 @@ async function settle(p, beforeUrl, grace = 600) {
   const [started, popup] = await Promise.all([navP, popP])
   if (popup) await followPopup(popup)
   const cur = page && !page.isClosed() ? page : p
-  const navStarted = started || (lastNavAt.get(p) || 0) >= t0
+  let navStarted = started || (lastNavAt.get(p) || 0) >= t0
+  const pending = lastNavReq.get(p)
+  if (!navStarted && cur === p && !p.isClosed() && pending && pending.at >= t0 && (lastNavAt.get(p) || 0) < pending.at) {
+    // The request is out, the page hasn't committed yet: wait for it (or for it to fail / turn out
+    // to be a download), up to 20 s.
+    navStarted = await Promise.race([
+      p.waitForEvent('framenavigated', { predicate: (f) => f === p.mainFrame(), timeout: 20000 }).then(() => true),
+      p.waitForEvent('requestfailed', { predicate: (r) => r === pending.req, timeout: 20000 }).then(() => false),
+      p.waitForEvent('download', { timeout: 20000 }).then(() => false)
+    ]).catch(() => false)
+  }
   if (navStarted || cur !== p) await cur.waitForLoadState('domcontentloaded', { timeout: 10000 }).catch(() => {})
   return actionResult(cur, { navigated: navStarted || cur !== p || cur.url() !== beforeUrl })
 }
@@ -717,14 +738,19 @@ export function formatPageSnapshot(s) {
 // number from before a page change never silently hits a different element.
 // ---------------------------------------------------------------------------
 const REF_ATTR = 'data-ghost-ref'
+// A number names ONE element for as long as it exists: snapshots keep the numbers they already gave
+// (so browser_get_page and an annotated screenshot agree) and new elements get fresh numbers from
+// refSeq, which never goes back. So an old number either finds the same element or nothing, never a
+// different one. refGen only changes when the backend switches (tags from before don't count).
 let refGen = 0
-let lastRefs = new Map() // ref -> { label, selector, kind } from the latest snapshot
+let refSeq = 1
+let lastRefs = new Map() // ref -> { label, selector, kind } from recent snapshots
 let lastRefsBackend = null // 'playwright' | 'extension' — which backend numbered lastRefs
 
 // Injected in-page (self-contained): tag + describe the interactive elements of ONE frame.
 function snapshotInPage({ cap, startRef, gen, attr }) {
-  for (const el of document.querySelectorAll(`[${attr}]`)) el.removeAttribute(attr)
   let next = startRef
+  const used = new Set() // a cloned node can carry a copy of another element's tag
   const vw = window.innerWidth
   const vh = window.innerHeight
   const norm = (s) => String(s || '').replace(/\s+/g, ' ').trim()
@@ -790,8 +816,15 @@ function snapshotInPage({ cap, startRef, gen, attr }) {
     if (name) return `${el.tagName.toLowerCase()}[name="${name.replace(/"/g, '\\"')}"]`
     return ''
   }
+  // Keep the number this element already has (same backend generation); otherwise a new one.
   const tag = (el) => {
+    const m = /^(\d+):(\d+)$/.exec(el.getAttribute(attr) || '')
+    if (m && Number(m[1]) === gen && !used.has(Number(m[2]))) {
+      used.add(Number(m[2]))
+      return Number(m[2])
+    }
     const ref = next++
+    used.add(ref)
     el.setAttribute(attr, `${gen}:${ref}`)
     return ref
   }
@@ -875,10 +908,9 @@ function snapshotInPage({ cap, startRef, gen, attr }) {
 // ref numbering across all of them. Iframe element positions are shifted into main-viewport
 // coordinates so annotated screenshots line up.
 async function takeSnapshot(p, cap) {
-  const gen = ++refGen
+  const gen = refGen
   const out = { url: p.url(), title: await p.title().catch(() => ''), buttons: [], links: [], fields: [], selects: [], excerpt: '' }
-  const refs = new Map()
-  let next = 1
+  const refs = lastRefsBackend === 'playwright' ? lastRefs : new Map()
   for (const frame of p.frames()) {
     const isMain = frame === p.mainFrame()
     let offset = { x: 0, y: 0 }
@@ -893,18 +925,19 @@ async function takeSnapshot(p, cap) {
     }
     let r
     try {
-      r = await frame.evaluate(snapshotInPage, { cap, startRef: next, gen, attr: REF_ATTR })
+      r = await frame.evaluate(snapshotInPage, { cap, startRef: refSeq, gen, attr: REF_ATTR })
     } catch {
       continue
     }
     if (!r) continue
-    next = r.nextRef
+    refSeq = Math.max(refSeq, r.nextRef)
     for (const k of ['buttons', 'links', 'fields', 'selects']) {
       for (const it of r[k]) {
         if (it.rect) {
           it.rect.x += offset.x
           it.rect.y += offset.y
         }
+        refs.delete(it.ref) // re-insert: the Map keeps the most recently seen last
         refs.set(it.ref, { label: it.label, selector: it.selector, kind: k })
         out[k].push(it)
       }
@@ -913,6 +946,10 @@ async function takeSnapshot(p, cap) {
     else if (r.excerpt && r.excerpt.length > 40 && out.excerpt.length < 1500) out.excerpt += `\n(frame) ${r.excerpt.slice(0, 300)}`
   }
   for (const k of ['buttons', 'links', 'fields', 'selects']) out[k] = out[k].slice(0, cap)
+  for (const old of refs.keys()) {
+    if (refs.size <= 3000) break
+    refs.delete(old) // only for the "no longer on the page" message; oldest first
+  }
   lastRefs = refs
   lastRefsBackend = 'playwright'
   return out
@@ -1024,6 +1061,7 @@ async function findField(page, label) {
 // selector (selectors are searched in every frame too; a visible match wins over a hidden one).
 async function resolveTarget(page, { ref, text, selector }, kind = 'click') {
   if (ref != null && ref !== '') {
+    if (lastRefsBackend !== 'playwright') throw refError(ref) // a number from the other backend
     const loc = await locateRef(page, ref)
     if (!loc) throw refError(ref)
     return loc
@@ -1118,6 +1156,7 @@ export async function browserClick({ ref, selector, text, double, button = 'left
   const p = await ensurePage()
   assertPageAllowed(p)
   const before = p.url()
+  const t0 = Date.now()
   const clickOpts = { timeout: 12000, button: button === 'right' ? 'right' : button === 'middle' ? 'middle' : 'left' }
   try {
     const loc = await resolveTarget(p, { ref, text, selector }, 'click')
@@ -1133,9 +1172,11 @@ export async function browserClick({ ref, selector, text, double, button = 'left
       }
     }
   } catch (err) {
-    throw await clarifyClickError(p, err, { selector, text, ref })
+    // The click happened and started loading a slow page: Playwright timed out waiting for it to
+    // commit. That's success, not "not found" (the model would click again).
+    if (!(/timeout/i.test(err?.message || '') && navRequestedSince(p, t0))) throw await clarifyClickError(p, err, { selector, text, ref })
   }
-  return settle(p, before)
+  return settle(p, before, 600, t0)
 }
 
 // Hover an element — the only way to open hover-driven menus (nav dropdowns, row action icons,
@@ -1177,12 +1218,21 @@ export async function browserFill({ ref, selector, value, label, pressEnter } = 
   assertPageAllowed(p)
   const val = value == null ? '' : String(value)
   const before = p.url()
+  let enterAt = Date.now()
   try {
     const target = await resolveTarget(p, { ref, text: label, selector }, 'fill')
     await target.scrollIntoViewIfNeeded({ timeout: 4000 }).catch(() => {})
     const info = await target
-      .evaluate((el) => ({ tag: el.tagName, type: String(el.type || '').toLowerCase() }))
+      .evaluate((el) => ({ tag: el.tagName, type: String(el.type || '').toLowerCase(), label: (el.innerText || el.value || '').trim().slice(0, 60) }))
       .catch(() => ({ tag: '', type: '' }))
+    // Never "fill" a link or a button: the old fallback clicked it, so a wrong number opened a random
+    // page and still reported "Filled".
+    if (info.tag === 'A' || info.tag === 'BUTTON' || (info.tag === 'INPUT' && ['submit', 'button', 'reset', 'image'].includes(info.type))) {
+      const what = `${ref != null && ref !== '' ? `[${ref}] ` : ''}${info.label ? `"${info.label}" ` : ''}`
+      throw new Error(
+        `${what}is a ${info.tag === 'A' ? 'link' : 'button'}, not a text field. Use browser_click to click it, or call browser_get_page and use a number from its fields list.`
+      )
+    }
     if (info.tag === 'SELECT') {
       try {
         await target.selectOption({ label: val }, { timeout: 12000 })
@@ -1212,11 +1262,19 @@ export async function browserFill({ ref, selector, value, label, pressEnter } = 
         } else throw err
       }
     }
-    if (pressEnter) await target.press('Enter', { timeout: 4000 }).catch(() => p.keyboard.press('Enter'))
+    if (pressEnter) {
+      enterAt = Date.now()
+      await target.press('Enter', { timeout: 4000 }).catch(async () => {
+        // Press Enter again only if the first one never got through. On a slow server it did (the
+        // form's request is out) and Playwright just timed out waiting: a second Enter would submit
+        // the form twice.
+        if (!navRequestedSince(p, enterAt)) await p.keyboard.press('Enter')
+      })
+    }
   } catch (err) {
     throw await clarifyClickError(p, err, { selector, text: label, ref })
   }
-  return pressEnter ? settle(p, before) : actionResult(p)
+  return pressEnter ? settle(p, before, 600, enterAt) : actionResult(p)
 }
 
 export async function browserGetPage({ limit } = {}) {
@@ -1365,8 +1423,9 @@ export async function browserClickAt({ x, y } = {}) {
   const { w, h } = await p.evaluate(() => ({ w: window.innerWidth, h: window.innerHeight }))
   const px = Number(x) <= 1 ? Number(x) * w : Number(x)
   const py = Number(y) <= 1 ? Number(y) * h : Number(y)
+  const t0 = Date.now()
   await p.mouse.click(px, py)
-  return settle(p, before)
+  return settle(p, before, 600, t0)
 }
 
 // Drag-and-drop. Two modes:
@@ -1504,6 +1563,7 @@ export async function browserPressKey({ keys, text } = {}) {
   const p = await ensurePage()
   assertPageAllowed(p)
   const before = p.url()
+  const t0 = Date.now()
   if (hasText) await p.keyboard.type(String(text))
   let submitted = hasText && /\n$/.test(String(text))
   for (const combo of keyList) {
@@ -1525,7 +1585,7 @@ export async function browserPressKey({ keys, text } = {}) {
     }
   }
   // Enter often submits a form / follows a link — let that navigation land before returning.
-  return submitted ? settle(p, before) : actionResult(p)
+  return submitted ? settle(p, before, 600, t0) : actionResult(p)
 }
 
 // Wait until a selector or visible text appears — for pages that render content after load
