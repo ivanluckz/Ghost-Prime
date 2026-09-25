@@ -205,6 +205,15 @@ export default function Main() {
         setMessages((prev) => [...prev, { role: 'system', content: `⏳ Waiting — ${who} is running; this starts when it finishes.`, reqId: ev.requestId }])
         return
       }
+      // "Can't reach Claude, retrying (2 of 10)…": one line per task, updated in place.
+      if (ev.kind === 'status') {
+        setMessages((prev) => {
+          const i = prev.findIndex((m) => m.role === 'system' && m.statusOf === ev.requestId)
+          const line = { role: 'system', content: `⚠ ${ev.text}`, reqId: ev.requestId, statusOf: ev.requestId }
+          return i === -1 ? [...prev, line] : prev.map((m, j) => (j === i ? line : m))
+        })
+        return
+      }
       // Instant acknowledgment: speak once, the first time a task uses a tool (if voice is on).
       if (ev.kind === 'tool_use' && voiceOutRef.current && ev.requestId && !ackedRef.current.has(ev.requestId)) {
         ackedRef.current.add(ev.requestId)

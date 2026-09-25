@@ -242,3 +242,10 @@ Status key:
    battery level?" once before the showcase: no live Claude call was possible overnight.
 7. **Fixed overnight 25 Sep:** the README used to describe AUTO as "each action approved". It now
    uses the §5 wording (classifier on Claude, no checks on Gemini, no "are you sure?" yet).
+8. **Fixed overnight 25 Sep:** with no internet (or Claude down), a question used to sit on
+   "working…" for about 3 minutes while Claude retried in silence, and every other message waited
+   behind it. Now each retry shows a line ("Can't reach Claude over the internet. Retrying…"), and if
+   Claude hasn't started yet it gives up after 2 network retries (3 for server errors): Gemini
+   answers instead, or the app says to check the Wi-Fi. A task that already ran a tool keeps waiting
+   (running it again could repeat its effect). Tested offline with the SDK stubbed
+   (`smoke-claude-retry`, 12 checks); not tried with the real network unplugged.

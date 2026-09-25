@@ -1548,7 +1548,28 @@ async function streamChatClaudeAgent({ messages, signal, onDelta, onEvent, model
   })
 
   let streamed = ''
+  let sawTool = false
   for await (const msg of response) {
+    if (msg.type === 'system' && msg.subtype === 'api_retry') {
+      // The CLI retries a failed API call ~10 times with backoff (about 3 minutes) and only tells us
+      // through these messages. Show each one. Before Claude has said or done anything, give up early
+      // (2 network failures, 3 server errors): the router then tries Gemini, or the user is told it's
+      // the internet, instead of watching "working…" for 3 minutes.
+      const network = msg.error_status == null
+      onEvent?.({
+        kind: 'status',
+        text: network
+          ? `Can't reach Claude over the internet. Retrying (${msg.attempt} of ${msg.max_retries})… check the Wi-Fi.`
+          : `Claude is busy right now (error ${msg.error_status}). Retrying (${msg.attempt} of ${msg.max_retries})…`
+      })
+      if (!streamed && !sawTool && msg.attempt >= (network ? 2 : 3)) {
+        abortController.abort()
+        throw new Error(
+          network ? 'cannot reach the Claude API (network connection error)' : `the Claude API is overloaded (${msg.error_status}, ${msg.attempt} retries)`
+        )
+      }
+      continue
+    }
     if (msg.type === 'stream_event') {
       const ev = msg.event
       if (ev?.type === 'content_block_delta' && ev.delta?.type === 'text_delta' && ev.delta.text) {
@@ -1559,6 +1580,7 @@ async function streamChatClaudeAgent({ messages, signal, onDelta, onEvent, model
       if (msg.error) throw new Error(`claude-agent error: ${msg.error}`)
       for (const block of msg.message?.content || []) {
         if (block?.type === 'tool_use') {
+          sawTool = true
           onEvent?.({ kind: 'tool_use', id: block.id, name: block.name, input: block.input })
         }
       }
@@ -1619,7 +1641,7 @@ async function streamChatClaudeAgent({ messages, signal, onDelta, onEvent, model
 // (streamChat) or a background job to GHOST_FALLBACK_PROVIDER (summaries / proactive lines).
 function isClaudeUnavailable(err) {
   const msg = (err?.message || String(err)).toLowerCase()
-  return /usage limit|rate.?limit|too many requests|\b429\b|\b529\b|\b503\b|quota|credit|insufficient|balance|billing|payment|overloaded|temporarily unavailable|service unavailable|\b401\b|\b403\b|unauthorized|forbidden|authentication|not authenticated|not logged in|invalid api key|please log ?in|token (?:expired|invalid)|subscription/.test(
+  return /cannot reach the claude api|usage limit|rate.?limit|too many requests|\b429\b|\b529\b|\b503\b|quota|credit|insufficient|balance|billing|payment|overloaded|temporarily unavailable|service unavailable|\b401\b|\b403\b|unauthorized|forbidden|authentication|not authenticated|not logged in|invalid api key|please log ?in|token (?:expired|invalid)|subscription/.test(
     msg
   )
 }
