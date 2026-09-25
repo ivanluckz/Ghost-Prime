@@ -145,8 +145,9 @@ Status key:
 **Other safeguards:**
 - **Site allow/block list** (Settings → Site access or `/site`). "open" mode allows every site except
   blocked ones; "strict" mode allows only allow-listed sites. It is enforced in the app for every
-  browser action and inside the extension. Ad-hoc check on 25 Sep: 4/4 passed (a block refuses the
-  site, strict mode refuses unknown sites and allows allow-listed subdomains). ⚠ The Chromebook's
+  browser action and inside the extension. `smoke-site-policy.mjs` **18/18** (added overnight 25 Sep):
+  the DEMO.md setup (strict + wikipedia.org + example.com) allows Wikipedia subdomains, refuses
+  google.com and look-alike hosts, and browser_navigate refuses before any page opens. ⚠ The Chromebook's
   real policy is currently **open, with nothing blocked**.
 - **Local bridge is token-gated**: constant-time token comparison, and web-page origins are
   refused. It listens only on `127.0.0.1` unless a **private** token is set. With the default token
