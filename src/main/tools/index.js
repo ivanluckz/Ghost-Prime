@@ -1059,7 +1059,8 @@ export async function executeTool(name, args = {}, { signal } = {}) {
       }
       case 'web_fetch': {
         const res = await web.webFetch({ ...args, signal })
-        return { output: res.error || res.content, isError: !!res.error }
+        if (res.error) return { output: res.error, isError: true }
+        return { output: res.note ? `${res.content ? `${res.content}\n\n` : ''}[${res.note}]` : res.content }
       }
 
       // Memory

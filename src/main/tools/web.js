@@ -69,30 +69,27 @@ export async function webSearch({ query, num_results = 5, signal } = {}) {
     let match
     const cleanText = (s) => s.replace(/<[^>]+>/g, '').replace(/&amp;/g, '&').replace(/&quot;/g, '"').replace(/&#x27;/g, "'").replace(/&lt;/g, '<').replace(/&gt;/g, '>').trim()
 
-    const titles = []
-    while ((match = titleRegex.exec(html)) !== null && titles.length < num_results) {
-      let rawUrl = match[1]
-      // DDG wraps external urls in /l/?kh=-1&uddg=https%3A%2F%2F...
+    // Each result's snippet is looked for only between its own title and the next result's title:
+    // pairing the two lists by position put every later snippet under the wrong link as soon as one
+    // result had none.
+    const heads = []
+    while ((match = titleRegex.exec(html)) !== null && heads.length <= num_results) {
+      let rawUrl = match[1].replace(/&amp;/g, '&')
+      // DDG wraps external urls in /l/?uddg=https%3A%2F%2F…&rut=… — searchParams already decodes
+      // it once (decoding again broke addresses containing %25).
       if (rawUrl.includes('uddg=')) {
         try {
-          const u = new URL(rawUrl, 'https://duckduckgo.com')
-          rawUrl = decodeURIComponent(u.searchParams.get('uddg') || rawUrl)
+          rawUrl = new URL(rawUrl, 'https://duckduckgo.com').searchParams.get('uddg') || rawUrl
         } catch {}
       }
-      titles.push({ url: rawUrl, title: cleanText(match[2]) })
+      heads.push({ url: rawUrl, title: cleanText(match[2]), end: titleRegex.lastIndex, start: match.index })
     }
-
-    const snippets = []
-    while ((match = snippetRegex.exec(html)) !== null && snippets.length < num_results) {
-      snippets.push(cleanText(match[1]))
-    }
-
-    for (let i = 0; i < titles.length; i++) {
-      results.push({
-        title: titles[i].title,
-        url: titles[i].url,
-        snippet: snippets[i] || ''
-      })
+    // One extra title was read so the last kept result's snippet search stops at the next result.
+    for (let i = 0; i < Math.min(heads.length, num_results); i++) {
+      const scope = html.slice(heads[i].end, i + 1 < heads.length ? heads[i + 1].start : undefined)
+      snippetRegex.lastIndex = 0
+      const sm = snippetRegex.exec(scope)
+      results.push({ title: heads[i].title, url: heads[i].url, snippet: sm ? cleanText(sm[1]) : '' })
     }
 
     if (results.length === 0) {
@@ -122,10 +119,15 @@ export async function webFetch({ url, signal } = {}) {
       .replace(/<[^>]+>/g, ' ')
       .replace(/\s+/g, ' ')
       .trim()
+    // A page built by JavaScript (many apps, some news sites) has almost no text in its HTML. Say so,
+    // or the model reads an empty result as "the page is empty".
+    const note =
+      clean.length < 80 ? 'This page has almost no text without JavaScript. Open it with browser_navigate and read it with browser_get_text instead.' : undefined
     return {
       url: finalUrl || url,
       content: clean.slice(0, 15000),
-      truncated: truncatedBody || clean.length > 15000
+      truncated: truncatedBody || clean.length > 15000,
+      ...(note ? { note } : {})
     }
   } catch (err) {
     return { error: `Web fetch error: ${describeFetchError(err)}` }
