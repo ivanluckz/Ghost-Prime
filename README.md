@@ -19,7 +19,11 @@ sessions** — wrapped in a Higgsfield-generated cinematic intro.
   spent and **never charges**. See [Switching the brain](#switching-the-brain-env).
 - **Streaming chat** with **Markdown** rendering (code blocks, lists, links), stop/abort mid-stream.
 - **Autonomy modes — Shift+Tab** to cycle (like Claude Code): **PLAN** (read-only) → **AUTO**
-  (each action approved) → **FULL** (no checks). Shown in the top bar.
+  (on the Claude brain an automatic safety classifier decides each action; on the Gemini brain AUTO
+  runs tools like FULL) → **FULL** (no checks). Nothing asks a human "are you sure?" yet. Shown in the
+  top bar. The app starts in FULL AUTO; `bin/ghost-showcase` starts in AUTO.
+- **Presenter mode** — `/showcase` (or launch with `bin/ghost-showcase`): big text for a projector,
+  chat history tucked away, starts in AUTO.
 - **Tools the agent can use:** live persistent terminals (`shell_run` — there is no `Bash` tool; shell
   work runs in terminals you can watch), `Read`, `Write`, `Edit`, `Glob`, `Grep`, `WebFetch`,
   `WebSearch`, reversible file ops + undo, reminders, clipboard, plus a **persistent, visible browser**
