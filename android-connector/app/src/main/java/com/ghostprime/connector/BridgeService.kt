@@ -13,6 +13,7 @@ import java.net.URLEncoder
 // with a stable id + friendly name + kind=phone so it registers as a named device.
 class BridgeService : Service() {
     @Volatile
+    @Volatile
     private var running = false
     private var worker: Thread? = null
 
@@ -67,7 +68,13 @@ class BridgeService : Service() {
                     readTimeout = 35000 // longer than the server's 25s long-poll hold
                     requestMethod = "GET"
                 }
+                conn.connect() // reached the computer; the bridge may hold this first poll for up to 25 s
+                if (!connected) lastError = "reached ${Prefs.host(ctx)}, waiting for Ghost-Prime (the first reply can take 25 s)"
                 val code = conn.responseCode
+                if (!running) { // stopped (or re-paired) while this poll was held: don't report or run anything
+                    conn.disconnect()
+                    break
+                }
                 if (code == 200) {
                     connected = true
                     lastError = ""
@@ -76,11 +83,12 @@ class BridgeService : Service() {
                     handle(body, token)
                 } else {
                     connected = false
-                    lastError = "poll HTTP $code"
+                    lastError = if (code == 403) "wrong token (HTTP 403): scan the pairing QR again" else "poll HTTP $code"
                     conn.disconnect()
                     sleep(1500)
                 }
             } catch (e: Exception) {
+                if (!running) break
                 connected = false
                 lastError = e.message ?: e.toString()
                 sleep(1500)

@@ -34,6 +34,8 @@ class ScreenCaptureService : Service() {
     private var width = 0
     private var height = 0
     private var density = 0
+    @Volatile
+    private var lastFrame: String? = null // Android sends no new frame while the screen is unchanged
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -81,7 +83,7 @@ class ScreenCaptureService : Service() {
             if (image != null) break
             Thread.sleep(60)
         }
-        image ?: return null
+        image ?: return lastFrame // no new frame = the screen hasn't changed since the last grab
         try {
             val plane = image.planes[0]
             val buffer = plane.buffer
@@ -95,7 +97,7 @@ class ScreenCaptureService : Service() {
             val out = ByteArrayOutputStream()
             cropped.compress(Bitmap.CompressFormat.PNG, 100, out)
             if (cropped !== bmp) bmp.recycle()
-            return "data:image/png;base64," + Base64.encodeToString(out.toByteArray(), Base64.NO_WRAP)
+            return ("data:image/png;base64," + Base64.encodeToString(out.toByteArray(), Base64.NO_WRAP)).also { lastFrame = it }
         } finally {
             image.close()
         }
@@ -104,6 +106,7 @@ class ScreenCaptureService : Service() {
     fun size(): Pair<Int, Int> = Pair(width, height)
 
     private fun teardown() {
+        lastFrame = null
         virtualDisplay?.release(); virtualDisplay = null
         reader?.close(); reader = null
         projection?.stop(); projection = null

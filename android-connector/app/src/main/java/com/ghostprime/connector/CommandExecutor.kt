@@ -63,6 +63,7 @@ object CommandExecutor {
     }
 
     private fun openApp(ctx: Context, args: JSONObject): JSONObject {
+        a11y() // Android blocks background launches without the accessibility service: fail clearly instead of "ok"
         val pkg = args.optString("package", "")
         val url = args.optString("url", "")
         return when {

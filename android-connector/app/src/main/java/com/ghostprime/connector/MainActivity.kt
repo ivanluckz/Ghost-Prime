@@ -57,13 +57,13 @@ class MainActivity : AppCompatActivity() {
         }
         findViewById<Button>(R.id.accessibility).setOnClickListener {
             startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
-            Toast.makeText(this, "Turn on Ghost-Prime", Toast.LENGTH_LONG).show()
+            Toast.makeText(this, "Installed apps → Ghost-Prime → On (greyed out? App info → ⋮ → Allow restricted settings)", Toast.LENGTH_LONG).show()
         }
         findViewById<Button>(R.id.screen).setOnClickListener { requestScreenCapture() }
         findViewById<Button>(R.id.start).setOnClickListener { startConnector() }
         findViewById<Button>(R.id.stop).setOnClickListener { stopConnector() }
 
-        applyPairing(intent?.data) // opened from the pairing QR
+        if (savedInstanceState == null) applyPairing(intent?.data) // opened from the pairing QR (not again on rotate / dark mode)
     }
 
     override fun onNewIntent(intent: Intent) {
