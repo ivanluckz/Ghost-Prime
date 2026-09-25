@@ -551,7 +551,7 @@ const ALL_TOOL_SPECS = [
         type: 'object',
         properties: {
           action: { type: 'string', enum: ['get', 'set', 'up', 'down', 'mute', 'unmute', 'toggle_mute'], description: 'Action' },
-          value: { type: 'number', description: 'Target percentage (0-100) or step amount' }
+          value: { type: 'number', description: 'For set: the level to set, 0-100 ("turn it to 80" = set 80). For up/down: how much to change it by (default 5). Never goes above 100.' }
         },
         required: ['action']
       }

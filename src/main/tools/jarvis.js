@@ -47,15 +47,17 @@ export async function systemVolume({ action = 'get', value = null } = {}) {
         await execAsync(`pactl set-sink-volume @DEFAULT_SINK@ ${pct}%`)
         return { success: true, message: `Volume set to ${pct}%` }
       }
-      case 'up': {
-        const step = volumeStep(value)
-        await execAsync(`pactl set-sink-volume @DEFAULT_SINK@ +${step}%`)
-        return { success: true, message: `Volume increased by ${step}%` }
-      }
+      case 'up':
       case 'down': {
+        // Work out the new level and set it: a relative "+N%" lets PulseAudio go past 100% (up to
+        // 150%, painfully loud on a projector's speakers).
         const step = volumeStep(value)
-        await execAsync(`pactl set-sink-volume @DEFAULT_SINK@ -${step}%`)
-        return { success: true, message: `Volume decreased by ${step}%` }
+        const { stdout } = await execAsync('pactl get-sink-volume @DEFAULT_SINK@')
+        const m = stdout.match(/(\d+)%/)
+        const cur = m ? parseInt(m[1], 10) : 50
+        const pct = Math.max(0, Math.min(100, action === 'up' ? Math.min(cur, 100) + step : cur - step))
+        await execAsync(`pactl set-sink-volume @DEFAULT_SINK@ ${pct}%`)
+        return { success: true, volume: pct, message: `Volume ${action === 'up' ? 'up' : 'down'} to ${pct}% (was ${cur}%)` }
       }
       case 'mute': {
         await execAsync('pactl set-sink-mute @DEFAULT_SINK@ 1')
@@ -332,7 +334,8 @@ export async function youtubePlay({ query, url } = {}) {
   try {
     let targetUrl = url
     if (!targetUrl && query) {
-      targetUrl = `https://www.youtube.com/results?search_query=${encodeURIComponent(query)}`
+      // encodeURIComponent leaves ' as is, which the check below refuses: "Don't Stop Me Now".
+      targetUrl = `https://www.youtube.com/results?search_query=${encodeURIComponent(query).replace(/'/g, '%27')}`
     }
     if (!targetUrl) return { error: 'Provide a search query or YouTube URL.' }
 
