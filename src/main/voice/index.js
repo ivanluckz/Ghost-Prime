@@ -77,6 +77,7 @@ async function geminiGenerate(model, body, timeoutMs = 20_000) {
 // --- Speech-to-text (push-to-talk) ---------------------------------------
 export function startRecording() {
   if (recProc) return
+  stopSpeaking() // never record Ghost-Prime's own voice: the mic would transcribe the reply back
   recErr = ''
   try {
     unlinkSync(REC_PATH) // don't let a stale WAV from a previous take mask a failed capture
@@ -135,13 +136,21 @@ export function stopRecordingAndTranscribe() {
 
 // Route to Gemini when enabled, with a clean fall back to local Whisper on any failure.
 function transcribe(wavPath) {
-  if (useGemini()) {
-    return geminiTranscribe(wavPath).catch((e) => {
-      console.warn('[voice] Gemini STT failed → local Whisper:', e.message)
-      return transcribeLocal(wavPath)
-    })
-  }
-  return transcribeLocal(wavPath)
+  const heard = useGemini()
+    ? geminiTranscribe(wavPath).catch((e) => {
+        console.warn('[voice] Gemini STT failed → local Whisper:', e.message)
+        return transcribeLocal(wavPath)
+      })
+    : transcribeLocal(wavPath)
+  return heard.then(spokenWords)
+}
+
+// Speech recognisers describe silence and noise instead of returning nothing — Whisper's
+// "[BLANK_AUDIO]", "(music)", "[inaudible]", or just "." — and that used to be sent as a message.
+export function spokenWords(text) {
+  const t = String(text || '').trim()
+  const words = t.replace(/\[[^\]]*\]|\([^)]*\)|\*[^*]*\*/g, ' ').replace(/[^\p{L}\p{N}]+/gu, ' ').trim()
+  return words ? t : ''
 }
 
 async function geminiTranscribe(wavPath) {
@@ -169,6 +178,8 @@ async function geminiTranscribe(wavPath) {
     .trim()
 }
 
+const LOCAL_STT_TIMEOUT_MS = 90_000 // first run loads the model (slow on a Chromebook); never hang "Transcribing…"
+
 function transcribeLocal(wavPath) {
   return new Promise((resolve, reject) => {
     // Run the model outside Electron's process: the Electron binary as plain Node.
@@ -178,10 +189,20 @@ function transcribeLocal(wavPath) {
     })
     let out = ''
     let err = ''
+    const timer = setTimeout(() => {
+      try {
+        proc.kill('SIGKILL')
+      } catch {}
+      reject(new Error('offline transcription timed out'))
+    }, LOCAL_STT_TIMEOUT_MS)
     proc.stdout.on('data', (d) => (out += d))
     proc.stderr.on('data', (d) => (err += d))
-    proc.on('error', reject)
+    proc.on('error', (e) => {
+      clearTimeout(timer)
+      reject(e)
+    })
     proc.on('close', (code) => {
+      clearTimeout(timer)
       if (code !== 0) return reject(new Error(err.trim() || `transcribe exited ${code}`))
       try {
         resolve((JSON.parse(out).text || '').trim())
@@ -193,16 +214,26 @@ function transcribeLocal(wavPath) {
 }
 
 // --- Text-to-speech ------------------------------------------------------
-export function speak(text) {
-  stopSpeaking()
-  const seq = ++speakSeq
-  // Strip markdown noise and cap length so we don't narrate a whole code dump.
-  const clean = String(text || '')
-    .replace(/```[\s\S]*?```/g, ' code block ')
+// What gets read aloud: markdown noise stripped, links read as their words (never a URL spelled
+// out), line breaks kept as sentence breaks so a list is spoken item by item, capped in length.
+export function cleanForSpeech(text) {
+  return String(text || '')
+    .replace(/```[\s\S]*?```/g, ' code block. ')
+    .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1') // [Wikipedia](https://…) → "Wikipedia"
+    .replace(/https?:\/\/(?:www\.)?([^\s/)]+)[^\s)]*/g, '$1') // bare URL → its site name
     .replace(/[`*_#>|]/g, '')
-    .replace(/\s+/g, ' ')
+    .replace(/[ \t\f\v]+/g, ' ')
+    .replace(/ *\n[\n ]*/g, '\n')
     .trim()
     .slice(0, 1200)
+}
+
+export function speak(text) {
+  stopSpeaking()
+  // The mic is open: speaking now would be recorded and sent back as the user's words.
+  if (recProc) return
+  const seq = ++speakSeq
+  const clean = cleanForSpeech(text)
   if (!clean) return
   if (useGemini()) {
     speakWithGemini(clean, seq).catch((e) => {
@@ -215,8 +246,10 @@ export function speak(text) {
 }
 
 function speakLocal(text) {
-  if (hasPiper()) speakWithPiper(text)
-  else if (hasEspeak()) speakWithEspeak(text)
+  const t = String(text).replace(/\s*\n\s*/g, '. ')
+  if (hasPiper()) speakWithPiper(t)
+  else if (hasEspeak()) speakWithEspeak(t)
+  else console.warn('[voice] no local voice (Piper or espeak-ng) to fall back to')
 }
 
 // Split into small chunks so the FIRST audio starts after one sentence's worth of TTS, not the
@@ -224,19 +257,25 @@ function speakLocal(text) {
 // versions like "1.5.0" stay intact (short abbreviations like "e.g." may still split, but the ~60-char
 // merge below usually rejoins them), then merge consecutive sentences until a chunk is ~60+ chars so
 // short sentences don't each cost a request.
-function chunkForSpeech(text) {
-  const parts = text.split(/(?<=[.!?])\s+/).filter(Boolean)
+// The first chunk stays short (~60 chars) so speech starts quickly; later chunks are longer (~300)
+// because every chunk is one request against the free tier's small TTS quota. Line breaks (list
+// items) are split points too.
+export function chunkForSpeech(text) {
+  const parts = String(text)
+    .split(/(?<=[.!?])\s+|\n+/)
+    .map((p) => p.trim())
+    .filter(Boolean)
   const chunks = []
   let buf = ''
   for (const p of parts) {
-    buf = buf ? buf + ' ' + p : p
-    if (buf.length >= 60) {
+    buf = buf ? buf + (/[.!?:;,]$/.test(buf) ? ' ' : '. ') + p : p
+    if (buf.length >= (chunks.length ? 300 : 60)) {
       chunks.push(buf)
       buf = ''
     }
   }
   if (buf) chunks.push(buf)
-  return chunks.length ? chunks : [text]
+  return chunks.length ? chunks : [String(text)]
 }
 
 // Play raw PCM via aplay; resolves when playback finishes, so chunks play back-to-back.
@@ -255,7 +294,14 @@ function playPcm(pcm, rate, seq) {
 
 async function speakWithGemini(text, seq) {
   let played = false
-  for (const chunk of chunkForSpeech(text)) {
+  const chunks = chunkForSpeech(text)
+  // Anything Gemini didn't voice is read by the local engine, so a reply never just stops.
+  const rest = (i) => {
+    if (seq !== speakSeq) return
+    const left = chunks.slice(i).join(' ')
+    if (left) speakLocal(left)
+  }
+  for (const [i, chunk] of chunks.entries()) {
     if (seq !== speakSeq) return // stopped or superseded
     let j
     try {
@@ -272,12 +318,16 @@ async function speakWithGemini(text, seq) {
       )
     } catch (e) {
       if (!played) throw e // nothing spoken yet → let speak() fall back to the local voice
-      console.warn('[voice] TTS chunk failed mid-reply, stopping early:', e.message) // don't re-speak
-      return
+      console.warn('[voice] TTS chunk failed mid-reply → local voice for the rest:', e.message)
+      return rest(i)
     }
     if (seq !== speakSeq) return
     const part = (j?.candidates?.[0]?.content?.parts || []).find((p) => p?.inlineData?.data)
-    if (!part) continue
+    if (!part) {
+      console.warn('[voice] Gemini TTS returned no audio → local voice for the rest')
+      if (!played) throw new Error('Gemini TTS returned no audio')
+      return rest(i)
+    }
     const pcm = Buffer.from(part.inlineData.data, 'base64')
     // mimeType is like "audio/L16;codec=pcm;rate=24000" — use the real rate so pitch is correct.
     const rate = (/rate=(\d+)/.exec(part.inlineData.mimeType || '') || [])[1] || '24000'
@@ -296,6 +346,10 @@ function speakWithPiper(text) {
   speakProcs = [piper, play]
   piper.on('error', (e) => console.error('[voice] piper error:', e.message))
   play.on('error', (e) => console.error('[voice] aplay error:', e.message))
+  // Stop/kill mid-sentence closes these pipes: an unhandled EPIPE would crash the main process.
+  play.stdin.on('error', () => {})
+  piper.stdin.on('error', () => {})
+  piper.stdout.on('error', () => {})
   piper.stdout.pipe(play.stdin)
   piper.stdin.write(text)
   piper.stdin.end()
