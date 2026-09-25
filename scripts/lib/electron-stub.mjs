@@ -5,7 +5,7 @@ import { mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 
-const dataDir = join(tmpdir(), 'ghost-prime-stub')
+const dataDir = process.env.GHOST_STUB_DATA_DIR || join(tmpdir(), 'ghost-prime-stub') // a test can use its own
 mkdirSync(dataDir, { recursive: true })
 
 export const app = { getPath: () => dataDir, getAppPath: () => process.cwd(), isPackaged: false, on() {} }

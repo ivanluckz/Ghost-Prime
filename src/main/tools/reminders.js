@@ -52,6 +52,9 @@ export function setReminder({ text, at, inMinutes, inSeconds } = {}) {
   if (!dueAt) throw new Error('need a time: pass `at` (ISO 8601) or `inMinutes` / `inSeconds`')
   if (dueAt < Date.now() - 1000) throw new Error('that time is in the past')
   const id = addReminder(clean, dueAt)
+  // addReminder returns null when the database didn't open at startup: nothing was saved, so it
+  // would never fire. Say so (the model tells the user) instead of reporting success.
+  if (!id) throw new Error("reminders are unavailable right now (the app's database didn't open), so it was not saved")
   return { id, dueAt }
 }
 

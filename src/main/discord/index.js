@@ -31,6 +31,9 @@ const histories = new Map() // channelId -> [{role, content}]
 // Cross-channel / cross-surface ordering is the global run slot in provider.js's streamChat.
 const chains = new Map()
 let offReminders = null // unsubscribe from db.onReminderFired while the bot is up
+// Discord reminders that fired before the bot finished logging in (one already due at app start
+// fires ~3 s in, long before the gateway is up). Delivered on 'clientReady'. Bounded.
+const heldReminders = []
 const running = new Map() // channelId -> AbortController (in-flight run, so !stop can cancel it)
 const modes = new Map() // channelId -> 'plan' | 'auto' | 'full' (per-channel autonomy override)
 const brains = new Map() // channelId -> 'auto' | 'gemini' | 'claude' (per-channel brain override)
@@ -211,6 +214,19 @@ export async function startDiscord({ onStatus } = {}) {
     } catch {}
   }
 
+  // Reminders asked for from a Discord channel come back to that channel when they fire (the desktop
+  // notification still shows too). Origins are 'discord:<channelId>' (see db.addReminder). Subscribe
+  // NOW, before login: a reminder that is already due fires within seconds of launch. Until the bot
+  // is ready, hold them (no "not connected" noise from a bot that never logs in).
+  offReminders?.()
+  offReminders = onReminderFired((r) => {
+    const target = channelFromOrigin(r?.origin)
+    if (!target) return
+    const text = `⏰ **Reminder:** ${r.text}`
+    if (client?.isReady?.()) notifyDiscord(target, text).catch((e) => console.warn('[discord] reminder delivery failed:', e?.message || e))
+    else if (heldReminders.length < 20) heldReminders.push({ target, text })
+  })
+
   if (!allowedIds().length) {
     console.warn('[discord] DISCORD_BOT_TOKEN is set but DISCORD_ALLOWED_USER_IDS is empty — the bot will refuse every message until you add your Discord user id.')
   }
@@ -238,15 +254,10 @@ export async function startDiscord({ onStatus } = {}) {
       try {
         c.user.setActivity('Ghost-Prime', { type: ActivityType.Listening })
       } catch {}
-      // Reminders asked for from a Discord channel come back to that channel when they fire (the
-      // desktop notification still shows too). Origins are 'discord:<channelId>' — see
-      // db.addReminder. Subscribed only once a client is connected, so a bot that never logged in
-      // (bad token, disallowed intents) doesn't log "not connected" on every firing.
-      offReminders?.()
-      offReminders = onReminderFired((r) => {
-        const target = channelFromOrigin(r?.origin)
-        if (target) notifyDiscord(target, `⏰ **Reminder:** ${r.text}`).catch((e) => console.warn('[discord] reminder delivery failed:', e?.message || e))
-      })
+      // Deliver the reminders that fired while we were still logging in.
+      for (const { target, text } of heldReminders.splice(0)) {
+        notifyDiscord(target, text).catch((e) => console.warn('[discord] reminder delivery failed:', e?.message || e))
+      }
     })
     c.on('error', (e) => console.error('[discord] client error:', e?.message || e))
     c.on('messageCreate', (msg) => handleMessage(msg).catch((e) => console.error('[discord]', e?.message || e)))
