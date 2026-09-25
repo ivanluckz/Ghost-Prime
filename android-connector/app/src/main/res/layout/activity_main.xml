@@ -36,6 +36,20 @@
             android:text="Not connected"
             android:textColor="#EEF2FF" />
 
+        <Button
+            android:id="@+id/pastePair"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Paste pairing link" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="6dp"
+            android:text="Easiest: in Ghost-Prime open Settings → Pair your phone and scan the QR with the camera. Or fill in the fields below."
+            android:textColor="#9FB0D6"
+            android:textSize="12sp" />
+
         <EditText
             android:id="@+id/host"
             android:layout_width="match_parent"

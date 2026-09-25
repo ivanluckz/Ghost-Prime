@@ -321,6 +321,8 @@ export default function SettingsPanel({ onClose, mirror, onMirrorChange, onChats
         {hkError && <p className="set-note set-warn">{hkError}</p>}
       </section>
 
+      <PhonePairing />
+
       <section className="set-section">
         <div className="set-title">Site access</div>
         <div className="set-seg">
@@ -391,5 +393,71 @@ export default function SettingsPanel({ onClose, mirror, onMirrorChange, onChats
         </div>
       </section>
     </div>
+  )
+}
+
+// Pair the Android connector: point the phone's camera at the QR and it connects — no typing.
+function PhonePairing() {
+  const saved = (() => {
+    try {
+      return localStorage.getItem('ghost.phoneHost') || ''
+    } catch {
+      return ''
+    }
+  })()
+  const [host, setHost] = useState(saved)
+  const [info, setInfo] = useState(null)
+  const [busy, setBusy] = useState(false)
+
+  async function show(h = host) {
+    setBusy(true)
+    try {
+      const r = await window.ghost.phone?.pairInfo(h.trim())
+      setInfo(r || null)
+      if (r?.host) {
+        setHost(r.host)
+        try {
+          localStorage.setItem('ghost.phoneHost', r.host)
+        } catch {}
+      }
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <section className="set-section">
+      <div className="set-title">Pair your phone</div>
+      <p className="set-note">
+        Scan with the phone's camera — the Ghost-Prime connector app opens and connects by itself. Phone and
+        Chromebook must be on the same Wi-Fi.
+      </p>
+      <div className="set-pair-row">
+        <input
+          className="set-pair-host"
+          value={host}
+          onChange={(e) => setHost(e.target.value)}
+          onKeyDown={(e) => e.key === 'Enter' && show()}
+          placeholder="Chromebook Wi-Fi IP, e.g. 10.14.46.195"
+          spellCheck={false}
+        />
+        <button onClick={() => show()} disabled={busy}>
+          {info?.dataUrl ? 'Refresh' : 'Show QR'}
+        </button>
+      </div>
+      {info?.problems?.map((p) => (
+        <p className="set-note set-warn" key={p}>
+          {p}
+        </p>
+      ))}
+      {info?.dataUrl && (
+        <>
+          <img className="set-pair-qr" src={info.dataUrl} alt="Phone pairing QR code" />
+          <p className="set-note">
+            Also needed once: Chrome OS Settings → Developers → Linux → Port forwarding → add {info.port}.
+          </p>
+        </>
+      )}
+    </section>
   )
 }

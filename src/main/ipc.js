@@ -1,4 +1,5 @@
 import { ipcMain } from 'electron'
+import { pairingInfo } from './tools/pairing.js'
 import { streamChat } from './agent/provider.js'
 import {
   recentSessions,
@@ -188,6 +189,7 @@ export function registerIpc() {
   })
 
   // --- Per-site permissions ---
+  ipcMain.handle('phone:pair-info', (_event, host) => pairingInfo({ host }))
   ipcMain.handle('sites:get', () => getPolicy())
   ipcMain.handle('sites:set', (_event, policy) => setPolicy(policy || {}))
 

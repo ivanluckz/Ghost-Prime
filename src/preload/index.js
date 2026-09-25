@@ -128,6 +128,12 @@ contextBridge.exposeInMainWorld('ghost', {
       return ipcRenderer.invoke('browser:set-target', target)
     }
   },
+  // Phone pairing QR (host = the Chromebook's Wi-Fi IP).
+  phone: {
+    pairInfo(host) {
+      return ipcRenderer.invoke('phone:pair-info', host)
+    }
+  },
   // Per-site permissions (allow/block lists + strict mode).
   sites: {
     get() {

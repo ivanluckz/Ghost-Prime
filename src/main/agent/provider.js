@@ -5,6 +5,7 @@ import { clipboard, Notification, BrowserWindow } from 'electron'
 import OpenAI from 'openai'
 import * as browser from '../tools/browser.js'
 import * as phone from '../tools/phone.js'
+import { pairingInfo } from '../tools/pairing.js'
 import * as screen from '../tools/screen.js'
 import * as shell from '../tools/shell-sessions.js'
 import * as reminders from '../tools/reminders.js'
@@ -118,7 +119,7 @@ const JARVIS_TOOLS = ['system_volume', 'system_brightness', 'system_power', 'sys
 const JARVIS_TOOL_NAMES = JARVIS_TOOLS.map((n) => `mcp__${JARVIS_SERVER}__${n}`)
 
 const PHONE_SERVER = 'ghost-phone'
-const PHONE_TOOL_NAMES = ['phone_screenshot', 'phone_ui', 'phone_tap', 'phone_swipe', 'phone_type', 'phone_key', 'phone_open_app'].map(
+const PHONE_TOOL_NAMES = ['phone_pair', 'phone_screenshot', 'phone_ui', 'phone_tap', 'phone_swipe', 'phone_type', 'phone_key', 'phone_open_app'].map(
   (n) => `mcp__${PHONE_SERVER}__${n}`
 )
 
@@ -186,7 +187,7 @@ function claudeToolsSection() {
 - WebFetch / WebSearch — fetch a URL or search the web for current information.
 - browser_navigate / browser_get_page / browser_get_text / browser_find / browser_click / browser_click_at / browser_hover / browser_fill / browser_screenshot / browser_read_pages / browser_drag — drive the browser (via the Chrome extension bridge or Playwright).
 - browser_list_tabs / browser_use_tab / browser_close_tab / browser_scroll / browser_press_key / browser_wait_for / browser_wait_for_navigation / browser_go_back / browser_go_forward / browser_reload — browser tab and navigation controls. browser_list_browsers / browser_use_browser switch between separate connected browsers/profiles.
-- phone_screenshot / phone_ui / phone_tap / phone_swipe / phone_type / phone_key / phone_open_app — the user's Android phone, when the Ghost-Prime connector app is connected (errors say so if it isn't).
+- phone_pair — show the QR code that connects the user's phone. phone_screenshot / phone_ui / phone_tap / phone_swipe / phone_type / phone_key / phone_open_app — the user's Android phone, when the Ghost-Prime connector app is connected (errors say so if it isn't).
 - memory_save / memory_recall — your long-term memory across sessions (supports tags + a ttl for temporary facts).
 - file_write / file_create / file_move / file_delete — REVERSIBLE file changes. When the user might want to undo a change (moving/renaming/deleting/rewriting a file), prefer these over the plain Write tool so undo_last can restore it. undo_last / undo_list — take back the last such change, or show what's undoable. (Use the Edit tool for surgical in-place code edits.)
 - reminder_set / reminder_list / reminder_cancel — schedule a desktop notification for later ("remind me at 5 to…"). Resolve vague times to an absolute time or minutes-from-now yourself.
@@ -1076,6 +1077,27 @@ async function getPhoneMcpServer() {
     name: PHONE_SERVER,
     version: '1.0.0',
     tools: [
+      tool(
+        'phone_pair',
+        "Show a QR code that pairs the user's Android phone (the Ghost-Prime connector app) with this " +
+          'computer — they scan it with the phone camera and it connects. Use when they ask to connect/pair/' +
+          'set up their phone, or when a phone_* tool reports no phone is connected.',
+        { host: z.string().optional() },
+        async ({ host }) => {
+          const r = await pairingInfo({ host })
+          if (!r.dataUrl) return { content: [{ type: 'text', text: `Can't make the pairing QR yet: ${r.problems.join(' ')}` }], isError: true }
+          const notes = r.problems.length ? `\nHeads-up: ${r.problems.join(' ')}` : ''
+          return {
+            content: [
+              { type: 'image', data: r.dataUrl.split(',')[1], mimeType: 'image/png' },
+              {
+                type: 'text',
+                text: `Pairing QR ready (${r.host}:${r.port}) and shown to the user. Tell them: open the phone camera, point it at the code, tap the link — the connector app opens and connects. Port forwarding for ${r.port} must be on in Chrome OS Linux settings.${notes}`
+              }
+            ]
+          }
+        }
+      ),
       tool(
         'phone_screenshot',
         "See the connected Android phone's screen (real pixels). Afterwards phone_tap / phone_swipe " +

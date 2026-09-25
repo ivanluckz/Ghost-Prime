@@ -5,7 +5,12 @@ import * as bridge from './browser-bridge.js'
 // 'phone': screenshot (MediaProjection), uiDump/tap/swipe/type/key (AccessibilityService), openApp
 // (launch intents). The phone connects over LAN; nothing here needs adb or root.
 const KIND = bridge.KIND_PHONE
-const send = (cmd, args = {}, timeoutMs = 25000) => bridge.sendCommand(cmd, args, timeoutMs, null, KIND)
+const send = (cmd, args = {}, timeoutMs = 25000) =>
+  bridge.sendCommand(cmd, args, timeoutMs, null, KIND).catch((e) => {
+    // Point the agent at the fix instead of a dead end.
+    if (/no Ghost-Prime phone is connected/i.test(e?.message || '')) throw new Error(`${e.message} — call phone_pair to show the pairing QR code.`)
+    throw e
+  })
 
 export const phoneConnected = () => bridge.bridgeConnected(null, KIND)
 

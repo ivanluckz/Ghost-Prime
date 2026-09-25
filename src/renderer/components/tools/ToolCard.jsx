@@ -45,6 +45,7 @@ export const TOOL_META = {
   browser_hover: { glyph: '☝', kind: 'browser' },
   browser_find: { glyph: '⌕', kind: 'browser' },
   browser_drag: { glyph: '⇢', kind: 'browser' },
+  phone_pair: { glyph: '⌗', kind: 'phone' },
   phone_screenshot: { glyph: '▯', kind: 'phone' },
   phone_ui: { glyph: '☷', kind: 'phone' },
   phone_tap: { glyph: '◎', kind: 'phone' },

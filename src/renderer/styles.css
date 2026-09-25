@@ -1975,7 +1975,8 @@ html.native-frame .sidebar-head {
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.set-hotkey button {
+.set-hotkey button,
+.set-pair-row button {
   flex: 0 0 auto;
   padding: 7px 12px;
   border-radius: 8px;
@@ -1987,7 +1988,8 @@ html.native-frame .sidebar-head {
   cursor: pointer;
   transition: all 140ms var(--ease-out);
 }
-.set-hotkey button:hover {
+.set-hotkey button:hover,
+.set-pair-row button:hover:not(:disabled) {
   color: var(--ink);
   background: rgba(255, 255, 255, 0.09);
 }
@@ -3043,4 +3045,31 @@ select:focus-visible,
 .chat-input .btn {
   align-self: flex-end;
   height: 48px;
+}
+
+/* --- Phone pairing (Settings) -------------------------------------------- */
+.set-pair-row {
+  display: flex;
+  gap: 6px;
+  margin-top: 8px;
+}
+.set-pair-host {
+  flex: 1;
+  min-width: 0;
+  padding: 7px 10px;
+  border-radius: 9px;
+  border: 1px solid var(--glass-brd);
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--ink);
+  font: 500 12.5px/1.2 var(--mono);
+}
+.set-pair-qr {
+  display: block;
+  width: 220px;
+  height: 220px;
+  margin: 12px auto 4px;
+  padding: 8px;
+  border-radius: 12px;
+  background: #fff; /* QR needs a light quiet zone to scan reliably */
+  image-rendering: pixelated;
 }

@@ -5,6 +5,7 @@ import * as web from './web.js'
 import * as jarvis from './jarvis.js'
 import * as screen from './screen.js'
 import * as phone from './phone.js'
+import { pairingInfo } from './pairing.js'
 import * as fileUndo from './file-undo.js'
 import * as reminders from './reminders.js'
 import { saveMemory, recallMemories } from '../memory/db.js'
@@ -307,6 +308,18 @@ const ALL_TOOL_SPECS = [
   },
 
   // ── Android phone (connector app over the bridge) ────────────────────────
+  {
+    type: 'function',
+    function: {
+      name: 'phone_pair',
+      description:
+        "Show a QR code that pairs the user's Android phone (the Ghost-Prime connector app) with this computer — they scan it with the phone camera and it connects. Use when they ask to connect/pair/set up their phone, or when a phone_* tool says no phone is connected.",
+      parameters: {
+        type: 'object',
+        properties: { host: { type: 'string', description: "The Chromebook's Wi-Fi IP, only if the user just told you a new one." } }
+      }
+    }
+  },
   {
     type: 'function',
     function: {
@@ -964,6 +977,15 @@ export async function executeTool(name, args = {}, { signal } = {}) {
       }
 
       // Phone
+      case 'phone_pair': {
+        const r = await pairingInfo({ host: args.host })
+        if (!r.dataUrl) return { output: `Can't make the pairing QR yet: ${r.problems.join(' ')}`, isError: true }
+        const notes = r.problems.length ? `\nHeads-up: ${r.problems.join(' ')}` : ''
+        return {
+          output: `Pairing QR ready (${r.host}:${r.port}). Tell the user: open the phone camera, point it at the code, tap the link — the connector app opens and connects. Port forwarding for ${r.port} must be on in Chrome OS Linux settings.${notes}`,
+          image: r.dataUrl
+        }
+      }
       case 'phone_screenshot': {
         const r = await phone.phoneScreenshot()
         return { output: `Phone screenshot captured (${r.w}×${r.h})`, image: `data:image/png;base64,${r.base64}` }

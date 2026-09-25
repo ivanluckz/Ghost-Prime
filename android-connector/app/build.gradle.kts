@@ -11,8 +11,8 @@ android {
         applicationId = "com.ghostprime.connector"
         minSdk = 30 // Android 11 — clean foreground-service types, broad device coverage
         targetSdk = 34
-        versionCode = 1
-        versionName = "1.0"
+        versionCode = 2
+        versionName = "1.1"
     }
 
     buildTypes {

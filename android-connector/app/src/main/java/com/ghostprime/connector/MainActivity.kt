@@ -5,7 +5,9 @@ import android.app.Activity
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.content.ClipboardManager
 import android.media.projection.MediaProjectionManager
+import android.net.Uri
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
@@ -46,6 +48,13 @@ class MainActivity : AppCompatActivity() {
             Toast.makeText(this, "Saved", Toast.LENGTH_SHORT).show()
             restartBridge()
         }
+        findViewById<Button>(R.id.pastePair).setOnClickListener {
+            val cm = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+            val text = cm.primaryClip?.takeIf { it.itemCount > 0 }?.getItemAt(0)?.coerceToText(this)?.toString()?.trim().orEmpty()
+            if (!applyPairing(runCatching { Uri.parse(text) }.getOrNull())) {
+                Toast.makeText(this, "No pairing link on the clipboard", Toast.LENGTH_LONG).show()
+            }
+        }
         findViewById<Button>(R.id.accessibility).setOnClickListener {
             startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
             Toast.makeText(this, "Turn on Ghost-Prime", Toast.LENGTH_LONG).show()
@@ -53,6 +62,35 @@ class MainActivity : AppCompatActivity() {
         findViewById<Button>(R.id.screen).setOnClickListener { requestScreenCapture() }
         findViewById<Button>(R.id.start).setOnClickListener { startConnector() }
         findViewById<Button>(R.id.stop).setOnClickListener { stopConnector() }
+
+        applyPairing(intent?.data) // opened from the pairing QR
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        applyPairing(intent.data)
+    }
+
+    // ghostprime://pair?host=…&port=…&token=… (the QR in Ghost-Prime's Settings): save it, fill the
+    // form and connect straight away. Returns false when the link isn't a pairing link.
+    private fun applyPairing(uri: Uri?): Boolean {
+        if (uri == null || uri.scheme != "ghostprime" || uri.host != "pair") return false
+        val h = uri.getQueryParameter("host")?.trim().orEmpty()
+        val p = uri.getQueryParameter("port")?.toIntOrNull() ?: 8731
+        val t = uri.getQueryParameter("token")?.trim().orEmpty()
+        if (h.isEmpty() || t.isEmpty()) {
+            Toast.makeText(this, "That pairing link is incomplete", Toast.LENGTH_LONG).show()
+            return false
+        }
+        Prefs.save(this, h, p, t)
+        host.setText(h)
+        port.setText(p.toString())
+        token.setText(t)
+        ensureNotifPermission()
+        restartBridge()
+        Toast.makeText(this, "Paired with $h — connecting…", Toast.LENGTH_LONG).show()
+        return true
     }
 
     override fun onResume() {
