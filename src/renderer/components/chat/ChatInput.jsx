@@ -29,6 +29,11 @@ const IconMic = () => (
     <path d="M3.5 7.5a4.5 4.5 0 0 0 9 0M8 12v2.25" />
   </svg>
 )
+const IconStop = () => (
+  <svg {...svg} width={14} height={14}>
+    <rect x="3.5" y="3.5" width="9" height="9" rx="2" fill="currentColor" stroke="none" />
+  </svg>
+)
 const IconSend = () => (
   <svg {...svg} width={16} height={16} strokeWidth={1.75}>
     <path d="M8 13V3.5M3.75 7.5 8 3.25l4.25 4.25" />
@@ -49,7 +54,9 @@ export function voiceProblem(error) {
 }
 
 // `hasAttachments` lets an attachment-only message go out (Main.send substitutes a default prompt).
-export default function ChatInput({ onSend, busy, hasAttachments = false }) {
+// `onStop` stops the running task (and anything queued). Shown whenever a task runs, so it is also
+// there in presenter mode, where the Activity panel (with its own ■ buttons) is tucked away.
+export default function ChatInput({ onSend, onStop, busy, hasAttachments = false }) {
   const [value, setValue] = useState('')
   const [voiceState, setVoiceState] = useState('idle') // idle | listening | transcribing
   const [voiceNote, setVoiceNote] = useState('') // a failed / empty recording, shown for a few seconds
@@ -199,6 +206,12 @@ export default function ChatInput({ onSend, busy, hasAttachments = false }) {
           placeholder={placeholder}
           rows={1}
         />
+        {busy && onStop && (
+          <button type="button" className="btn btn-stop" onClick={onStop} title="Stop the running task" aria-label="Stop the running task">
+            <IconStop />
+            <span className="btn-send-label">Stop</span>
+          </button>
+        )}
         <button type="submit" className="btn btn-send" disabled={!canSend}>
           <IconSend />
           <span className="btn-send-label">Send</span>

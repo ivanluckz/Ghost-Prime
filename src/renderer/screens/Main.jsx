@@ -897,7 +897,7 @@ export default function Main() {
             ))}
           </div>
         )}
-        <ChatInput onSend={send} busy={busy} hasAttachments={attachments.length > 0} />
+        <ChatInput onSend={send} onStop={stopAll} busy={busy} hasAttachments={attachments.length > 0} />
       </div>
       {activityOpen && (
         <ActivityPanel

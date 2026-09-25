@@ -817,6 +817,29 @@
   box-shadow: inset 0 0 0 1px var(--shell-line);
 }
 
+/* Stop: only while a task runs. Red-tinted so it reads as "stop", next to Send (which still queues). */
+.composer .btn-stop {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 14px 0 12px;
+  border: 0;
+  background: rgba(255, 93, 122, 0.14);
+  color: #ffc2cd;
+  font-size: 13px;
+  font-weight: 700;
+  box-shadow: inset 0 0 0 1px rgba(255, 93, 122, 0.5);
+  transition: background-color 140ms var(--ease-out), color 140ms var(--ease-out);
+}
+.composer .btn-stop:hover {
+  background: rgba(255, 93, 122, 0.3);
+  color: #fff;
+}
+@container pane (max-width: 560px) {
+  .composer .btn-stop { padding: 0; width: 40px; justify-content: center; }
+}
+
 /* Key hints under the box. */
 .input-hint {
   gap: 18px;
