@@ -19,7 +19,7 @@ async function page(width = 1280, height = 840, query = '') {
     console.log('PAGEERROR:', e.message)
   })
   await p.goto(base + query)
-  await p.waitForSelector('.chat-input textarea', { timeout: 20000 })
+  await p.waitForSelector('.chat-input textarea', { timeout: 60000 }) // the dev server is slow on a busy machine
   await p.waitForTimeout(900)
   return p
 }
