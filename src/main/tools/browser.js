@@ -279,6 +279,9 @@ const lastNavAt = new WeakMap() // Page -> timestamp of its last main-frame navi
 // long before the new page commits, and Playwright's click/press time out waiting for that commit:
 // this tells "the action worked, the page is slow" apart from "the action never happened".
 const lastNavReq = new WeakMap()
+// Tabs whose renderer crashed ("Aw, Snap!", often out of memory). A crashed Page is not closed, so
+// without this it was reused and every later browser tool failed until the tab was closed by hand.
+const crashedPages = new WeakSet()
 const navRequestedSince = (pg, t0) => (lastNavReq.get(pg)?.at || 0) >= t0
 let nextPageId = 1
 let pendingEvents = [] // notable things since the last action result: dialog / download / popup
@@ -344,6 +347,10 @@ function trackPage(pg) {
   })
   pg.on('framenavigated', (f) => {
     if (f === pg.mainFrame()) lastNavAt.set(pg, Date.now())
+  })
+  pg.on('crash', () => {
+    crashedPages.add(pg)
+    console.warn(`[browser] tab crashed: ${pg.url()}`)
   })
   pg.on('request', (req) => {
     if (req.isNavigationRequest() && req.frame() === pg.mainFrame()) lastNavReq.set(pg, { at: Date.now(), req })
@@ -422,8 +429,15 @@ async function ensurePage(retry = true) {
       attachContext(context)
       page = context.pages()[0] || (await context.newPage())
     }
+    if (page && crashedPages.has(page)) {
+      // Replace a crashed tab with a fresh one (the model is told, and opens the page again).
+      const dead = page
+      page = null
+      noteEvent({ kind: 'tab-crashed', url: dead.url() })
+      await dead.close().catch(() => {})
+    }
     if (!page || page.isClosed()) {
-      const open = context.pages().filter((x) => !x.isClosed())
+      const open = context.pages().filter((x) => !x.isClosed() && !crashedPages.has(x))
       page = open[open.length - 1] || (await context.newPage())
     }
     trackPage(page)
@@ -496,6 +510,7 @@ export function describeEvents(events = []) {
       if (e.kind === 'download') return e.error ? `A download started (${e.url}) but couldn't be saved: ${e.error}` : `Download saved to ${e.path}`
       if (e.kind === 'popup') return `That opened a new tab — now acting on it: ${e.title ? `"${e.title}" · ` : ''}${e.url}`
       if (e.kind === 'tab-closed') return `That tab closed — now acting on ${e.url}`
+      if (e.kind === 'tab-crashed') return `The tab showing ${e.url} had crashed (often low memory), so a fresh tab was opened. Open the page again if you still need it.`
       return ''
     })
     .filter(Boolean)
