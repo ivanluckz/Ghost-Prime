@@ -239,7 +239,9 @@ export default function SettingsPanel({ onClose, mirror, onMirrorChange, onChats
       <div className="set-head">
         <span>Settings</span>
         <button className="set-close" onClick={onClose} aria-label="Close settings">
-          ✕
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" aria-hidden="true">
+            <path d="m4 4 8 8M12 4l-8 8" />
+          </svg>
         </button>
       </div>
 
@@ -352,7 +354,9 @@ export default function SettingsPanel({ onClose, mirror, onMirrorChange, onChats
         <div className="set-title">Memory{memCount ? ` (${memCount})` : ''}</div>
         <p className="set-note">Everything Ghost has remembered about you across chats. Delete anything you don’t want kept.</p>
         {memList === null ? (
-          <button onClick={loadMemories}>Show what Ghost remembers</button>
+          <button className="set-btn" onClick={loadMemories}>
+            Show what Ghost remembers
+          </button>
         ) : memList.length === 0 ? (
           <p className="set-empty">Nothing remembered yet.</p>
         ) : (

@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import GhostCore from './GhostCore'
 
 // Tool glyphs/kinds are shared with ToolCard so the rail and the cards never drift apart.
-import { TOOL_META, summarizeInput } from './tools/ToolCard'
+import { TOOL_META, summarizeInput, plainArg } from './tools/ToolCard'
 
 // MCP tool names arrive namespaced (mcp__ghost-browser__browser_click) — show the bare name.
 const cleanName = (n) => (typeof n === 'string' && n.startsWith('mcp__') ? n.split('__').pop() : n)
@@ -142,7 +142,7 @@ export default function ActivityPanel({
               {feed.map((t, i) => {
                 const name = cleanName(t.name)
                 const meta = TOOL_META[name] || { glyph: '∎', kind: 'tool' }
-                const arg = summarizeInput(t.input)
+                const arg = plainArg(t.input)
                 const live = t.status === 'running'
                 return (
                   <div className={`act-tool tool-${meta.kind} ${t.status}${t.isError ? ' err' : ''}`} key={t.id || i}>

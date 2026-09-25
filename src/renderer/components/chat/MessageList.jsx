@@ -3,11 +3,13 @@ import Message from './Message.jsx'
 import ToolCard from '../tools/ToolCard.jsx'
 import GhostCore from '../GhostCore.jsx'
 
+// Start-screen suggestions: the rehearsed showcase demos (showcase/demo/DEMO.md), all safe to click
+// in front of an audience. Nothing here lists personal folders or reads private data aloud.
 const EXAMPLES = [
-  { icon: '❯', text: 'What files are in my home directory?' },
-  { icon: '◉', text: 'Open example.com and tell me what it says' },
-  { icon: '⌕', text: "Search the web for today's top AI story" },
-  { icon: '✦', text: 'Remember that I prefer concise answers' }
+  { icon: '◉', text: 'Go to Wikipedia and explain photosynthesis in three simple sentences' },
+  { icon: '❯', text: 'How much free space is left on this Chromebook?' },
+  { icon: '⏰', text: 'Remind me in two minutes to drink some water' },
+  { icon: '✦', text: 'Remember that I like short, simple answers' }
 ]
 
 export default function MessageList({ messages, onExample, runningIds, trackColor, brainByReq }) {
@@ -46,9 +48,10 @@ export default function MessageList({ messages, onExample, runningIds, trackColo
       )}
       {messages.map((m, i) => {
         const accent = trackColor?.(m.reqId)
-        return m.role === 'tool' ? (
-          <div key={m.id || i} className={accent ? 'track-wrap' : undefined} style={accent ? { borderLeftColor: accent } : undefined}>
+        if (m.role === 'tool') {
+          const card = (
             <ToolCard
+              key={accent ? undefined : m.id || i}
               name={m.name}
               input={m.input}
               output={m.output}
@@ -57,8 +60,18 @@ export default function MessageList({ messages, onExample, runningIds, trackColo
               isError={m.isError}
               durationMs={m.durationMs}
             />
-          </div>
-        ) : m.role === 'system' ? (
+          )
+          // Untracked cards are direct children of the thread, so consecutive calls join into one
+          // panel (tools.css); a parallel-task card keeps its coloured track wrapper.
+          return accent ? (
+            <div key={m.id || i} className="track-wrap" style={{ borderLeftColor: accent }}>
+              {card}
+            </div>
+          ) : (
+            card
+          )
+        }
+        return m.role === 'system' ? (
           <div key={i} className="sys-note">
             {m.content}
           </div>

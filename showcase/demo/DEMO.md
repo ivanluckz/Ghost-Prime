@@ -71,9 +71,10 @@ Visitors will read your screen and hear what Ghost-Prime says.
       me?" reads them out.
 - [ ] **Chat history:** the sidebar shows old chat titles. Delete the ones that are private, or collapse
       the sidebar (the panel button left of "New chat") before visitors arrive.
-- [ ] **Files:** never ask it to list your home folder or Downloads on the big screen. That includes the
-      example button "What files are in my home directory?" on the start screen. Don't open the Files
-      app on the projector. Demo 2 writes into its own `Showcase` folder for this reason.
+- [ ] **Files:** never ask it to list your home folder or Downloads on the big screen. Don't open the
+      Files app on the projector. Demo 2 writes into its own `Showcase` folder for this reason. (The four
+      example buttons on the start screen are rehearsed demos and safe to click: photosynthesis, free
+      space, the water reminder and "short, simple answers".)
 - [ ] **Browser:** the launcher drives a separate, clean browser profile. Don't sign in to anything in it.
 - [ ] **Notifications:** on the day, turn on ChromeOS **Do Not Disturb** so personal messages don't pop
       up. Ghost-Prime reminders still appear in the chat and are read aloud.

@@ -190,12 +190,16 @@ export default function TerminalPanel({ sessions = [], onClose }) {
               </span>
             </button>
           ))}
-          <button className="term-new" onClick={openTerminal} title="New terminal">
-            +
+          <button className="term-new" onClick={openTerminal} title="New terminal" aria-label="New terminal">
+            <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" aria-hidden="true">
+              <path d="M8 3.25v9.5M3.25 8h9.5" />
+            </svg>
           </button>
         </div>
-        <button className="term-collapse" onClick={onClose} title="Hide terminal">
-          ⌄
+        <button className="term-collapse" onClick={onClose} title="Hide terminal" aria-label="Hide terminal">
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <path d="m4 6 4 4 4-4" />
+          </svg>
         </button>
       </div>
       <div className="term-body" ref={bodyRef}>
@@ -207,15 +211,7 @@ export default function TerminalPanel({ sessions = [], onClose }) {
           </div>
         )}
         {err && (
-          <div
-            className={sessions.length === 0 ? 'term-empty term-error' : 'term-error term-error-bar'}
-            role="alert"
-            style={
-              sessions.length === 0
-                ? undefined
-                : { position: 'absolute', left: 0, right: 0, top: 0, zIndex: 2, padding: '6px 12px', fontSize: 12, background: 'rgba(255, 93, 122, 0.12)', borderBottom: '1px solid rgba(255, 93, 122, 0.35)' }
-            }
-          >
+          <div className={sessions.length === 0 ? 'term-empty term-error' : 'term-error term-error-bar'} role="alert">
             <div>
               <strong>Couldn't open a terminal.</strong> <span className="term-error-detail">{err}</span>
               {/terminal backend unavailable/i.test(err) && (
@@ -223,12 +219,7 @@ export default function TerminalPanel({ sessions = [], onClose }) {
                   Rebuild the native module: <kbd>npx electron-rebuild -f -o node-pty</kbd>, then restart Ghost-Prime.
                 </div>
               )}
-              <button
-                type="button"
-                className="term-error-dismiss"
-                onClick={() => setErr('')}
-                style={{ marginLeft: 8, padding: '1px 8px', font: 'inherit', fontSize: 11, color: 'inherit', background: 'rgba(255, 255, 255, 0.06)', border: '1px solid rgba(255, 93, 122, 0.35)', borderRadius: 6, cursor: 'pointer' }}
-              >
+              <button type="button" className="term-error-dismiss" onClick={() => setErr('')}>
                 Dismiss
               </button>
             </div>

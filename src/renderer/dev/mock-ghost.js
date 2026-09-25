@@ -17,105 +17,104 @@ const wait = (ms) => new Promise((r) => setTimeout(r, ms))
 const now = Date.now()
 const day = 86400000
 
+// Demo content follows the showcase's hero demo (showcase/demo/DEMO.md, Demo 5) and the study-plan
+// demo, so screenshots taken from this preview are on-message. No real names: the class is a
+// placeholder the presenter fills in.
+const HERO = 'Go to the Wikipedia website, search for photosynthesis, and explain it to me in three simple sentences.'
+
 const sessions = [
-  { id: 's-browser', title: 'Find me a cheap flight to Lisbon in October and compare the top three', started_at: now - 2 * 3600e3, message_count: 6, parent_id: null },
-  { id: 's-sub', title: 'Only direct flights please', started_at: now - 1.5 * 3600e3, message_count: 2, parent_id: 's-browser' },
-  { id: 's-code', title: 'Refactor the reminders scheduler', started_at: now - day, message_count: 4, parent_id: null },
-  { id: 's-hi', title: 'hey who am i ?', started_at: now - 40 * day, message_count: 3, parent_id: null }
+  { id: 's-web', title: HERO, started_at: now - 2 * 3600e3, message_count: 4, parent_id: null },
+  { id: 's-sub', title: 'Turn it into three quiz questions', started_at: now - 1.5 * 3600e3, message_count: 2, parent_id: 's-web' },
+  { id: 's-plan', title: 'Make me a three-day chemistry revision plan', started_at: now - day, message_count: 4, parent_id: null },
+  { id: 's-hi', title: 'What do you know about me?', started_at: now - 3 * day, message_count: 2, parent_id: null }
 ]
 
-const md = `Here's what I found — **three direct options** under €150:
+// Exercises every Markdown block the thread renders: list, table, blockquote, a long code line
+// (horizontal scroll), bold/italic and a link.
+const md = `Here's **photosynthesis** in three simple sentences:
 
-| Airline | Depart | Price |
-|---|---|---|
-| TAP Portugal | 08:40 | €128 |
-| easyJet | 13:15 | €96 |
-| Ryanair | 19:50 | €84 |
+1. Photosynthesis is how plants, algae and some bacteria make their own food using sunlight.
+2. They take in **carbon dioxide** from the air and **water** from the soil, and the green pigment chlorophyll turns them into sugar (glucose).
+3. **Oxygen** is released as a by-product, and that's where most of the oxygen we breathe comes from.
 
-1. **Ryanair** is cheapest but lands after 22:00.
-2. **easyJet** is the best balance — you'd arrive mid-afternoon.
-3. **TAP** includes a checked bag.
+| Goes in | Comes out |
+|---|---|
+| Carbon dioxide (from the air) | Glucose (food for the plant) |
+| Water (from the roots) | Oxygen (into the air) |
+| Light energy (from the sun) | — |
 
-> Prices change fast; I left the easyJet tab open so you can book.
+> Source: the Wikipedia article *Photosynthesis*. I left it open in the browser if you want to read more.
 
-The search I ran:
+The word equation, if your teacher asks for it:
 
-\`\`\`js
-const results = await searchFlights({ from: 'KGL', to: 'LIS', month: 10, direct: true })
-results.sort((a, b) => a.price - b.price)
+\`\`\`text
+carbon dioxide + water  --(light energy, absorbed by chlorophyll)-->  glucose + oxygen
 \`\`\`
 
-Want me to hold the easyJet fare? More at [skyscanner.net](https://www.skyscanner.net).`
+Want me to turn this into three quiz questions? The full article: [en.wikipedia.org/wiki/Photosynthesis](https://en.wikipedia.org/wiki/Photosynthesis).`
 
 const history = {
-  's-browser': [
-    { role: 'user', content: 'Find me a cheap flight to Lisbon in October and compare the top three' },
+  's-web': [
+    { role: 'user', content: HERO },
     { role: 'assistant', content: md },
-    { role: 'user', content: 'nice, which one has the best reviews?' },
-    { role: 'assistant', content: 'TAP scores highest (4.2★ on Skytrax), then easyJet (3.6★). Ryanair trails at 2.9★ — mostly for fees, not safety.' }
+    { role: 'user', content: 'Which part of the plant does it happen in?' },
+    { role: 'assistant', content: 'Mostly in the **leaves**. Their cells contain tiny green parts called *chloroplasts*, and that is where chlorophyll catches the light.' }
   ],
-  's-sub': [{ role: 'user', content: 'Only direct flights please' }, { role: 'assistant', content: 'All three above are direct. 👍' }],
-  's-code': [
-    { role: 'user', content: 'Refactor the reminders scheduler so missed reminders fire on startup' },
-    { role: 'assistant', content: 'Done. `initReminders()` now sweeps anything past due on boot:\n\n```js\nfor (const r of pending()) if (r.due_at <= Date.now()) fire(r)\n```\n\nTests pass (`smoke-reminders`: 9/9).' }
+  's-sub': [
+    { role: 'user', content: 'Turn it into three quiz questions' },
+    { role: 'assistant', content: '1. Which gas do plants take in for photosynthesis?\n2. What does chlorophyll do?\n3. Which gas do plants give out?\n\n**Answers:** carbon dioxide · it captures light energy · oxygen.' }
+  ],
+  's-plan': [
+    { role: 'user', content: 'Make me a three-day chemistry revision plan and save it in a new folder called Showcase, so I can undo it if I change my mind.' },
+    { role: 'assistant', content: 'Done. I saved it as `~/Showcase/chemistry-revision-plan.txt`:\n\n- **Day 1, learn:** atoms, the periodic table and bonding.\n- **Day 2, practise:** balancing equations and moles.\n- **Day 3, test yourself:** a past paper, then go over your mistakes.\n\nSay "undo that" if you change your mind.' },
+    { role: 'user', content: 'Actually, undo that.' },
+    { role: 'assistant', content: 'Undone. `chemistry-revision-plan.txt` is gone and the Showcase folder is back to how it was.' }
   ],
   's-hi': [
-    { role: 'user', content: 'hey who am i ?' },
-    { role: 'assistant', content: "You're **Jes** — you're building Ghost-Prime on a Chromebook and learning web security on the side." }
+    { role: 'user', content: 'What do you know about me?' },
+    { role: 'assistant', content: "Here's what I remember:\n\n- Your favourite subject is **chemistry**.\n- You like short, simple answers.\n- You asked me to remind you to drink some water." }
   ]
 }
 
 const memories = [
-  { id: 'm1', type: 'preference', content: 'Prefers concise answers', importance: 8, created_at: now - 3 * day, tags: [] },
-  { id: 'm2', type: 'fact', content: 'Uses a Chromebook with Crostini; phone is a Galaxy A05', importance: 7, created_at: now - 2 * day, tags: [] },
-  { id: 'm3', type: 'task', content: 'Rotate the leaked API keys', importance: 9, created_at: now - day, tags: ['security'] }
+  { id: 'm1', type: 'preference', content: 'Likes short, simple answers', importance: 8, created_at: now - 3 * day, tags: [] },
+  { id: 'm2', type: 'fact', content: 'Favourite subject is chemistry', importance: 7, created_at: now - 2 * day, tags: [] },
+  { id: 'm3', type: 'task', content: 'Chemistry revision plan lives in ~/Showcase', importance: 6, created_at: now - day, tags: ['school'] }
 ]
 
-// A fake "screenshot" for tool cards that return an image.
-function fakeShot(label) {
-  const c = document.createElement('canvas')
-  c.width = 640
-  c.height = 360
-  const x = c.getContext('2d')
-  const g = x.createLinearGradient(0, 0, 640, 360)
-  g.addColorStop(0, '#f7f8fb')
-  g.addColorStop(1, '#e3e8f2')
-  x.fillStyle = g
-  x.fillRect(0, 0, 640, 360)
-  x.fillStyle = '#ff6600'
-  x.fillRect(0, 0, 640, 48)
-  x.fillStyle = '#fff'
-  x.font = 'bold 20px sans-serif'
-  x.fillText('easyJet', 20, 32)
-  x.fillStyle = '#1b2433'
-  x.font = 'bold 26px sans-serif'
-  x.fillText(label, 24, 110)
-  x.font = '16px sans-serif'
-  for (let i = 0; i < 4; i++) {
-    x.fillStyle = i === 1 ? '#fff4e8' : '#ffffff'
-    x.fillRect(24, 140 + i * 50, 592, 40)
-    x.fillStyle = '#1b2433'
-    x.fillText(`KGL → LIS   ${['08:40', '13:15', '19:50', '21:05'][i]}   €${[128, 96, 84, 142][i]}`, 40, 166 + i * 50)
-  }
-  return c.toDataURL('image/png')
-}
-
 let reqSeq = 0
-let active = 's-browser'
+let active = 's-web'
 const running = new Map()
 
 async function script(requestId, prompt) {
   const aborted = () => !running.has(requestId)
   const slow = /slow/i.test(prompt)
   const fail = /error/i.test(prompt)
+  const { wikiShot } = await import('./showcase-scenarios.js')
   emit('tool', { requestId, kind: 'brain', brain: 'claude' })
   const steps = [
-    { name: 'mcp__ghost-browser__browser_navigate', input: { url: 'https://www.easyjet.com/en' }, output: 'Navigated — now at https://www.easyjet.com/en — "easyJet | Cheap flights"', ms: 700 },
-    { name: 'mcp__ghost-browser__browser_get_page', input: {}, output: '# easyJet | Cheap flights\n(Act on a numbered element with browser_click / browser_fill { ref: N }.)\n\n## Buttons & controls\n- [1] "Show flights"\n- [2] "Accept cookies"\n## Input fields\n- [3] From (text)\n- [4] To (text)', ms: 500 },
-    { name: 'mcp__ghost-browser__browser_fill', input: { ref: 4, value: 'Lisbon', pressEnter: true }, output: 'Filled [4] and pressed Enter — now at https://www.easyjet.com/en/buy/flights (page changed)', ms: slow ? 60000 : 900 },
-    { name: 'mcp__ghost-browser__browser_screenshot', input: { annotate: true }, output: 'Numbered elements: [1] Select · [2] Select · [3] Select', image: fakeShot('Kigali → Lisbon · Oct 14'), ms: 600 },
-    { name: 'mcp__ghost-shell__shell_run', input: { command: 'node scripts/compare.mjs --sort price' }, output: fail ? 'Error: Cannot find module scripts/compare.mjs\n[exit code: 1]' : 'Ryanair  €84\neasyJet  €96\nTAP      €128\n[exit code: 0]', isError: fail, ms: 700 },
-    { name: 'weather_get', input: { location: 'Lisbon' }, output: '{ "location": "Lisbon", "temperature": "24°C", "condition": "Sunny" }', ms: 400 }
+    { name: 'mcp__ghost-browser__browser_navigate', input: { url: 'https://www.wikipedia.org' }, output: 'Navigated — now at https://www.wikipedia.org/ — "Wikipedia"', ms: 700 },
+    {
+      name: 'mcp__ghost-browser__browser_get_page',
+      input: {},
+      output: '# Wikipedia\nhttps://www.wikipedia.org/\n(Act on a numbered element with browser_click / browser_fill { ref: N }.)\n\n## Buttons & controls\n- [1] "Search"\n- [2] "Read Wikipedia in your language"\n## Input fields\n- [6] Search Wikipedia (search)',
+      ms: 500
+    },
+    {
+      name: 'mcp__ghost-browser__browser_fill',
+      input: { ref: 6, value: 'photosynthesis', pressEnter: true },
+      output: 'Filled [6] and pressed Enter — now at https://en.wikipedia.org/wiki/Photosynthesis — "Photosynthesis - Wikipedia" (page changed)',
+      ms: slow ? 60000 : 900
+    },
+    { name: 'mcp__ghost-browser__browser_screenshot', input: { annotate: true }, output: 'Numbered elements: [1] Search · [2] Photosynthesis · [3] Contents', image: wikiShot(), ms: 600 },
+    fail
+      ? { name: 'mcp__ghost-browser__browser_get_text', input: {}, output: 'Error: the page did not finish loading within 15 seconds', isError: true, ms: 700 }
+      : {
+          name: 'mcp__ghost-browser__browser_get_text',
+          input: {},
+          output: '# Photosynthesis - Wikipedia\nhttps://en.wikipedia.org/wiki/Photosynthesis\n\nPhotosynthesis is a system of biological processes by which photosynthetic organisms, such as most plants, algae, and cyanobacteria, convert light energy, typically from sunlight, into the chemical energy necessary to fuel their metabolism. …',
+          ms: 600
+        }
   ]
   for (const [i, s] of steps.entries()) {
     if (aborted()) return
@@ -127,7 +126,7 @@ async function script(requestId, prompt) {
   }
   if (fail) {
     running.delete(requestId)
-    emit('error', { requestId, message: 'The compare script failed — I stopped before booking anything.' })
+    emit('error', { requestId, message: "Wikipedia didn't finish loading, so I stopped there. Check the internet connection and ask me again." })
     return
   }
   for (const chunk of md.match(/[\s\S]{1,24}/g)) {
@@ -146,7 +145,9 @@ const ghost = {
     const requestId = `demo_${++reqSeq}`
     running.set(requestId, true)
     const last = [...messages].reverse().find((m) => m.role === 'user')?.content || ''
-    script(requestId, typeof last === 'string' ? last : '')
+    // Start on the next tick, like the real IPC round trip: the renderer adds the user's bubble
+    // right after sendMessage returns, and the first tool card must land below it.
+    setTimeout(() => script(requestId, typeof last === 'string' ? last : ''), 0)
     return requestId
   },
   abort(requestId) {
@@ -193,7 +194,7 @@ const ghost = {
   onFocusInput: () => () => {},
   onExternalTask: () => () => {},
   windowControls: { minimize() {}, maximize() {}, close() {} },
-  browserTarget: { get: async () => 'active', set: async (t) => t },
+  browserTarget: { get: async () => 'group', set: async (t) => t },
   phone: {
     async pairInfo(host) {
       const h = host || '10.14.46.195'
@@ -201,7 +202,8 @@ const ghost = {
       return { host: h, port: 8731, uri, dataUrl: await QRCode.toDataURL(uri, { margin: 1, width: 360 }), problems: [] }
     }
   },
-  sites: { get: async () => ({ mode: 'open', allow: [], block: ['mybank.com'] }), set: async (p) => p },
+  // The showcase setup (DEMO.md): strict, with the two demo sites allowed.
+  sites: { get: async () => ({ mode: 'strict', allow: ['wikipedia.org', 'example.com'], block: ['mybank.com'] }), set: async (p) => p },
   mirrorChat() {},
   hotkey: {
     get: async () => ({ accelerator: 'CommandOrControl+Shift+G', default: 'CommandOrControl+Shift+G' }),

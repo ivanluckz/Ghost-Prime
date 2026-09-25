@@ -5,6 +5,7 @@
 
 :root {
   --chat-col: 800px; /* thread column on wide panes: ~80ch of body text */
+  --thread-gap: 12px; /* between thread items; tools.css closes it to join consecutive tool calls */
   --chat-fill: rgba(9, 13, 26, 0.55); /* dark glass base: mutes the aurora behind the text */
   --chat-sheen: linear-gradient(180deg, rgba(255, 255, 255, 0.045), rgba(255, 255, 255, 0.018));
   --chat-brd: rgba(255, 255, 255, 0.1);
@@ -13,17 +14,16 @@
 }
 
 /* ---------- Thread column + rhythm ---------- */
+/* Wide panes centre a readable column instead of letting lines run ~130 characters; narrow panes
+   use the frame gutter, so bubbles line up with the command bar and the composer (shell.css). */
 .messages {
-  gap: 12px;
-  padding-top: 24px;
+  gap: var(--thread-gap);
+  padding: 24px var(--col-inset) 24px;
 }
-
-/* Wide panes centre a readable column instead of letting lines run ~130 characters. Narrow panes
-   keep the base gutter (the base sheet's own container query). */
-@container pane (min-width: 821px) {
-  .messages {
-    padding-inline: max(clamp(16px, 9%, 120px), calc((100% - var(--chat-col)) / 2));
-  }
+/* Thread items never shrink to fit the scroller: an item with overflow:hidden (a tool card) has a
+   zero automatic minimum height, so without this a long thread squashed the cards into each other. */
+.messages > * {
+  flex-shrink: 0;
 }
 
 /* A user message opens a new turn: extra air above it groups each ask with its answer. */

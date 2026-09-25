@@ -1,1 +1,603 @@
-/* panels — design pass overrides/additions (loaded after styles.css). */
+/* panels — design pass overrides/additions (loaded after styles.css).
+   The two panels that open on demand: the Settings popover and the live terminal dock.
+   They share the command bar's language (shell.css): the same opaque glass surface and hairline,
+   32px controls, one cyan "on" tint, 4px grid. Neither uses backdrop-filter: the popover floats
+   over a thread that repaints on every streamed token, and the dock sits right under it, so a
+   blur would be recomputed constantly. Motion is transform/opacity only. */
+
+:root {
+  /* Fully opaque: without a backdrop blur, even 3% show-through reads as ghost text on this theme. */
+  --pnl-surface: linear-gradient(160deg, rgba(255, 255, 255, 0.06), rgba(255, 255, 255, 0.012) 55%), #0a0e1c;
+  --pnl-solid: #0c1122; /* sticky header + switch knob ring: an opaque match for the surface */
+  --pnl-line: var(--shell-line, rgba(255, 255, 255, 0.08));
+  --pnl-field: rgba(0, 0, 0, 0.26);
+  --pnl-ctl-h: 32px;
+  --pnl-danger: #ff5d7a;
+}
+
+/* ============================================================
+   SETTINGS POPOVER
+   ============================================================ */
+/* Anchored to the chat pane (shell.css makes it the positioning context), so it opens right under
+   the bar's gear and never covers the Activity panel's live state. */
+.settings-pop {
+  position: absolute;
+  top: calc(var(--gutter, 12px) + var(--shell-bar-h, 52px) + 8px);
+  right: var(--gutter, 12px);
+  z-index: 60;
+  width: min(360px, calc(100% - 2 * var(--gutter, 12px)));
+  max-height: calc(100% - var(--shell-bar-h, 52px) - 3 * var(--gutter, 12px) - 8px);
+  padding: 0 16px 8px;
+  border-radius: 16px;
+  border: 1px solid var(--glass-brd);
+  background: var(--pnl-surface);
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  box-shadow: var(--inset-hi), 0 24px 60px -12px rgba(0, 0, 0, 0.75);
+  overscroll-behavior: contain;
+  transform-origin: top right;
+  animation: pnl-pop 180ms var(--ease-out) both;
+}
+@keyframes pnl-pop {
+  from {
+    opacity: 0;
+    transform: translateY(-4px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* Sticky header on an opaque fill, so rows never show through it while the panel scrolls. */
+.set-head {
+  z-index: 2;
+  height: 48px;
+  margin: 0 -16px;
+  padding: 0 8px 0 16px;
+  border-bottom: 1px solid var(--pnl-line);
+  background: var(--pnl-solid);
+  border-radius: 16px 16px 0 0;
+  font-size: 13px;
+  font-weight: 650;
+  letter-spacing: 0.02em;
+  color: var(--ink);
+}
+.set-close {
+  width: var(--pnl-ctl-h);
+  height: var(--pnl-ctl-h);
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border-radius: 8px;
+  color: var(--ink-dim);
+  transition: background-color 140ms var(--ease-out), color 140ms var(--ease-out);
+}
+.set-close:hover {
+  color: var(--ink);
+  background: var(--shell-hover, rgba(255, 255, 255, 0.07));
+}
+
+/* Sections: even 16px rhythm, hairline between them. */
+.set-section {
+  padding: 16px 0;
+  border-top: 1px solid var(--pnl-line);
+}
+.set-head + .set-section {
+  border-top: 0;
+}
+.set-title {
+  margin-bottom: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.35;
+  color: var(--ink);
+}
+.set-note {
+  margin: 8px 0 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--shell-ink-meta, #7c8ab0);
+}
+.set-title + .set-note {
+  margin-top: -4px;
+  margin-bottom: 12px;
+}
+.set-row .set-title + .set-note {
+  margin: 4px 0 0;
+}
+/* Sub-labels read like the Activity panel's section labels. */
+.set-sub {
+  margin: 16px 0 8px;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  color: var(--ink-faint);
+}
+.set-warn {
+  color: #ff9aac;
+}
+
+/* ---------- Segmented control ---------- */
+.set-seg {
+  height: var(--pnl-ctl-h);
+  gap: 2px;
+  padding: 2px;
+  border-radius: 10px;
+  border: 1px solid var(--pnl-line);
+  background: rgba(255, 255, 255, 0.025);
+}
+.set-seg button {
+  padding: 0 8px;
+  border-radius: 7px;
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--ink-dim);
+  transition: background-color 140ms var(--ease-out), color 140ms var(--ease-out);
+}
+.set-seg button:hover:not(.on) {
+  color: var(--ink);
+  background: var(--shell-hover, rgba(255, 255, 255, 0.07));
+}
+.set-seg button.on {
+  background: var(--shell-on);
+  box-shadow: inset 0 0 0 1px var(--shell-on-brd);
+  color: var(--ink);
+  font-weight: 600;
+}
+
+/* ---------- Switch (the mirror checkbox, restyled; still a native checkbox) ---------- */
+.set-row {
+  align-items: center;
+  gap: 16px;
+}
+.set-switch {
+  appearance: none;
+  -webkit-appearance: none;
+  position: relative;
+  flex: 0 0 auto;
+  width: 36px;
+  height: 20px;
+  margin: 0;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  background: rgba(255, 255, 255, 0.08);
+  transition: background-color 160ms var(--ease-out), border-color 160ms var(--ease-out);
+}
+.set-switch::before {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--ink-dim);
+  transition: transform 160ms var(--ease-out), background-color 160ms var(--ease-out);
+}
+.set-switch:checked {
+  border-color: color-mix(in srgb, var(--cyan) 70%, transparent);
+  background: color-mix(in srgb, var(--cyan) 38%, transparent);
+}
+.set-switch:checked::before {
+  transform: translateX(16px);
+  background: #fff;
+}
+
+/* ---------- Buttons + fields: one 32px family ---------- */
+.set-hotkey,
+.set-add,
+.set-pair-row {
+  gap: 8px;
+}
+.settings-pop .set-btn,
+.set-hotkey button,
+.set-add button,
+.set-pair-row button {
+  height: var(--pnl-ctl-h);
+  padding: 0 12px;
+  border-radius: 8px;
+  border: 1px solid var(--pnl-line);
+  background: rgba(255, 255, 255, 0.045);
+  color: var(--ink-dim);
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color 140ms var(--ease-out), color 140ms var(--ease-out), border-color 140ms var(--ease-out);
+}
+.settings-pop .set-btn:hover,
+.set-hotkey button:hover,
+.set-add button:hover,
+.set-pair-row button:hover:not(:disabled) {
+  color: var(--ink);
+  border-color: rgba(255, 255, 255, 0.16);
+  background: rgba(255, 255, 255, 0.08);
+}
+.set-pair-row button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+/* The primary action in a row (Add) and a live "recording" state carry the accent. */
+.set-add button,
+.set-hotkey button.on {
+  color: var(--ink);
+  border-color: var(--shell-on-brd);
+  background: var(--shell-on);
+  box-shadow: none;
+}
+.set-add button:hover,
+.set-hotkey button.on:hover {
+  border-color: color-mix(in srgb, var(--cyan) 55%, transparent);
+  background: color-mix(in srgb, var(--cyan) 20%, transparent);
+}
+
+.set-add input,
+.set-pair-host,
+.hk-combo {
+  height: var(--pnl-ctl-h);
+  padding: 0 10px;
+  border-radius: 8px;
+  border: 1px solid var(--pnl-line);
+  background: var(--pnl-field);
+  color: var(--ink);
+  font-size: 12.5px;
+}
+.set-add input::placeholder,
+.set-pair-host::placeholder {
+  color: #6f7da3;
+}
+.set-add input:focus,
+.set-pair-host:focus {
+  outline: none;
+  border-color: color-mix(in srgb, var(--cyan) 55%, transparent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--cyan) 13%, transparent);
+}
+.set-pair-host {
+  font: 500 12px/1 var(--mono);
+}
+.hk-combo {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font: 600 12px/1 var(--mono);
+  letter-spacing: 0.02em;
+}
+
+/* ---------- Accent colour ---------- */
+.set-swatches {
+  gap: 8px;
+  margin: 0 0 12px;
+}
+.set-swatch {
+  width: 24px;
+  height: 24px;
+  border: 0;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.18);
+  transition: transform 140ms var(--ease-out);
+}
+.set-swatch:hover {
+  transform: scale(1.1);
+}
+/* Selected: a ring set off from the dot by a gap in the panel colour. */
+.set-swatch.on {
+  box-shadow: 0 0 0 2px var(--pnl-solid), 0 0 0 4px var(--ink);
+}
+/* The hue slider shows the hue range it picks from. */
+.set-hue {
+  -webkit-appearance: none;
+  appearance: none;
+  display: block;
+  height: 8px;
+  margin: 4px 0 12px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, hsl(0, 90%, 60%), hsl(60, 90%, 60%), hsl(120, 90%, 60%), hsl(180, 90%, 60%),
+    hsl(240, 90%, 60%), hsl(300, 90%, 60%), hsl(359, 90%, 60%));
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.35);
+}
+.set-hue::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  border: 2px solid #fff;
+  background: transparent;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.45), 0 2px 6px rgba(0, 0, 0, 0.5);
+  cursor: grab;
+}
+.set-hue:focus-visible {
+  outline: none;
+  box-shadow: var(--ring);
+}
+
+/* ---------- Site access chips ---------- */
+.set-chips {
+  gap: 6px;
+  margin-bottom: 8px;
+}
+.set-chip {
+  height: 26px;
+  padding: 0 4px 0 10px;
+  border-color: var(--pnl-line);
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--ink);
+  font: 500 12px/1 var(--mono);
+}
+.set-chip button {
+  width: 20px;
+  height: 20px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  font-size: 13px;
+}
+.set-chip button:hover {
+  color: #fff;
+  background: rgba(255, 93, 122, 0.35);
+}
+.set-empty {
+  font-size: 12px;
+  font-style: normal;
+  color: var(--ink-faint);
+}
+
+/* ---------- Memory ---------- */
+.set-memlist {
+  gap: 4px;
+  margin-top: 0;
+  max-height: 232px;
+}
+.set-memrow {
+  align-items: center;
+  gap: 8px;
+  padding: 8px 6px 8px 10px;
+  border-radius: 8px;
+  border-color: var(--pnl-line);
+  background: rgba(255, 255, 255, 0.03);
+}
+.set-memtype {
+  padding: 3px 6px;
+  border-radius: 5px;
+  background: var(--shell-on);
+  color: var(--cyan);
+  font: 600 9.5px/1 var(--font-sans);
+  letter-spacing: 0.08em;
+  opacity: 1;
+}
+.set-memtext {
+  color: var(--ink);
+  font-size: 12.5px;
+}
+.set-memdel {
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--ink-faint);
+}
+.set-memdel:hover {
+  color: #fff;
+  background: rgba(255, 93, 122, 0.35);
+}
+
+/* ---------- Danger zone ---------- */
+.set-danger {
+  margin-top: 0;
+  border-top-color: rgba(255, 93, 122, 0.2);
+}
+.set-danger .set-title {
+  color: #ff9aac;
+}
+.set-danger-row {
+  gap: 8px;
+  margin-top: 0;
+}
+.set-danger-btn {
+  height: var(--pnl-ctl-h);
+  padding: 0 10px;
+  border-color: rgba(255, 93, 122, 0.32);
+  background: rgba(255, 93, 122, 0.07);
+  color: #ff9aac;
+  font-size: 12.5px;
+  transition: background-color 140ms var(--ease-out), color 140ms var(--ease-out);
+}
+.set-danger-btn:hover {
+  background: rgba(255, 93, 122, 0.14);
+  color: #ffc2cd;
+}
+.set-danger-btn.armed {
+  background: #c93a55;
+  border-color: #c93a55;
+  color: #fff;
+  box-shadow: none;
+}
+
+/* ---------- Phone pairing ---------- */
+.set-pair-row {
+  margin-top: 0;
+}
+.set-pair-qr {
+  width: 208px;
+  height: 208px;
+  margin: 16px auto 4px;
+  border-radius: 12px;
+}
+
+/* ============================================================
+   TERMINAL DOCK
+   ============================================================ */
+/* Same edges as the composer below it and the thread above it (shell.css column inset). */
+.term-dock {
+  margin: 0 var(--col-inset, 12px) 8px;
+  border-radius: 16px;
+  border: 1px solid var(--glass-brd);
+  background: #06080f; /* = the xterm theme background, so the body reads as one surface */
+  box-shadow: var(--inset-hi), var(--shell-drop, 0 12px 32px -14px rgba(0, 0, 0, 0.7));
+}
+
+/* Header: label · tabs (+ new) · hide, on the bar's surface. */
+.term-tabs {
+  height: 40px;
+  gap: 8px;
+  padding: 0 4px 0 12px;
+  border-bottom: 1px solid var(--pnl-line);
+  background: var(--shell-surface, rgba(9, 13, 27, 0.8));
+}
+.term-label {
+  gap: 8px;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  color: var(--ink-faint);
+}
+.term-glyph {
+  font-size: 11px;
+  text-shadow: none;
+}
+.term-tablist {
+  gap: 4px;
+}
+
+/* Tabs: borderless pills; the active one takes the bar's "on" tint. */
+.term-tab {
+  height: 28px;
+  gap: 8px;
+  padding: 0 6px 0 10px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--ink-dim);
+  font-size: 12px;
+  transition: background-color 140ms var(--ease-out), color 140ms var(--ease-out);
+}
+.term-tab:hover {
+  color: var(--ink);
+  background: var(--shell-hover, rgba(255, 255, 255, 0.07));
+}
+.term-tab.active {
+  color: var(--ink);
+  background: var(--shell-on);
+  box-shadow: inset 0 0 0 1px var(--shell-on-brd);
+}
+.term-tab.dead {
+  opacity: 0.55;
+}
+.term-tab-agent {
+  filter: none;
+}
+.term-tab-dot {
+  width: 6px;
+  height: 6px;
+}
+.term-tab-dot.live {
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--mint) 18%, transparent);
+}
+.term-tab-dot.busy {
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--cyan) 20%, transparent);
+}
+/* Close: a small icon target, visible on hover and on the active tab. */
+.term-tab-x {
+  width: 18px;
+  height: 18px;
+  display: grid;
+  place-items: center;
+  border-radius: 5px;
+  font-size: 10px;
+  transition: opacity 120ms ease, color 120ms ease, background-color 120ms ease;
+}
+.term-tab.active .term-tab-x {
+  opacity: 0.6;
+}
+.term-tab-x:hover {
+  color: #fff;
+  background: rgba(255, 93, 122, 0.35);
+}
+
+/* New (+) and hide: the bar's borderless icon buttons. */
+.term-new,
+.term-collapse {
+  width: 30px;
+  height: 28px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--ink-dim);
+  box-shadow: none;
+  transition: background-color 140ms var(--ease-out), color 140ms var(--ease-out);
+}
+.term-new:hover,
+.term-collapse:hover {
+  color: var(--ink);
+  background: var(--shell-hover, rgba(255, 255, 255, 0.07));
+  box-shadow: none;
+}
+.term-new svg,
+.term-collapse svg {
+  display: block;
+}
+
+/* Body */
+.term-surface {
+  inset: 8px 8px 8px 12px;
+}
+.term-empty {
+  font-size: 12.5px;
+  color: var(--shell-ink-meta, #7c8ab0);
+}
+.term-empty kbd {
+  padding: 1px 6px;
+  border-color: var(--pnl-line);
+  color: var(--ink-dim);
+}
+
+/* Errors: a centred message on an empty dock, or a strip across the top of a live one. */
+.term-error {
+  color: #ffd7df;
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+.term-error-detail {
+  color: #ffb3c1;
+}
+.term-error-hint {
+  margin-top: 4px;
+  color: var(--ink-dim);
+}
+.term-error-bar {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 2;
+  padding: 8px 12px;
+  font-size: 12px;
+  background: rgba(40, 12, 22, 0.96);
+  border-bottom: 1px solid rgba(255, 93, 122, 0.35);
+}
+.term-error-dismiss {
+  height: 24px;
+  margin-left: 8px;
+  padding: 0 8px;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 93, 122, 0.35);
+  background: rgba(255, 255, 255, 0.06);
+  color: inherit;
+  font: inherit;
+  font-size: 11.5px;
+  cursor: pointer;
+}
+.term-error-dismiss:hover {
+  background: rgba(255, 93, 122, 0.2);
+}
+
+/* Shorter windows: the dock gives the thread room back. */
+@media (max-height: 760px) {
+  .term-dock {
+    height: 240px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .settings-pop {
+    animation: none;
+  }
+}

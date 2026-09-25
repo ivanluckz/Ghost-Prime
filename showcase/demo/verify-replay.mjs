@@ -1,7 +1,7 @@
 // Check the showcase OFFLINE REPLAY end to end in headless Chromium: types every rehearsed phrase
 // from src/renderer/dev/showcase-scenarios.js (the same list DEMO.md uses), screenshots each result,
 // and fails on page errors or a phrase that lands on the wrong scenario. Also checks that the plain
-// design preview (no ?replay=1) still runs its old flight demo, because other agents rely on it.
+// design preview (no ?replay=1) still runs its own scripted demo (the design screenshots rely on it).
 //
 // Needs the design server (`npm run design`). This machine is short on RAM, so ALWAYS run it
 // through the shared lock:
@@ -149,14 +149,14 @@ try {
   if ((await quiet.evaluate(() => window.__ghostReplay.spoken.length)) !== 0) fail('speak=0 still spoke')
   await quiet.context().close()
 
-  // ---- regression: the plain design preview must still play its flight demo ---------------------
+  // ---- regression: the plain design preview must still play its own scripted demo ---------------
   const q = await open(base, 'plain preview')
   if (await q.locator('.replay-badge').count()) fail('replay badge shown without ?replay=1')
   if (await q.evaluate(() => 'ghostReplay' in window || '__ghostReplay' in window)) fail('replay installed without ?replay=1')
-  await send(q, 'find me a flight to Lisbon')
+  await send(q, 'look up photosynthesis')
   await q.waitForTimeout(7000)
   const txt = await q.locator('.messages').innerText()
-  if (!/browser_navigate/.test(txt) || !/easyJet/.test(txt)) fail('plain preview no longer runs the flight demo')
+  if (!/browser_navigate/.test(txt) || !/goes in/i.test(txt)) fail('plain preview no longer runs its scripted demo')
   await shot(q, '30-plain-preview-unchanged')
   await q.context().close()
 } catch (e) {

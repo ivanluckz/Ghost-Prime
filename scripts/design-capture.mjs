@@ -22,8 +22,23 @@ async function page(width = 1280, height = 840) {
   await p.waitForTimeout(900)
   return p
 }
+// Let entry animations (popover, terminal, cards) finish first: under swiftshader the first frames
+// can take ~0.5s, and a shot taken mid-fade shows a half-transparent panel that isn't a real state.
+const settle = (p) =>
+  p.evaluate(() =>
+    Promise.race([
+      Promise.all(
+        document
+          .getAnimations()
+          .filter((a) => Number.isFinite(a.effect?.getComputedTiming?.().endTime))
+          .map((a) => a.finished.catch(() => {}))
+      ),
+      new Promise((r) => setTimeout(r, 2500))
+    ])
+  )
 const shot = async (p, name) => {
   await p.waitForTimeout(350)
+  await settle(p)
   await p.screenshot({ path: `${outdir}/${prefix}-${name}.png` })
   console.log('saved', name)
 }
@@ -35,7 +50,7 @@ const send = async (p, text) => {
 try {
   let p = await page()
   await shot(p, 'empty')
-  await p.getByText('Find me a cheap flight', { exact: false }).first().click()
+  await p.locator('.session-title').first().click()
   await p.waitForTimeout(600)
   await shot(p, 'history')
   await p.evaluate(() => {
@@ -56,13 +71,13 @@ try {
   await p.context().close()
 
   p = await page()
-  await send(p, 'find me a flight to Lisbon — slow please')
+  await send(p, 'look up photosynthesis — slow please')
   await p.waitForTimeout(2600)
   await shot(p, 'running')
   await p.context().close()
 
   p = await page()
-  await send(p, 'find me a flight to Lisbon')
+  await send(p, 'look up photosynthesis')
   await p.waitForTimeout(6500)
   await shot(p, 'tools')
   const cards = p.locator('.toolcard')
@@ -75,20 +90,20 @@ try {
   await p.context().close()
 
   p = await page()
-  await send(p, 'compare flights — error case')
+  await send(p, 'look up photosynthesis — error case')
   await p.waitForTimeout(5500)
   await shot(p, 'error')
   await p.context().close()
 
   p = await page()
-  await p.getByText('Find me a cheap flight', { exact: false }).first().click()
+  await p.locator('.session-title').first().click()
   await p.locator('[aria-label="Toggle activity panel"]').click()
   await p.locator('.sidebar-collapse').click()
   await shot(p, 'compact')
   await p.context().close()
 
   p = await page(900, 700)
-  await p.getByText('Find me a cheap flight', { exact: false }).first().click()
+  await p.locator('.session-title').first().click()
   await shot(p, 'narrow')
   await p.context().close()
 } finally {

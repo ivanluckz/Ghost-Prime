@@ -7,9 +7,8 @@
    the only loop animations are the spinner and a 1px sweep, both transform-only. */
 
 :root {
-  /* Gap between thread items, mirrored from `.messages { gap }` so consecutive calls can close it
-     and join up. Keep in sync if the thread gap changes. */
-  --thread-gap: 18px;
+  /* --thread-gap (the gap between thread items) is defined in chat.css; consecutive calls close it
+     to join up into one panel. */
   --tool-pad-x: 10px;
   --tool-chip: 22px;
   --tool-row-gap: 9px;

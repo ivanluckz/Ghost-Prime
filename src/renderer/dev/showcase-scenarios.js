@@ -214,7 +214,7 @@ function wrap(x, text, left, top, width, lh) {
   if (line) x.fillText(line, left, y)
   return y + lh
 }
-function wikiShot() {
+export function wikiShot() {
   const [c, x] = canvas(800, 450)
   x.fillStyle = '#ffffff'
   x.fillRect(0, 0, 800, 450)

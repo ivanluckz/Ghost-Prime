@@ -11,7 +11,8 @@ function CodeBlock({ code, lang }) {
   const [copied, setCopied] = useState(false)
   const copy = () => {
     try {
-      navigator.clipboard?.writeText(code)
+      // writeText returns a promise: a refused write must not surface as an unhandled rejection.
+      navigator.clipboard?.writeText(code)?.catch?.(() => {})
       setCopied(true)
       setTimeout(() => setCopied(false), 1400)
     } catch {}
@@ -216,9 +217,12 @@ function parseBlocks(text) {
     if (h) {
       const level = h[1].length
       const Tag = `h${Math.min(level + 2, 6)}`
+      // Take the key once: the automatic JSX runtime evaluates `key` AFTER the children, so
+      // `key={key}` next to a `key++` in the children gave this block the next block's key.
+      const k = key++
       blocks.push(
-        <Tag key={key} className={`md-h md-h${Math.min(level, 4)}`}>
-          {renderInline(h[2], `h${key++}`)}
+        <Tag key={k} className={`md-h md-h${Math.min(level, 4)}`}>
+          {renderInline(h[2], `h${k}`)}
         </Tag>
       )
       i++
@@ -283,9 +287,10 @@ function parseBlocks(text) {
       para.push(lines[i])
       i++
     }
+    const k = key++ // see the heading branch: never read `key` in JSX next to a key++
     blocks.push(
-      <p key={key} className="md-p">
-        {renderInline(para.join('\n'), `p${key++}`)}
+      <p key={k} className="md-p">
+        {renderInline(para.join('\n'), `p${k}`)}
       </p>
     )
   }

@@ -551,6 +551,14 @@
   color: var(--act-ink-soft);
 }
 
+/* ---------- Narrow windows ---------- */
+/* At ~900px both side panels used to leave the conversation under 400px; a slimmer rail keeps the
+   gem, the running task and the feed readable and gives the chat pane its room back. */
+@media (max-width: 1000px) {
+  .activity { flex-basis: 244px; width: 244px; }
+  .act-config { display: none; } /* model · mode: the mode already shows in the bar */
+}
+
 /* ---------- Motion preferences ---------- */
 /* The base sheet collapses every animation to a single frame; the looping indicators here are
    switched off outright so nothing is left mid-pulse, and the progress bar shows as a static fill. */

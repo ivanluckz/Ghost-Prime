@@ -120,6 +120,14 @@ function argView(input) {
   return { text: pairs.length ? text : '', pairs }
 }
 
+// One-line plain-text form of the same view, for the Activity rail: `ref 6 · value photosynthesis`
+// instead of {"ref":6,"value":"photosynthesis"}, and nothing at all for an empty {}.
+export function plainArg(input) {
+  const { text, pairs } = argView(input)
+  if (!text) return ''
+  return pairs ? pairs.map(([k, v]) => `${k} ${v}`).join(' · ') : text
+}
+
 // Chevron points right when collapsed and rotates down when open (see tools.css).
 const Chevron = () => (
   <svg className="tool-chevron" viewBox="0 0 12 12" width="12" height="12" aria-hidden="true">
