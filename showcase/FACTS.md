@@ -253,3 +253,9 @@ Status key:
    answers instead, or the app says to check the Wi-Fi. A task that already ran a tool keeps waiting
    (running it again could repeat its effect). Tested offline with the SDK stubbed
    (`smoke-claude-retry`, 12 checks); not tried with the real network unplugged.
+9. **Fixed overnight 25 Sep (Gemini brain, `smoke-gemini-loop` 7 checks, offline):** every Gemini
+   error used to read "400 status code (no body)" (Google sends errors in a shape the SDK didn't
+   read), so a wrong or rotated key was impossible to diagnose on the day. The real reason now shows,
+   and a rejected key gets a plain sentence. And when Gemini gave an empty final answer after using a
+   tool, the reply used to stop at its preamble ("Checking your battery now."); it now asks once more
+   for the answer, and says so if there still isn't one.

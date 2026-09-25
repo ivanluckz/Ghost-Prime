@@ -334,6 +334,24 @@ function getOpenAIConfig(providerName) {
   return cfg
 }
 
+// Gemini's OpenAI-compatible endpoint returns errors as a JSON ARRAY ([{"error":{…}}]). The openai
+// SDK only reads body.error, so every failure (a wrong key, a retired model, a Google 500) read
+// "400 status code (no body)". Unwrap the array so the real reason reaches the log and the user.
+export async function geminiErrorFetch(url, init) {
+  const res = await fetch(url, init)
+  if (res.ok || !/json/i.test(res.headers.get('content-type') || '')) return res
+  const text = await res.text()
+  let body = text
+  try {
+    const parsed = JSON.parse(text)
+    if (Array.isArray(parsed) && parsed[0] && typeof parsed[0] === 'object') body = JSON.stringify(parsed[0])
+  } catch {}
+  const headers = new Headers(res.headers)
+  headers.delete('content-length')
+  headers.delete('content-encoding')
+  return new Response(body, { status: res.status, statusText: res.statusText, headers })
+}
+
 function getClient(providerName) {
   const cfg = getOpenAIConfig(providerName)
   const apiKey = process.env[cfg.apiKeyEnv]
@@ -346,6 +364,7 @@ function getClient(providerName) {
       new OpenAI({
         baseURL: cfg.baseURL,
         apiKey,
+        fetch: geminiErrorFetch, // harmless for OpenRouter (it sends {error:{…}} already)
         defaultHeaders: { 'HTTP-Referer': 'https://ghost-prime.local', 'X-Title': 'Ghost-Prime' }
       })
     )
@@ -400,6 +419,7 @@ async function streamChatGeminiAgent({ messages, signal, onDelta, onEvent, model
   const imageTurns = new Set() // screenshot turns we injected (pruned to the newest few)
   let exhausted = false // we reached the text-only last round (the notice below blames the budget)
   let lastFinish = 'unknown' // finish_reason of the final completion, for the empty-reply notice
+  let lastText = '' // what the FINAL round said: a preamble in an earlier round is not an answer
 
   while (turns < MAX_TURNS) {
     turns++
@@ -433,6 +453,7 @@ async function streamChatGeminiAgent({ messages, signal, onDelta, onEvent, model
     const choice = res.choices?.[0]
     const assistantMsg = choice?.message
     lastFinish = choice?.finish_reason || 'unknown'
+    lastText = assistantMsg?.content || ''
     if (!assistantMsg) break
 
     // Stream any assistant text content
@@ -538,6 +559,32 @@ async function streamChatGeminiAgent({ messages, signal, onDelta, onEvent, model
     }
   }
 
+  // Tools ran but the final round came back empty (Gemini 2.5 does this now and then after a function
+  // result): the reply would end at a preamble like "Checking your battery now." Ask once more, for
+  // words only.
+  if (!lastText.trim() && turns > 1 && !exhausted && !signal?.aborted) {
+    try {
+      const res = await openai.chat.completions.create(
+        {
+          model: useModel,
+          messages: [...conversation, { role: 'system', content: 'Now answer the user in plain words, using the tool results above. Do not call tools.' }],
+          tools: getToolSpecs(),
+          tool_choice: 'none'
+        },
+        { signal }
+      )
+      const text = res.choices?.[0]?.message?.content || ''
+      if (text.trim()) {
+        const sep = fullOutput.trim() ? '\n\n' : ''
+        onDelta(sep + text)
+        fullOutput += sep + text
+        lastText = text
+      }
+    } catch (e) {
+      console.warn('[ghost-agent] follow-up for an empty answer failed:', errorDetail(e))
+    }
+  }
+
   // A Stop that lands after the final reply has already streamed must not throw the reply away
   // (ipc.js would persist it with a [stopped] marker and report the turn as aborted instead of done).
   if (signal?.aborted && !fullOutput.trim()) throw new Error('Request aborted')
@@ -545,12 +592,13 @@ async function streamChatGeminiAgent({ messages, signal, onDelta, onEvent, model
   // the turn silently (ipc.js skips persisting an empty reply; Discord shows "(no response)").
   // Only blame the tool budget when it really ran out — an empty first-turn reply (safety block,
   // finish_reason length, provider hiccup) gets a truthful notice instead.
-  if (!fullOutput.trim()) {
+  if (!lastText.trim()) {
     const notice = exhausted
       ? `*Stopped after ${MAX_TURNS} tool rounds without a final reply. Ask me to continue if the task is unfinished.*` // *…* — no _italic_ rule in the renderer
       : `*The model returned an empty reply (finish_reason: ${lastFinish}). Please try again.*`
-    onDelta(notice)
-    fullOutput += notice
+    const sep = fullOutput.trim() ? '\n\n' : ''
+    onDelta(sep + notice)
+    fullOutput += sep + notice
   }
 
   return fullOutput

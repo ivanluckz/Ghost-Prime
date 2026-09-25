@@ -34,6 +34,7 @@ export function errorDetail(e) {
 
 const RULES = [
   [/ENOENT|command not found|no such file/i, /claude/i, 'Claude Code is not installed or could not start on this Chromebook. Run `claude` in the terminal once to check, or type /brain gemini to use the free brain.'],
+  [/api key not valid|pass a valid api key|api_key_invalid|api key expired/i, null, "Google Gemini didn't accept its API key (wrong, expired or replaced). Ask the owner to update it in the settings file, or type /brain claude."],
   [/please run \/login|not logged in|invalid api key|authentication|unauthori[sz]ed|\b401\b|oauth|token (?:expired|invalid)|please log ?in/i, null, 'Claude is not signed in on this Chromebook. Run `claude` in the terminal and log in, or type /brain gemini to use the free brain for now.'],
   [/usage limit|credit|billing|subscription/i, null, "Claude's usage allowance is used up for now. It pauses instead of charging extra. Try again later, or type /brain gemini to use the free brain."],
   [/\b429\b|quota|resource.?(?:has been )?exhausted|rate.?limit|too many requests/i, null, 'The free AI service is busy or has hit its limit for now. Wait a minute and ask again, or switch brain with /brain claude or /brain gemini.'],
