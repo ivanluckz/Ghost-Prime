@@ -153,7 +153,11 @@ Status key:
   blocked ones; "strict" mode allows only allow-listed sites. It is enforced in the app for every
   browser action and inside the extension. `smoke-site-policy.mjs` **18/18** (added overnight 25 Sep):
   the DEMO.md setup (strict + wikipedia.org + example.com) allows Wikipedia subdomains, refuses
-  google.com and look-alike hosts, and browser_navigate refuses before any page opens. ⚠ The Chromebook's
+  google.com and look-alike hosts, and browser_navigate refuses before any page opens. **Also fixed
+  overnight 25 Sep** (`smoke-site-gaps.mjs` **12/12**): four ways around it are closed. A trailing dot
+  ("facebook.com.") no longer slips past the block list. Gemini's web_fetch and the Claude brain's
+  built-in WebFetch now obey the list (they ignored it). browser_read_pages no longer returns a
+  forbidden page that a redirect led to. ⚠ The Chromebook's
   real policy is currently **open, with nothing blocked**.
 - **Local bridge is token-gated**: constant-time token comparison, and web-page origins are
   refused. It listens only on `127.0.0.1` unless a **private** token is set. With the default token

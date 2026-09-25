@@ -15,6 +15,7 @@ import { getToolSpecs, executeTool } from '../tools/index.js'
 import { envBool } from '../env.js'
 import { errorDetail } from './friendly-error.js'
 import { claudePlanOptions, isReadOnlyCall, planModeMessage } from './plan-gate.js'
+import { checkUrl } from '../tools/site-policy.js'
 
 // Two chat brains, picked PER TURN by pickBrain() below:
 //   gemini — Google AI Studio free tier (Gemini 2.5 Flash) with full tool calling (src/main/tools)
@@ -159,6 +160,26 @@ const SCREEN_TOOL_NAMES = ['screen_screenshot', 'screen_type', 'screen_key', 'sc
 // Added to the Claude brain's system prompt in PLAN mode (the base prompt says "act directly").
 const planNote = (surface) =>
   `\n\nPLAN mode is ON (read-only, chosen by the user). You can look things up and read pages and files, but anything that changes the computer is switched off: files, the terminal, clicking or typing in the browser, reminders, memory, settings. Do not try those tools. Answer with a short numbered plan of exactly what you would do, then tell the user to ${surface === 'discord' ? 'send `!mode auto`' : 'press Shift+Tab to AUTO'} if they want it done.`
+
+// Site access (Settings → Site access) for the Claude brain's built-in WebFetch, which otherwise
+// fetches anything: a PreToolUse hook runs in every mode (plan, auto, full) and denies a blocked or
+// not-allow-listed site before the request is made.
+const SITE_POLICY_HOOKS = {
+  PreToolUse: [
+    {
+      matcher: 'WebFetch',
+      hooks: [
+        async (input) => {
+          const url = input?.tool_input?.url
+          const gate = url ? checkUrl(String(url)) : { ok: true }
+          return gate.ok
+            ? { continue: true }
+            : { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: `Not fetched: ${gate.reason}` } }
+        }
+      ]
+    }
+  ]
+}
 
 // UI autonomy mode (cycled with Shift+Tab) → SDK permission mode.
 const MODE_TO_PERMISSION = { plan: 'plan', auto: 'auto', full: 'bypassPermissions' }
@@ -1542,6 +1563,7 @@ async function streamChatClaudeAgent({ messages, signal, onDelta, onEvent, model
       allowDangerouslySkipPermissions: permissionMode === 'bypassPermissions',
       settingSources: [], // isolation: no user/project MCP (higgsfield), CLAUDE.md, skills
       strictMcpConfig: true, // only our in-process mcpServers — ignore on-disk config
+      hooks: SITE_POLICY_HOOKS, // site access also covers the built-in WebFetch
       cwd: homedir(),
       abortController
     }

@@ -1,3 +1,5 @@
+import { checkUrl } from './site-policy.js'
+
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
 const TIMEOUT_MS = 20_000 // a stalled host must not block the agent turn for minutes
 const MAX_BYTES = 2 * 1024 * 1024 // cap the body so a huge page can't be buffered whole
@@ -106,7 +108,13 @@ export async function webSearch({ query, num_results = 5, signal } = {}) {
 export async function webFetch({ url, signal } = {}) {
   try {
     if (!url) return { error: 'URL is required' }
+    // Site access (Settings → Site access) applies here too: check the address, and where any
+    // redirect ended up, before returning a single word of the page.
+    const gate = checkUrl(url)
+    if (!gate.ok) return { error: `Not fetched: ${gate.reason}` }
     const { text, finalUrl, truncatedBody } = await fetchText(url, signal)
+    const after = checkUrl(finalUrl || url)
+    if (!after.ok) return { error: `Not fetched: it redirected to ${finalUrl}. ${after.reason}` }
     // Strip script and style tags, return readable text
     const clean = text
       .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '')

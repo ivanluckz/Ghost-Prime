@@ -212,8 +212,9 @@ async function resolveTab(cmd, args) {
 //   { mode: 'open' | 'strict', allow: ['github.com', ...], block: ['*.bank.com', ...] }
 function hostMatches(host, pattern) {
   if (!host || !pattern) return false
-  host = host.toLowerCase().replace(/^www\./, '')
-  let p = String(pattern).toLowerCase().trim().replace(/^www\./, '')
+  // A trailing dot is the same host ("facebook.com." = "facebook.com"): strip it on both sides.
+  host = host.toLowerCase().replace(/\.+$/, '').replace(/^www\./, '')
+  let p = String(pattern).toLowerCase().trim().replace(/\.+$/, '').replace(/^www\./, '')
   if (p.startsWith('*.')) p = p.slice(2)
   if (!p) return false
   return host === p || host.endsWith('.' + p)

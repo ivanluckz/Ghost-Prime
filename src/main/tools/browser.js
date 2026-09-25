@@ -1414,6 +1414,13 @@ export async function browserReadPages({ urls, keepOpen } = {}) {
       try {
         pg = await context.newPage()
         await pg.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 })
+        // A redirect can land on a site the policy forbids: never read it (and don't leave it open).
+        const landed = checkUrl(pg.url())
+        if (!landed.ok) {
+          const where = pg.url()
+          if (pg !== page) await pg.close().catch(() => {})
+          return { url, title: '', text: '', error: `It redirected to ${where}. ${landed.reason}` }
+        }
         const text = await pg.evaluate(() => document.body?.innerText || '')
         const out = { url: pg.url(), title: await pg.title(), text: text.slice(0, 12000) }
         if (keepOpen === false && pg !== page) await pg.close().catch(() => {})
