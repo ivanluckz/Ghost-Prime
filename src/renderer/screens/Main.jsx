@@ -116,6 +116,9 @@ export default function Main() {
   // Per-request reply text, kept outside React state: onDone fires in the same tick as the last
   // delta, before React has rendered it, so reading `messages` there would miss the final chunk.
   const replyTextRef = useRef({})
+  // Requests the user stopped (■, Stop, Ctrl+N, switching chat). The app can still send a few events
+  // for them before 'done'; those are dropped so they never land in whatever chat is open now.
+  const stoppedRef = useRef(new Set())
   const dragDepth = useRef(0) // nested dragenter/dragleave depth — dragleave fires on children too
   const ackedRef = useRef(new Set()) // reqIds we've already spoken an instant "on it" for
 
@@ -178,6 +181,7 @@ export default function Main() {
   useEffect(() => {
     // Streamed assistant text — routed to ITS request's bubble so parallel tasks never mix.
     const offDelta = window.ghost.onDelta(({ requestId, text }) => {
+      if (stoppedRef.current.has(requestId)) return // stopped: late text must not land in any chat
       replyTextRef.current[requestId] = (replyTextRef.current[requestId] || '') + text
       setMessages((prev) => {
         const i = lastIndexFor(prev, requestId)
@@ -193,6 +197,7 @@ export default function Main() {
 
     // Tool activity — tagged with its request so it sits in the right track.
     const offTool = window.ghost.onTool((ev) => {
+      if (stoppedRef.current.has(ev.requestId)) return // no late cards, notices or spoken acks
       // Router telling us which brain is handling this turn — record it, render nothing.
       if (ev.kind === 'brain') {
         if (ev.requestId) setBrainByReq((prev) => ({ ...prev, [ev.requestId]: ev.brain }))
@@ -258,6 +263,7 @@ export default function Main() {
 
     const offDone = window.ghost.onDone(({ requestId, aborted }) => {
       settleTools(requestId, aborted ? 'stopped' : 'no result')
+      stoppedRef.current.delete(requestId) // nothing more comes for it after 'done'
       ackedRef.current.delete(requestId)
       setRunning((prev) => {
         const n = { ...prev }
@@ -273,7 +279,8 @@ export default function Main() {
 
     const offError = window.ghost.onError(({ requestId, message }) => {
       settleTools(requestId, 'failed: ' + message)
-      setMessages((prev) => {
+      const wasStopped = stoppedRef.current.delete(requestId)
+      if (!wasStopped) setMessages((prev) => {
         const i = lastIndexFor(prev, requestId)
         if (i >= 0 && prev[i].role === 'assistant') {
           const next = [...prev]
@@ -388,6 +395,7 @@ export default function Main() {
   }
 
   function stopTask(reqId) {
+    stoppedRef.current.add(reqId)
     window.ghost.abort(reqId)
     setRunning((prev) => {
       const n = { ...prev }
@@ -397,7 +405,10 @@ export default function Main() {
   }
 
   function stopAll() {
-    Object.keys(runningRef.current).forEach((id) => window.ghost.abort(id))
+    Object.keys(runningRef.current).forEach((id) => {
+      stoppedRef.current.add(id)
+      window.ghost.abort(id)
+    })
     setRunning({})
     setQueue([]) // also drop anything waiting in the queue
   }

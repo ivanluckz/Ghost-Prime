@@ -181,6 +181,23 @@ const SITE_POLICY_HOOKS = {
   ]
 }
 
+// Stop on the Claude brain: the SDK only kills the Claude CLI ~2 s after an abort, and in that window
+// the CLI can still call our in-process tools. Every Ghost-Prime MCP tool is wrapped so it refuses
+// while the run it belongs to is stopped. Runs never overlap (the run slot is held until the old
+// CLI is gone, see streamChatClaudeAgent), so "the active run" is the one calling.
+let activeClaudeSignal = null
+const guardTool = (sdkTool) => (name, description, schema, handler, ...rest) =>
+  sdkTool(
+    name,
+    description,
+    schema,
+    async (args, extra) => {
+      if (activeClaudeSignal?.aborted) return { content: [{ type: 'text', text: 'Not run: the user pressed Stop.' }], isError: true }
+      return handler(args, extra)
+    },
+    ...rest
+  )
+
 // UI autonomy mode (cycled with Shift+Tab) → SDK permission mode.
 const MODE_TO_PERMISSION = { plan: 'plan', auto: 'auto', full: 'bypassPermissions' }
 
@@ -644,7 +661,8 @@ let browserMcpServer = null
 
 async function getBrowserMcpServer() {
   if (browserMcpServer) return browserMcpServer
-  const { createSdkMcpServer, tool } = await import('@anthropic-ai/claude-agent-sdk')
+  const { createSdkMcpServer, tool: sdkTool } = await import('@anthropic-ai/claude-agent-sdk')
+  const tool = guardTool(sdkTool)
   const { z } = await import('zod')
 
   browserMcpServer = createSdkMcpServer({
@@ -985,7 +1003,8 @@ let memoryMcpServer = null
 
 async function getMemoryMcpServer() {
   if (memoryMcpServer) return memoryMcpServer
-  const { createSdkMcpServer, tool } = await import('@anthropic-ai/claude-agent-sdk')
+  const { createSdkMcpServer, tool: sdkTool } = await import('@anthropic-ai/claude-agent-sdk')
+  const tool = guardTool(sdkTool)
   const { z } = await import('zod')
 
   memoryMcpServer = createSdkMcpServer({
@@ -1038,7 +1057,8 @@ async function getMemoryMcpServer() {
 let filesMcpServer = null
 async function getFilesMcpServer() {
   if (filesMcpServer) return filesMcpServer
-  const { createSdkMcpServer, tool } = await import('@anthropic-ai/claude-agent-sdk')
+  const { createSdkMcpServer, tool: sdkTool } = await import('@anthropic-ai/claude-agent-sdk')
+  const tool = guardTool(sdkTool)
   const { z } = await import('zod')
   const ok = (text) => ({ content: [{ type: 'text', text }] })
   const guard = (fn) => async (a) => {
@@ -1098,7 +1118,8 @@ async function getFilesMcpServer() {
 let remindersMcpServer = null
 async function getRemindersMcpServer() {
   if (remindersMcpServer) return remindersMcpServer
-  const { createSdkMcpServer, tool } = await import('@anthropic-ai/claude-agent-sdk')
+  const { createSdkMcpServer, tool: sdkTool } = await import('@anthropic-ai/claude-agent-sdk')
+  const tool = guardTool(sdkTool)
   const { z } = await import('zod')
   const fmt = (ms) => new Date(ms).toLocaleString(undefined, { weekday: 'short', hour: 'numeric', minute: '2-digit' })
   remindersMcpServer = createSdkMcpServer({
@@ -1146,7 +1167,8 @@ async function getRemindersMcpServer() {
 let phoneMcpServer = null
 async function getPhoneMcpServer() {
   if (phoneMcpServer) return phoneMcpServer
-  const { createSdkMcpServer, tool } = await import('@anthropic-ai/claude-agent-sdk')
+  const { createSdkMcpServer, tool: sdkTool } = await import('@anthropic-ai/claude-agent-sdk')
+  const tool = guardTool(sdkTool)
   const { z } = await import('zod')
   const text = (t) => ({ content: [{ type: 'text', text: t }] })
   phoneMcpServer = createSdkMcpServer({
@@ -1248,7 +1270,8 @@ async function getPhoneMcpServer() {
 let jarvisMcpServer = null
 async function getJarvisMcpServer() {
   if (jarvisMcpServer) return jarvisMcpServer
-  const { createSdkMcpServer, tool } = await import('@anthropic-ai/claude-agent-sdk')
+  const { createSdkMcpServer, tool: sdkTool } = await import('@anthropic-ai/claude-agent-sdk')
+  const tool = guardTool(sdkTool)
   const { z } = await import('zod')
   // zod shape from the OpenAI-style JSON schema each spec already carries (strings/numbers/enums/objects).
   const shapeOf = (schema) => {
@@ -1282,7 +1305,8 @@ async function getJarvisMcpServer() {
 let systemMcpServer = null
 async function getSystemMcpServer() {
   if (systemMcpServer) return systemMcpServer
-  const { createSdkMcpServer, tool } = await import('@anthropic-ai/claude-agent-sdk')
+  const { createSdkMcpServer, tool: sdkTool } = await import('@anthropic-ai/claude-agent-sdk')
+  const tool = guardTool(sdkTool)
   const { z } = await import('zod')
 
   systemMcpServer = createSdkMcpServer({
@@ -1337,7 +1361,8 @@ async function getSystemMcpServer() {
 let screenMcpServer = null
 async function getScreenMcpServer() {
   if (screenMcpServer) return screenMcpServer
-  const { createSdkMcpServer, tool } = await import('@anthropic-ai/claude-agent-sdk')
+  const { createSdkMcpServer, tool: sdkTool } = await import('@anthropic-ai/claude-agent-sdk')
+  const tool = guardTool(sdkTool)
   const { z } = await import('zod')
   screenMcpServer = createSdkMcpServer({
     name: SCREEN_SERVER,
@@ -1395,7 +1420,8 @@ async function getScreenMcpServer() {
 let shellMcpServer = null
 async function getShellMcpServer() {
   if (shellMcpServer) return shellMcpServer
-  const { createSdkMcpServer, tool } = await import('@anthropic-ai/claude-agent-sdk')
+  const { createSdkMcpServer, tool: sdkTool } = await import('@anthropic-ai/claude-agent-sdk')
+  const tool = guardTool(sdkTool)
   const { z } = await import('zod')
 
   shellMcpServer = createSdkMcpServer({
@@ -1482,6 +1508,7 @@ async function getShellMcpServer() {
 // Autonomy mode (Shift+Tab) → permissionMode. onEvent surfaces tool activity.
 // SDK is ESM-only → dynamic import().
 // ---------------------------------------------------------------------------
+const ABORTED = Symbol('aborted')
 async function streamChatClaudeAgent({ messages, signal, onDelta, onEvent, model, mode, effort, thinking }) {
   const { query } = await import('@anthropic-ai/claude-agent-sdk')
   // Default to 'sonnet' (Claude Sonnet 4.6) — the balanced choice for agentic, multi-step work
@@ -1619,7 +1646,26 @@ async function streamChatClaudeAgent({ messages, signal, onDelta, onEvent, model
 
   let streamed = ''
   let sawTool = false
-  for await (const msg of response) {
+  activeClaudeSignal = abortController.signal
+  // Stop must stop NOW: race every message against the abort, so nothing more reaches the chat.
+  const it = response[Symbol.asyncIterator]()
+  let onAbort
+  const aborted = new Promise((resolve) => {
+    onAbort = () => resolve(ABORTED)
+    if (abortController.signal.aborted) onAbort()
+    else abortController.signal.addEventListener('abort', onAbort, { once: true })
+  })
+  for (;;) {
+    const step = await Promise.race([it.next(), aborted])
+    if (step === ABORTED) {
+      // Ask the CLI to stop at once, then wait (max 3 s) until it has gone, so its late tool calls
+      // hit the guard above instead of the next run's tools. Only then free the run slot.
+      response.interrupt?.().catch(() => {})
+      await Promise.race([(async () => { try { while (!(await it.next()).done); } catch {} })(), new Promise((r) => setTimeout(r, 3000))])
+      throw new Error('Request aborted')
+    }
+    if (step.done) break
+    const msg = step.value
     if (msg.type === 'system' && msg.subtype === 'api_retry') {
       // The CLI retries a failed API call ~10 times with backoff (about 3 minutes) and only tells us
       // through these messages. Show each one. Before Claude has said or done anything, give up early

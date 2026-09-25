@@ -259,3 +259,10 @@ Status key:
    and a rejected key gets a plain sentence. And when Gemini gave an empty final answer after using a
    tool, the reply used to stop at its preamble ("Checking your battery now."); it now asks once more
    for the answer, and says so if there still isn't one.
+10. **Fixed overnight 25 Sep (Stop):** DEMO.md's recovery is "press Stop, ask again". On the Claude
+   brain the reply used to keep typing for about 2 s after Stop, and a tool the AI called in that
+   window (create a file, run a command) still ran. After Ctrl+N or switching chat, those late
+   words could even appear in the new chat and be sent along with the next question. Now nothing
+   reaches the chat after Stop, tools refuse to run, and the next question starts cleanly
+   (`smoke-claude-stop` 8 checks, SDK stubbed; `scripts/check-stop-ui.mjs` 4 checks in the design
+   preview). Not tried against live Claude: press Stop once during the day-before rehearsal.

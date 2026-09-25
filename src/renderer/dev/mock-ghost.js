@@ -14,6 +14,8 @@ const on = (kind) => (cb) => {
   return () => listeners[kind].delete(cb)
 }
 const wait = (ms) => new Promise((r) => setTimeout(r, ms))
+const LATE_DONE = new URLSearchParams(location.search).has('lateDone')
+window.__ghostEmit = emit // test hook (design preview only)
 const now = Date.now()
 const day = 86400000
 
@@ -153,7 +155,9 @@ const ghost = {
   },
   abort(requestId) {
     if (!running.delete(requestId)) return
-    emit('done', { requestId, aborted: true })
+    // ?lateDone=1: like the real app, 'done' comes only once the stopped run has wound down. Tests
+    // send the late events a run can still produce, then 'done', themselves with window.__ghostEmit.
+    if (!LATE_DONE) emit('done', { requestId, aborted: true })
   },
   onDelta: on('delta'),
   onTool: on('tool'),

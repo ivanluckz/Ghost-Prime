@@ -28,6 +28,7 @@ SUITES=(
   "claude-prompt|$E|smoke-claude-prompt.mjs"
   "plan-mode|$S|smoke-plan-mode.mjs"
   "claude-retry|$S|smoke-claude-retry.mjs"
+  "claude-stop|$S|smoke-claude-stop.mjs"
   "gemini-loop|$O|smoke-gemini-loop.mjs"
   "brain-router|$E|smoke-brain-router.mjs"
   "run-slot|$E|smoke-run-slot.mjs"
