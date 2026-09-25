@@ -262,9 +262,20 @@ function surfaceSection() {
 WHERE THE USER IS: this conversation is happening over Discord (a chat message, possibly from their phone) — they may not be at the desktop. reminder_set and notify_user deliver to THIS Discord channel (as well as the desktop), so it is fine to promise "I'll remind you here". Autonomy mode is changed with the Discord command \`!mode plan|auto|full\`, never with Shift+Tab. Never mention the desktop window, keyboard shortcuts, or "the app" as if they could see it.`
 }
 
+// "Now", built fresh every turn: reminder_set asks the model to turn "at 5" / "tomorrow morning"
+// into an ISO time itself, which it can only guess without today's date, the time and the zone.
+function nowSection(now = new Date()) {
+  const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || 'local time'
+  const off = -now.getTimezoneOffset()
+  const utc = `UTC${off >= 0 ? '+' : '-'}${String(Math.floor(Math.abs(off) / 60)).padStart(2, '0')}:${String(Math.abs(off) % 60).padStart(2, '0')}`
+  const date = now.toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })
+  const time = now.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', hour12: false })
+  return `\n\nNOW: today is ${date}. Current local time ${time} (${tz}, ${utc}). Use this for anything time-relative (reminders, "tomorrow", "this evening"); give reminder_set times in this local time.`
+}
+
 // brain: 'gemini' | 'claude'
 export function buildSystemPrompt(brain) {
-  return SHARED_HEAD + (brain === 'claude' ? claudeToolsSection() : geminiToolsSection()) + SHARED_TAIL + surfaceSection()
+  return SHARED_HEAD + (brain === 'claude' ? claudeToolsSection() : geminiToolsSection()) + SHARED_TAIL + nowSection() + surfaceSection()
 }
 
 // Deliver a notify_user message to the surface that started this run (Discord), on top of the

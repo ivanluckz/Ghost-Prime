@@ -28,5 +28,14 @@ check(!/\bscreen_screenshot\b/.test(prompt) || process.env.GHOST_SCREEN_TOOLS, '
 const g = buildSystemPrompt('gemini')
 check(/\bweather_get\b/.test(g) && /\bsystem_power\b/.test(g), 'Gemini prompt lists its Jarvis tools too')
 
+// Both brains must know "now": reminder_set asks the model to turn "at 5" into an ISO time itself.
+const now = new Date()
+const tz = Intl.DateTimeFormat().resolvedOptions().timeZone
+for (const [b, pr] of [['claude', prompt], ['gemini', g]]) {
+  check(pr.includes(String(now.getFullYear())) && pr.includes(now.toLocaleDateString('en-GB', { weekday: 'long' })), `${b} prompt states today's date (weekday + year)`)
+  check(pr.includes(tz), `${b} prompt states the time zone (${tz})`)
+  check(/\b\d{2}:\d{2}\b/.test(pr.split('Current local time')[1] || ''), `${b} prompt states the current time`)
+}
+
 console.log(`\n${pass} passed, ${fail} failed`)
 process.exit(fail ? 1 : 0)
