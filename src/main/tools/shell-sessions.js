@@ -1,6 +1,7 @@
 import { homedir, tmpdir, userInfo } from 'node:os'
 import { writeFileSync, mkdirSync, lstatSync, statSync, rmSync } from 'node:fs'
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
+import { spawnSync } from 'node:child_process'
 import { app, BrowserWindow } from 'electron'
 
 // node-pty is a native module. Load it lazily + defensively: an ABI mismatch (e.g. after an
@@ -27,6 +28,44 @@ const AGENT_TIMEOUT_DEFAULT = 120_000
 
 const sessions = new Map() // id -> session
 let counter = 0
+let mainAgentId = null // the terminal shell_run uses when no { terminal } is given (so cd / env persist)
+
+// Agent terminals never open a pager (git log / man / journalctl would sit in `less` and shell_run
+// would wait out its whole timeout), and turn off ! history expansion (see the rc file).
+const AGENT_ENV = { PAGER: 'cat', GIT_PAGER: 'cat', MANPAGER: 'cat', SYSTEMD_PAGER: 'cat', LESS: '-FRX', GHOST_AGENT_TERMINAL: '1' }
+
+// "~", "~/x" and relative paths mean the home folder, like everywhere else the agent names a path.
+// A folder that doesn't exist is an error, not a terminal that dies on spawn.
+function resolveCwd(cwd) {
+  const raw = String(cwd ?? '').trim()
+  if (!raw || raw === '~') return homedir()
+  const p = raw.startsWith('~/') ? join(homedir(), raw.slice(2)) : resolve(homedir(), raw)
+  let ok = false
+  try {
+    ok = statSync(p).isDirectory()
+  } catch {}
+  if (!ok) throw new Error(`No such folder: ${raw}`)
+  return p
+}
+
+// bash -n parses without running: an unclosed quote or a syntax error would otherwise leave the
+// live terminal waiting at a "> " continuation prompt and shell_run hanging until its timeout.
+function syntaxProblem(line) {
+  try {
+    const r = spawnSync('bash', ['-O', 'extglob', '-n', '-c', line], { encoding: 'utf8', timeout: 3000 })
+    if (r.error || r.status === 0 || r.status == null) return ''
+    return (r.stderr || 'syntax error').trim().split('\n').slice(-2).join(' ').replace(/^bash: (?:-c: )?(?:line \d+: )?/, '')
+  } catch {
+    return ''
+  }
+}
+
+// Several lines typed into an interactive shell run as separate commands, and only the first one's
+// output was captured. A { … } group runs them as ONE command in the same shell (cd still sticks).
+function asOneCommand(command) {
+  const cmd = String(command ?? '').replace(/\s+$/, '')
+  return cmd.includes('\n') ? `{ ${cmd}\n}` : cmd
+}
 
 // Shell integration: bash emits OSC-133 semantic markers itself (invisible in the terminal) so we can
 // tell where a command's output begins (C) and ends (D;<exit>) WITHOUT typing any marker commands
@@ -71,6 +110,8 @@ export function ensureRc() {
     '# Ghost-Prime shell integration (OSC 133 semantic prompts)',
     'if [ -r /etc/profile ]; then . /etc/profile; fi',
     'if [ -r "$HOME/.bashrc" ]; then . "$HOME/.bashrc"; fi',
+    '# Agent terminals: no ! history expansion, so text like "echo Done!" runs as written.',
+    'if [ -n "${GHOST_AGENT_TERMINAL:-}" ]; then set +H; fi',
     "__ghost_done() { local e=$?; printf '\\033]133;D;%s\\007' \"$e\"; }",
     'case "${PROMPT_COMMAND:-}" in',
     '  *__ghost_done*) ;;',
@@ -140,14 +181,14 @@ export async function createSession({ name, cwd, cols = 80, rows = 24, agent = f
   const p = await loadPty()
   if (!p) throw new Error(`Terminal backend unavailable: ${ptyError?.message || 'node-pty failed to load'}`)
 
+  const startCwd = resolveCwd(cwd)
   const n = ++counter
-  const startCwd = cwd || homedir()
   const shell = p.spawn('bash', ['--init-file', ensureRc()], {
     name: 'xterm-256color',
     cols,
     rows,
     cwd: startCwd,
-    env: { ...process.env, TERM: 'xterm-256color', GHOST_TERMINAL: '1' }
+    env: { ...process.env, TERM: 'xterm-256color', GHOST_TERMINAL: '1', ...(agent ? AGENT_ENV : {}) }
   })
 
   const session = {
@@ -161,14 +202,24 @@ export async function createSession({ name, cwd, cols = 80, rows = 24, agent = f
     scrollback: '',
     seq: 0, // increments per shell:data chunk so a re-attaching UI can drop chunks its scrollback already holds
     capture: null,
+    fg: false, // a command is running in the foreground (OSC-133 C seen, no D yet) — e.g. a background server
+    oscTail: '', // end of the previous chunk, so a marker split across two chunks is still seen
     osc: null, // null = unknown, true = OSC-133 integration live, false = fell back to printf markers
     lastExit: null // exit code once the shell process dies (so shell_list surfaces deaths)
   }
 
   shell.onData((data) => {
     session.scrollback = (session.scrollback + data).slice(-MAX_SCROLLBACK)
-    // Integration is live the moment we see any OSC-133 marker (emitted on the first prompt).
-    if (session.osc === null && session.scrollback.slice(-64).indexOf('\x1b]133;') !== -1) session.osc = true
+    // Integration is live the moment we see any OSC-133 marker (emitted on the first prompt). Look at
+    // this chunk (plus the tail of the last one), not the scrollback's last 64 bytes: a long coloured
+    // prompt printed after the marker used to push it out of view, costing an 8 s wait.
+    const seen = session.oscTail + data
+    session.oscTail = data.slice(-16)
+    if (seen.includes('\x1b]133;')) {
+      if (session.osc === null) session.osc = true
+      const marks = [...seen.matchAll(/\x1b\]133;([ACD])/g)]
+      if (marks.length) session.fg = marks[marks.length - 1][1] === 'C' // C = running, A/D = at the prompt
+    }
     emitData(session, data)
     if (session.capture) session.capture.feed(data)
   })
@@ -253,16 +304,31 @@ function waitReady(session, timeoutMs = 8000) {
 
 // ---- agent-facing run/read -----------------------------------------------------------------------
 export async function runForAgent({ id, command, name, cwd, background = false, timeoutMs = AGENT_TIMEOUT_DEFAULT }) {
+  const line = asOneCommand(command)
+  if (!line.trim()) throw new Error('shell_run needs a command.')
+  const bad = syntaxProblem(line)
+  if (bad) throw new Error(`Not run: bash would reject this command line (${bad}). Fix the quoting or syntax and try again.`)
+
   let session = id ? sessions.get(id) : null
+  let note = ''
+  if (id && (!session || !session.alive)) note = `(terminal ${id} is closed, so this ran in a new one)\n`
+  // No { terminal }: keep using the agent's main terminal, so cd / exported variables persist — unless
+  // it is gone, capturing, or has a command running in the foreground (a server started earlier).
+  if (!id) {
+    const main = mainAgentId ? sessions.get(mainAgentId) : null
+    if (main && main.alive && !main.capture && !main.fg) session = main
+  }
   if (!session || !session.alive) {
     const created = await createSession({ name, cwd, agent: true })
     session = sessions.get(created.id)
+    if (!id) mainAgentId = created.id
   }
   if (!session) throw new Error('Could not open a terminal session.')
   if (session.osc === null) await waitReady(session) // learn the capture method before running
 
   if (background) {
-    session.pty.write(command + '\r')
+    session.fg = true // it now owns the foreground until its OSC D marker arrives
+    session.pty.write(line + '\r')
     emitSessions()
     return {
       sessionId: session.id,
@@ -277,7 +343,8 @@ export async function runForAgent({ id, command, name, cwd, background = false, 
 
   if (session.capture) throw new Error(`${session.name} (${session.id}) is busy running another command.`)
 
-  return session.osc ? captureOsc(session, command, timeoutMs) : capturePrintf(session, command, timeoutMs)
+  const r = await (session.osc ? captureOsc(session, line, timeoutMs) : capturePrintf(session, line, timeoutMs))
+  return note ? { ...r, output: note + r.output } : r
 }
 
 function finalize(session, resolve, { code, raw, timedOut, exited, timeoutMs }) {
@@ -308,6 +375,9 @@ function captureOsc(session, command, timeoutMs) {
     let raw = ''
     let started = false
     let settled = false
+    // If an earlier command is still running here (it timed out), ITS end marker arrives first and
+    // must not be taken for ours; only a capture that starts at an idle prompt may finish early.
+    let atPrompt = !session.fg
     const timer = setTimeout(() => done(null, { timedOut: true }), timeoutMs)
 
     function done(code, { timedOut = false, exited = false } = {}) {
@@ -322,7 +392,28 @@ function captureOsc(session, command, timeoutMs) {
         raw += data
         if (!started) {
           const m = raw.match(startRe)
-          if (!m) return
+          if (!m) {
+            if (!atPrompt) {
+              // Skip the earlier command's end marker; keep only what follows it. From then on the
+              // shell is at its prompt, so the next marker is ours.
+              const prev = raw.match(endRe)
+              if (prev) {
+                raw = raw.slice(prev.index + prev[0].length)
+                atPrompt = true
+                return this.feed('') // our own markers may already be in the same chunk
+              }
+              return
+            }
+            // Back at the prompt without running anything (a comment-only line, input bash refused
+            // before running it): finish now with whatever bash printed, instead of waiting it out.
+            const early = raw.match(endRe)
+            if (early) {
+              raw = raw.slice(0, early.index)
+              raw = raw.slice(raw.indexOf('\n') + 1) // drop the echoed command line
+              done(early[1] != null ? parseInt(early[1], 10) : null, {})
+            }
+            return
+          }
           started = true
           raw = raw.slice(m.index + m[0].length) // drop the command echo before output
         }
