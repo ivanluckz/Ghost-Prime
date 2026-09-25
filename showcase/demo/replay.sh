@@ -6,6 +6,8 @@
 #   showcase/demo/replay.sh           open the replay in ChromeOS Chrome (it has offline voices)
 #   showcase/demo/replay.sh --linux   open it in the Linux Chrome as an app window instead
 #   showcase/demo/replay.sh --quiet   same, but don't read every answer aloud (adds &speak=0)
+#   showcase/demo/replay.sh --small   normal-size text instead of presenter mode (big text, AUTO),
+#                                     which is what bin/ghost-showcase shows in the live app
 #
 # If the preview server isn't running, this starts it and keeps it in THIS terminal:
 # Ctrl+C here stops it. Say out loud that it's a replay (DEMO.md, "Plan C").
@@ -15,21 +17,23 @@ GHOST_DIR="$(cd "$(dirname "$(readlink -f "$0")")/../.." && pwd)"
 PORT="${DESIGN_PORT:-5199}"
 WHERE=chromeos
 EXTRA=""
+PRESENTER="&showcase=1"
 for a in "$@"; do
   case "$a" in
     --linux) WHERE=linux ;;
     --quiet) EXTRA="&speak=0" ;;
+    --small) PRESENTER="" ;;
     -h | --help)
-      sed -n '2,11p' "$0"
+      sed -n '2,13p' "$0"
       exit 0
       ;;
     *)
-      echo "usage: replay.sh [--linux] [--quiet]" >&2
+      echo "usage: replay.sh [--linux] [--quiet] [--small]" >&2
       exit 2
       ;;
   esac
 done
-QUERY="?skipIntro=1&replay=1$EXTRA"
+QUERY="?skipIntro=1&replay=1$EXTRA$PRESENTER"
 
 up() { curl -s -o /dev/null -m 1 "http://127.0.0.1:$PORT/"; }
 

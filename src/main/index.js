@@ -43,6 +43,9 @@ app.commandLine.appendSwitch('disable-backgrounding-occluded-windows')
 // the `dev` script sets the hint itself instead.
 const USE_NATIVE_FRAME =
   process.platform === 'linux' && envBool('GHOST_NATIVE_FRAME', false)
+// Presenter ("showcase") mode: big type for a projector. bin/ghost-showcase exports
+// GHOST_SHOWCASE=1; the renderer can't read env, so it rides along like the frame flag below.
+const SHOWCASE = envBool('GHOST_SHOWCASE', false)
 const OZONE_HINT = process.env.ELECTRON_OZONE_PLATFORM_HINT || ''
 const OZONE_WANT = (process.env.GHOST_OZONE || '').trim().toLowerCase()
 const OZONE_VALID = ['wayland', 'x11', 'auto']
@@ -147,8 +150,9 @@ function createWindow() {
       sandbox: false,
       backgroundThrottling: false, // keep streaming/animations live while you're over in Chrome
       autoplayPolicy: 'no-user-gesture-required', // let the intro sting + sfx play on launch
-      // The preload can't see .env (renderer env), so main passes the frame decision down.
-      additionalArguments: [`--ghost-native-frame=${USE_NATIVE_FRAME ? 1 : 0}`]
+      // The preload can't see .env (renderer env), so main passes the frame decision (and the
+      // presenter flag) down.
+      additionalArguments: [`--ghost-native-frame=${USE_NATIVE_FRAME ? 1 : 0}`, `--ghost-showcase=${SHOWCASE ? 1 : 0}`]
     }
   })
 

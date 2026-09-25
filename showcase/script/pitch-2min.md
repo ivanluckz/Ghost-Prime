@@ -58,15 +58,16 @@ DEMO.md estimates at 10–20 seconds. Keep the hero phrase for the booth, where 
 ## Before your slot (10 minutes before)
 
 1. Start the app with `bin/ghost-showcase --restart` (DEMO.md, section 2).
-2. Type `/mode auto` until the badge says **AUTO**. Not **FULL AUTO** in public. Not **PLAN**
-   either: PLAN only looks and never clicks, so the demo would stop.
+2. Check the badge says **AUTO** (the showcase launcher starts there, in big-text presenter mode).
+   If not, type `/mode auto`. Not **FULL AUTO** in public. Not **PLAN** either: PLAN only looks and
+   never clicks, so the demo would stop.
 3. Type `/voice on`.
 4. Type `/site strict`, then `/site allow wikipedia.org`, then `/site allow example.com`, then
    `/site list` to check. These are the same two sites as DEMO.md (example.com is the backup page).
 5. **Warm up the browser.** Type `Open example.com and tell me what it says.` The first browser
    launch is the slow one (DEMO.md), so this gets it out of the way. Leave that browser window open,
    snapped to the right (**Alt + ]**), with Ghost-Prime on the left (**Alt + [**).
-6. Press **Ctrl+N** for a fresh chat, and hide the chat history.
+6. Press **Ctrl+N** for a fresh chat. (Presenter mode already hides the chat history.)
 7. **Talk or type?** Listen to the room. If the mic got the hero phrase right when you tried it here
    at the venue, you'll speak it. If the hall is too loud, you'll type it. Decide now, not in the
    middle of the pitch.

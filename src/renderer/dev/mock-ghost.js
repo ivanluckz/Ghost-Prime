@@ -139,7 +139,8 @@ async function script(requestId, prompt) {
 }
 
 const ghost = {
-  platform: { isLinux: true, nativeFrame: false },
+  // ?showcase=1 previews a bin/ghost-showcase launch (presenter mode on, AUTO mode).
+  platform: { isLinux: true, nativeFrame: false, showcase: new URLSearchParams(location.search).get('showcase') === '1' },
   uiReady: () => {},
   sendMessage(messages) {
     const requestId = `demo_${++reqSeq}`
@@ -219,9 +220,14 @@ const ghost = {
     onData: () => () => {},
     onSessions: () => () => {}
   },
+  // The mic "hears" the hero phrase after a short transcription, so the voice states can be
+  // previewed; ?voice=fail previews the failure note instead.
   voice: {
     listenStart() {},
-    listenStop: async () => ({ text: '' }),
+    listenStop: async () => {
+      await wait(1200)
+      return new URLSearchParams(location.search).get('voice') === 'fail' ? { error: 'arecord: audio open error: No such file or directory' } : { text: HERO }
+    },
     ttsAvailable: async () => true,
     speak() {},
     stopSpeaking() {}

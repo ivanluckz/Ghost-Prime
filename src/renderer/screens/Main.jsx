@@ -74,22 +74,29 @@ const IconSettings = () => (
   </svg>
 )
 
+// Launched for the showcase (bin/ghost-showcase → GHOST_SHOWCASE=1 → preload): presenter mode on,
+// and a safer starting mode. Read once; /showcase toggles presenter mode at runtime.
+const LAUNCHED_FOR_SHOWCASE = () => !!window.ghost?.platform?.showcase
+
 export default function Main() {
   const [messages, setMessages] = useState([]) // { role:'user'|'assistant'|'tool', reqId, ... }
   const [running, setRunning] = useState({}) // reqId -> { prompt, startedAt } — the single in-flight task
   const [queue, setQueue] = useState([]) // prompts waiting their turn (FIFO) — one task runs at a time
-  const [mode, setMode] = useState('full')
+  // FULL AUTO by default; a showcase launch starts in AUTO so a public demo never begins with no checks.
+  const [mode, setMode] = useState(() => (LAUNCHED_FOR_SHOWCASE() ? 'auto' : 'full'))
+  const [presenter, setPresenter] = useState(LAUNCHED_FOR_SHOWCASE) // big-text projector mode
   const [agent, setAgent] = useState({}) // { model, effort, thinking } — runtime overrides via / commands
 
   const [voiceOut, setVoiceOut] = useState(false) // speak replies aloud
   const [ttsOk, setTtsOk] = useState(false)
   const [sessions, setSessions] = useState([])
   const [activeId, setActiveId] = useState(null)
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
+  // Presenter mode opens with the chat list tucked away: old chat titles stay off the projector.
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(LAUNCHED_FOR_SHOWCASE)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [mirror, setMirror] = useState(true) // auto-sync chat into Chrome's side panel
 
-  const [activityOpen, setActivityOpen] = useState(true) // right-hand Mission Control activity panel
+  const [activityOpen, setActivityOpen] = useState(() => !LAUNCHED_FOR_SHOWCASE()) // right-hand Mission Control activity panel
   const [browserTarget, setBrowserTarget] = useState('group') // which tab browser tools act on
   const [muted, setMutedState] = useState(isMuted()) // master sound mute (intro sting + sfx)
   const [shellSessions, setShellSessions] = useState([]) // live terminals (shared with the agent)
@@ -99,6 +106,9 @@ export default function Main() {
   const [dropNote, setDropNote] = useState('') // transient message about a rejected/too-big drop
   const [brainByReq, setBrainByReq] = useState({}) // reqId -> 'gemini' | 'claude' (which brain answered)
   const prevShellCount = useRef(0)
+  // Panel layout to restore when presenter mode is switched off. A showcase launch starts in
+  // presenter mode, so "before" is the normal layout: history and Activity both open.
+  const beforePresenter = useRef(LAUNCHED_FOR_SHOWCASE() ? { sidebarCollapsed: false, activityOpen: true } : null)
   const voiceOutRef = useRef(false)
   const sendRef = useRef(null) // latest send(), so externally-pushed tasks avoid a stale closure
   const newChatRef = useRef(null) // latest newChat(), so the global key handler avoids a stale closure
@@ -125,6 +135,13 @@ export default function Main() {
 
   // Apply the saved accent theme as early as possible.
   useEffect(() => initAccent(), [])
+
+  // Presenter mode is a class on <html>, so presenter.css can restyle every panel (and the Settings
+  // popover) from one place.
+  useEffect(() => {
+    document.documentElement.classList.toggle('presenter', presenter)
+    return () => document.documentElement.classList.remove('presenter')
+  }, [presenter])
 
   // Initial load: TTS availability, past sessions, current session id.
   useEffect(() => {
@@ -439,6 +456,22 @@ export default function Main() {
     refreshSessions()
   }
 
+  // Presenter mode on/off. Turning it on tucks both side panels away (the conversation gets the room,
+  // old chat titles leave the projector); turning it off puts them back as they were.
+  function changePresenter(on) {
+    if (on === presenter) return
+    if (on) {
+      beforePresenter.current = { sidebarCollapsed, activityOpen }
+      setSidebarCollapsed(true)
+      setActivityOpen(false)
+    } else if (beforePresenter.current) {
+      setSidebarCollapsed(beforePresenter.current.sidebarCollapsed)
+      setActivityOpen(beforePresenter.current.activityOpen)
+      beforePresenter.current = null
+    }
+    setPresenter(on)
+  }
+
   // Push a small dim "system note" into the transcript (used to confirm / commands).
   function note(content) {
     setMessages((prev) => [...prev, { role: 'system', content }])
@@ -528,6 +561,17 @@ export default function Main() {
       case 'settings':
         setSettingsOpen(true)
         return true
+      case 'showcase':
+      case 'presenter': {
+        if (arg && arg !== 'on' && arg !== 'off') {
+          note('Usage: /showcase (toggle) · /showcase on | off')
+          return true
+        }
+        const on = arg ? arg === 'on' : !presenter
+        changePresenter(on)
+        note(on ? '✓ Presenter mode on: big text for the projector. /showcase off to leave.' : '✓ Presenter mode off')
+        return true
+      }
       case 'new':
         newChat()
         return true
@@ -535,7 +579,7 @@ export default function Main() {
         note(`model ${agent.model || 'sonnet'} · effort ${agent.effort || 'low'} · thinking ${agent.thinking || 'adaptive'} · mode ${mode}`)
         return true
       case 'help':
-        note('/model · /brain auto|gemini|claude · /effort low…max · /thinking off|adaptive · /fast · /smart · /mode plan|auto|full · /voice on|off · /tab own|current · /mirror on|off · /site … · /hotkey · /settings · /status · /new')
+        note('/model · /brain auto|gemini|claude · /effort low…max · /thinking off|adaptive · /fast · /smart · /mode plan|auto|full · /voice on|off · /showcase on|off · /tab own|current · /mirror on|off · /site … · /hotkey · /settings · /status · /new')
         return true
       default:
         note(`Unknown command "/${c}". Try /help`)
@@ -834,7 +878,7 @@ export default function Main() {
           />
         )}
         <MessageList messages={messages} onExample={send} runningIds={runningIds} brainByReq={brainByReq} />
-        {termOpen && <TerminalPanel sessions={shellSessions} onClose={() => setTermOpen(false)} />}
+        {termOpen && <TerminalPanel sessions={shellSessions} onClose={() => setTermOpen(false)} fontSize={presenter ? 17 : 12.5} />}
         {dropNote && <div className="drop-note">{dropNote}</div>}
         {attachments.length > 0 && (
           <div className="attach-row">

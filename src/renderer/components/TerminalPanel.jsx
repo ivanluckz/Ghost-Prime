@@ -32,8 +32,9 @@ const FONT = "ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, Consolas, 'Liber
 
 // One live, persistent multi-session terminal dock. `sessions` is owned by Main (so it can badge the
 // toolbar / auto-open); this component owns the xterm instances and the live data stream.
-export default function TerminalPanel({ sessions = [], onClose }) {
+export default function TerminalPanel({ sessions = [], onClose, fontSize = 12.5 }) {
   const [activeId, setActiveId] = useState(null)
+  const fontSizeRef = useRef(fontSize) // read by mountTerm, so new terminals open at the current size
   const [err, setErr] = useState('') // why the last '+' failed (e.g. node-pty backend unavailable)
   const terms = useRef(new Map()) // id -> { term, fit, ready, buf }
   const containers = useRef(new Map()) // id -> DOM node
@@ -64,7 +65,7 @@ export default function TerminalPanel({ sessions = [], onClose }) {
     if (!el || terms.current.has(id)) return
     const term = new Terminal({
       fontFamily: FONT,
-      fontSize: 12.5,
+      fontSize: fontSizeRef.current,
       lineHeight: 1.18,
       theme: THEME,
       cursorBlink: true,
@@ -102,6 +103,16 @@ export default function TerminalPanel({ sessions = [], onClose }) {
         requestAnimationFrame(() => fit(id))
       })
   }
+
+  // Presenter mode changes the size live: resize every open terminal and re-fit it to the dock.
+  useEffect(() => {
+    fontSizeRef.current = fontSize
+    for (const [id, t] of terms.current) {
+      if (t.term.options.fontSize === fontSize) continue
+      t.term.options.fontSize = fontSize
+      requestAnimationFrame(() => fit(id))
+    }
+  }, [fontSize])
 
   function disposeTerm(id) {
     const t = terms.current.get(id)

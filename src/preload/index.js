@@ -9,12 +9,15 @@ const localErrorCbs = new Set()
 
 // Main decides the frame (it has .env; the renderer env doesn't) and passes it via additionalArguments.
 const nativeFrame = process.argv.includes('--ghost-native-frame=1')
+// Presenter mode on at launch (GHOST_SHOWCASE=1, set by bin/ghost-showcase). /showcase toggles it.
+const showcase = process.argv.includes('--ghost-showcase=1')
 
 // The only bridge between renderer and main. No node, no remote — typed wrappers only.
 contextBridge.exposeInMainWorld('ghost', {
   platform: {
     isLinux: process.platform === 'linux',
-    nativeFrame
+    nativeFrame,
+    showcase
   },
   // Main.jsx calls this once its push listeners are attached; main flushes buffered pushes then.
   uiReady: () => ipcRenderer.send('ui:ready'),

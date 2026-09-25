@@ -65,6 +65,7 @@ Status key:
 | Clipboard and desktop notifications | "Copy this", "notify me when done" | Electron clipboard and Notification | **WORKING (manual)**. No test. |
 | Message it from Discord (remote control from a phone) | DMs the bot; `!mode`, `!brain`, `!stop`, `!status` | discord.js bot inside the app (online only while the app runs), locked to an allow-list of user IDs | **WORKING (manual)**. Commits `19e1089`, `e2c96d7`, `09c8480`. `smoke-run-slot.mjs` **33/33** on 25 Sep proves Discord and desktop runs queue safely without clashing. The bot itself has no automated test. |
 | Autonomy modes (Shift+Tab) | Cycles PLAN → AUTO → FULL AUTO | PLAN blocks state-changing tools; AUTO/FULL differ per brain (see §5) | **WORKING (manual)**. The plan gate is in `provider.js`; there is no dedicated test. |
+| Presenter (big-text) mode for a projector | Starts with `bin/ghost-showcase`, or type `/showcase` | Bar, conversation and composer scaled ~1.45× (more on wide screens), simpler bar, chat history hidden, starts in AUTO; the mic shows a big "Listening…" / "Turning your speech into text…" pill and a plain-English note when voice fails | **BUILT, NOT TRIED ON THE CHROMEBOOK** (added overnight 25 Sep). Checked in the design preview at 1366×768, 1280×800 and half-screen 683×768, and in the built Electron app under Xvfb (flag reaches the UI, badge says AUTO). Try it on the real projector before the 29th. |
 | Scheduled tasks and "Ask Ghost" from outside the app | `node scripts/run-task.mjs "…"` from cron | POST to the bridge's `/task` endpoint | **WORKING**. `smoke-bridge.mjs` **6/6** on 25 Sep covers `/task` and token enforcement. |
 | Canva design tools | "Make a poster in Canva" | Canva's MCP server wired into the Claude brain | **BUILT, NOT VERIFIED** (`0d1b3c6`). Needs Canva sign-in. **Do not claim.** |
 | Control any desktop app (mouse/keyboard outside the browser) | n/a | n/a | **NOT POSSIBLE on ChromeOS** (no screen-capture protocol; `/dev/uinput` is root-only). An experimental `screen_*` toolset exists but is **off by default**. **Do not claim.** |
@@ -131,8 +132,11 @@ Status key:
 - **AUTO**: on the Claude brain, the SDK's automatic permission classifier decides for each action.
   On the Gemini brain, AUTO runs tools **without asking**, exactly like FULL.
 - **FULL AUTO** runs everything with no checks.
-- ⚠ **The desktop app starts in FULL AUTO by default** (`Main.jsx`: `useState('full')`). Discord
-  defaults to AUTO.
+- ⚠ **The desktop app starts in FULL AUTO by default** (`Main.jsx`). Discord defaults to AUTO.
+  **Exception (added 25 Sep, overnight):** launched with `bin/ghost-showcase` (`GHOST_SHOWCASE=1`) it
+  starts in **AUTO**, in big-text presenter mode with the chat history hidden. Checked by launching
+  the built app under Xvfb with and without `GHOST_SHOWCASE=1` and reading the badge: AUTO vs FULL
+  AUTO. Not yet tried on the Chromebook itself.
 - ⚠ **No mode shows a human "are you sure?" prompt.** A real confirmation gate for irreversible
   actions is PLANNED. Never say "it always asks before doing anything".
 - Browser pop-up dialogs (`confirm()`/`prompt()`) are **auto-accepted** by default
@@ -221,8 +225,9 @@ Status key:
 4. **Gemini free-tier quota and rate limits** can fail mid-demo, and voice depends on Gemini by
    default. Have `GHOST_VOICE_PROVIDER=local` (offline Whisper + espeak-ng) ready as a backup, and
    rehearse on the venue Wi-Fi or a hotspot. Everything except local voice needs internet.
-5. The desktop starts in **FULL AUTO**. For a public demo, switch to **AUTO** or **PLAN**, and set
-   the site policy to strict with a short allow-list.
+5. Plain Ghost-Prime starts in **FULL AUTO**; `bin/ghost-showcase` starts in **AUTO** (§5). Check
+   the badge says AUTO (or PLAN) before a public demo, and set the site policy to strict with a
+   short allow-list.
 6. Inconsistency in the code: the Claude system prompt still says "You do NOT have the Jarvis
    one-shot tools on this brain" (`provider.js`, `claudeToolsSection`), but since commit `5543493`
    those tools are registered for Claude. Claude may wrongly refuse "what's my battery?". Test it,

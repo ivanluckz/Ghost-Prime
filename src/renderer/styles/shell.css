@@ -720,6 +720,9 @@
 }
 .chat-input .composer textarea::placeholder {
   color: #6f7da3;
+  white-space: nowrap; /* one line, never a wrapped second line under the first */
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .composer .btn {
@@ -830,6 +833,100 @@
   .input-hint { gap: 12px; }
   .composer .btn-send { padding: 0; width: 40px; justify-content: center; }
   .btn-send-label { display: none; }
+}
+
+/* Voice state pill: floats above the composer, centred, readable from across a room (presenter
+   mode zooms it further). Listening = red with a pinging dot, transcribing = cyan with a spinner,
+   a failed/empty recording = amber note. Opaque fills: it sits over a thread that repaints. */
+.voice-banner {
+  position: absolute;
+  left: 50%;
+  bottom: calc(100% + 4px);
+  z-index: 5;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  max-width: calc(100% - 2 * var(--col-inset));
+  padding: 8px 16px;
+  border-radius: 999px;
+  border: 1px solid var(--glass-brd);
+  background: #0c1122;
+  color: var(--ink);
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.35;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  box-shadow: 0 10px 28px -10px rgba(0, 0, 0, 0.8);
+  transform: translateX(-50%);
+  animation: voice-in 160ms var(--ease-out) both;
+  pointer-events: none;
+}
+@keyframes voice-in {
+  from {
+    opacity: 0;
+    transform: translate(-50%, 4px);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, 0);
+  }
+}
+.voice-banner-listening {
+  border-color: rgba(255, 93, 122, 0.6);
+  background: #2a0e18;
+  color: #ffd7df;
+}
+.voice-banner-transcribing {
+  border-color: color-mix(in srgb, var(--cyan) 50%, transparent);
+  background: #07202a;
+  color: #cffaff;
+}
+.voice-banner-note {
+  width: max-content;
+  max-width: min(560px, calc(100% - 2 * var(--col-inset)));
+  border-radius: 14px;
+  white-space: normal;
+  text-align: left;
+  border-color: rgba(255, 180, 84, 0.5);
+  background: #241a0b;
+  color: #ffe3b8;
+}
+.voice-banner .tool-spinner {
+  width: 14px;
+  height: 14px;
+  border: 2px solid rgba(255, 255, 255, 0.18);
+  border-top-color: var(--cyan);
+}
+.voice-banner-dot {
+  position: relative;
+  flex: 0 0 auto;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--error);
+}
+.voice-banner-dot::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  border: 2px solid var(--error);
+  animation: shell-ping 1.2s var(--ease-out) infinite;
+}
+/* While listening the whole composer carries the red edge, not just the mic button. */
+.composer.composer-listening {
+  border-color: rgba(255, 93, 122, 0.6);
+  box-shadow: var(--inset-hi), 0 0 0 3px rgba(255, 93, 122, 0.14), var(--shell-drop);
+}
+@media (prefers-reduced-motion: reduce) {
+  .voice-banner {
+    animation: none;
+  }
+  .voice-banner-dot::after {
+    display: none;
+  }
 }
 
 /* Slash-command menu: same surface as the composer, aligned to its edges. */

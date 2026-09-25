@@ -64,7 +64,8 @@ export GHOST_AUTO_SUMMARIZE=0
 export GHOST_CANVA=0
 # Discord relay off: nobody can send it tasks from outside during the demo.
 export DISCORD_BOT_TOKEN=
-# Presenter flag for the UI (big-text presenter mode will read this later).
+# Presenter mode: big text for the projector, chat history tucked away, and the app starts in AUTO
+# instead of FULL AUTO. Type /showcase off in the chat to leave it (e.g. to reach the history).
 export GHOST_SHOWCASE=1
 
 echo "ghost-showcase: starting Ghost-Prime with showcase settings"
@@ -75,6 +76,6 @@ if [ "$GHOST_BROWSER_BACKEND" != playwright ]; then
 fi
 [ -n "${GHOST_VOICE_PROVIDER:-}" ] && echo "  voice provider (from your command line): $GHOST_VOICE_PROVIDER"
 [ -n "${GHOST_BRAIN_MODE:-}" ] && echo "  brain mode (from your command line): $GHOST_BRAIN_MODE"
-echo "  remember: Shift+Tab to AUTO, then /voice on   (checklist: showcase/demo/DEMO.md)"
+echo "  presenter mode on (big text, starts in AUTO) · remember: /voice on   (checklist: showcase/demo/DEMO.md)"
 
 exec "$GHOST_DIR/bin/ghost-prime" -f "$@"

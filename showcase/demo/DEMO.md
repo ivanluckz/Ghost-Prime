@@ -107,20 +107,23 @@ Visitors will read your screen and hear what Ghost-Prime says.
    **Check the line it prints: it must say `browser=playwright`.** If it says anything else, or shows a
    WARNING, open a new terminal tab and run `bin/ghost-showcase --restart` again. The intro video
    plays once. Let it play for the people watching, or click to skip it.
+   The launcher also turns on **presenter mode**: big text you can read from 2–3 metres, the chat
+   history tucked away, and the badge starts at **AUTO** instead of FULL AUTO. Type `/showcase off` if
+   you need the normal layout (for example to reach Settings' memory list), and `/showcase on` to go back.
 3. **Window:** maximise Ghost-Prime (the square button at the top right). For Demo 5, snap Ghost-Prime
    to the left half (**Alt + [**). When the browser window opens, snap it to the right (**Alt + ]**).
-   If people are standing back, enlarge everything with **Ctrl + Shift + Plus**. Reset with
-   **Ctrl + Shift + 0**. On a projector, **Ctrl + the window-switcher key** switches mirroring on and off.
+   Presenter mode already uses big text, and it still fits when the window is snapped to half the
+   screen. On a projector, **Ctrl + the window-switcher key** switches mirroring on and off.
 4. **Settings, typed into the chat box:**
-   - `/mode auto` (or press **Shift+Tab** twice), until the badge at the top says **AUTO**. The app
-     starts in FULL AUTO. Don't demo in FULL AUTO.
+   - Check the badge at the top says **AUTO** (the showcase launcher starts there). If it doesn't, type
+     `/mode auto`. Plain Ghost-Prime starts in FULL AUTO: never demo in FULL AUTO.
    - `/voice on`. Answers are read aloud.
    - `/site strict`, then `/site allow wikipedia.org`, then `/site allow example.com`, then `/site list`
      to check. Now the browser only goes to those sites.
    - `/status`. Check that it says **mode auto**. The brain shows as a small **CLAUDE** tag on each
      answer (the sound check in step 6 shows it).
-   - Press **Ctrl+N** for a fresh chat, then hide the chat history (the panel button left of
-     "New chat").
+   - Press **Ctrl+N** for a fresh chat. Presenter mode keeps the chat history hidden; if you left it,
+     type `/showcase on` again.
 5. **Volume:** set the ChromeOS volume to about 80%. If Ghost-Prime is quiet, run
    `pactl set-sink-volume @DEFAULT_SINK@ 100%` in the terminal (this is the Linux side's own volume).
 6. **Sound check:** type *"Say hello to the judges."* (Demo 0). You should hear the answer.

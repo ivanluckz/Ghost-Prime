@@ -1,0 +1,130 @@
+/* presenter — big-text "showcase" mode for a projector (loaded last).
+   On when the app is launched by bin/ghost-showcase (GHOST_SHOWCASE=1) or with /showcase; Main.jsx
+   puts `presenter` on <html>. Goal: the conversation reads from 2–3 m away.
+   - The bar, the thread and the composer are scaled with CSS zoom (~1.45×), so every size, gap and
+     radius from the design pass scales together instead of being re-tuned one by one. The terminal
+     is NOT zoomed (xterm measures its cells in real pixels); it gets a bigger font from Main instead.
+   - A wider column, and a simpler bar: build badge, key hints, the sound and Chrome-mirror buttons go.
+   - Both side panels are tucked away when presenter mode turns on (Main.jsx); the Activity panel
+     can still be opened from the bar. */
+
+:root.presenter {
+  --presenter-zoom: 1.45;
+  --chat-col: 900px; /* in zoomed px: ~1300 real px, i.e. the whole pane on a 1280-1366 projector */
+}
+/* A 1080p Chromebook at 125% gives a ~1536px viewport: step up so the text keeps its size on screen. */
+@media (min-width: 1500px) {
+  :root.presenter {
+    --presenter-zoom: 1.65;
+  }
+}
+@media (min-width: 1800px) {
+  :root.presenter {
+    --presenter-zoom: 1.9;
+  }
+}
+
+.presenter .topbar,
+.presenter .messages,
+.presenter .chat-input,
+.presenter .attach-row,
+.presenter .drop-note,
+.presenter .settings-pop {
+  zoom: var(--presenter-zoom);
+}
+
+/* ---------- Simplified bar ---------- */
+.presenter .brand-version,
+.presenter .mode-hint,
+.presenter .tb-tools .voice-toggle[aria-label='Toggle app sound'],
+.presenter .tb-tools .voice-toggle[aria-label='Mirror chat to Chrome'],
+.presenter .tb-tools .tb-sep:first-of-type {
+  display: none;
+}
+/* The live status word is the audience's cue ("working…"): shown whenever the bar has room. */
+.presenter .status {
+  font-size: 11px;
+}
+/* The bar is zoomed but the pane's container queries measure real pixels, so presenter mode has its
+   own steps (real pane widths). Half a 1366px screen (Demo 5, snapped left) leaves ~610px. */
+@container pane (min-width: 861px) {
+  .presenter .status-label {
+    display: inline;
+  }
+  .presenter .status {
+    margin-left: 14px;
+    padding-left: 14px;
+    border-left: 1px solid var(--shell-line);
+  }
+}
+@container pane (max-width: 1100px) {
+  .presenter .brand-accent {
+    display: none;
+  }
+}
+@container pane (max-width: 860px) {
+  .presenter .brand-word {
+    display: none;
+  }
+  .presenter .brand-mark {
+    margin-right: 0;
+  }
+  .presenter .status {
+    margin-left: 10px;
+    padding-left: 0;
+    border-left: 0;
+  }
+  .presenter .mode-label {
+    display: none;
+  }
+  .presenter .mode-label-short {
+    display: inline;
+  }
+  /* Activity stays reachable via /showcase off; on a half-width window the conversation needs the room. */
+  .presenter .tb-tools .voice-toggle[aria-label='Toggle activity panel'],
+  .presenter .tb-tools .tb-sep {
+    display: none;
+  }
+}
+
+/* ---------- Start screen ---------- */
+/* The gem canvas has a fixed pixel size; scale it back down so the title and the four examples
+   still fit above the composer on a 768-800px-tall projector. */
+.presenter .empty .hero-core {
+  zoom: 0.55;
+  margin-bottom: 8px;
+}
+.presenter .empty-sub {
+  margin-bottom: 16px;
+}
+
+/* ---------- Thread ---------- */
+.presenter .messages {
+  gap: 14px;
+}
+/* Tool calls: the card output is detail, not the story. Keep it, but shorter. */
+.presenter .toolcard .tool-output {
+  max-height: 150px;
+}
+.presenter .toolcard .tool-shot {
+  max-height: 260px;
+}
+
+/* ---------- Composer ---------- */
+.presenter .input-hint {
+  display: none;
+}
+
+/* ---------- Terminal (not zoomed) ---------- */
+/* Same edges as the zoomed composer below it: the gutter, scaled by the zoom. */
+.presenter .term-dock {
+  height: 34vh;
+  margin-inline: calc(var(--gutter, 12px) * var(--presenter-zoom));
+}
+.presenter .term-empty {
+  font-size: 17px;
+}
+.presenter .term-label,
+.presenter .term-tab {
+  font-size: 15px;
+}

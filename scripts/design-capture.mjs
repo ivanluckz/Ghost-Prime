@@ -1,7 +1,8 @@
 // Screenshot every UI state of the design preview (`npm run design` must be running).
 // Usage: node scripts/design-capture.mjs <outdir> [prefix] [baseUrl]
 // States: empty, history, markdown, running, tools, tool-open, error, settings, settings-lower,
-// terminal, compact, narrow. Each run is a fresh page (fresh mock data). Prints PAGEERROR lines.
+// terminal, compact, voice-listening, voice-failed, presenter, presenter-answer, narrow.
+// Each run is a fresh page (fresh mock data). Prints PAGEERROR lines.
 import { chromium } from 'playwright'
 import { mkdirSync } from 'node:fs'
 
@@ -10,14 +11,14 @@ mkdirSync(outdir, { recursive: true })
 const browser = await chromium.launch({ args: ['--use-gl=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'] })
 let errors = 0
 
-async function page(width = 1280, height = 840) {
+async function page(width = 1280, height = 840, query = '') {
   const ctx = await browser.newContext({ viewport: { width, height }, deviceScaleFactor: 1 })
   const p = await ctx.newPage()
   p.on('pageerror', (e) => {
     errors++
     console.log('PAGEERROR:', e.message)
   })
-  await p.goto(base)
+  await p.goto(base + query)
   await p.waitForSelector('.chat-input textarea', { timeout: 20000 })
   await p.waitForTimeout(900)
   return p
@@ -100,6 +101,27 @@ try {
   await p.locator('[aria-label="Toggle activity panel"]').click()
   await p.locator('.sidebar-collapse').click()
   await shot(p, 'compact')
+  await p.context().close()
+
+  // Voice input: listening (red pill + composer edge) and a failed recording's note.
+  p = await page()
+  await p.locator('[aria-label="Voice input"]').click()
+  await shot(p, 'voice-listening')
+  await p.context().close()
+  p = await page(1280, 840, '&voice=fail')
+  await p.locator('[aria-label="Voice input"]').click()
+  await p.waitForTimeout(300)
+  await p.locator('[aria-label="Voice input"]').click()
+  await p.waitForTimeout(1700)
+  await shot(p, 'voice-failed')
+  await p.context().close()
+
+  // Presenter mode as bin/ghost-showcase launches it (GHOST_SHOWCASE=1), on a 1366x768 projector.
+  p = await page(1366, 768, '&showcase=1')
+  await shot(p, 'presenter')
+  await send(p, 'look up photosynthesis')
+  await p.waitForTimeout(6500)
+  await shot(p, 'presenter-answer')
   await p.context().close()
 
   p = await page(900, 700)

@@ -12,6 +12,7 @@ import './styles/chat.css'
 import './styles/tools.css'
 import './styles/activity.css'
 import './styles/panels.css'
+import './styles/presenter.css' // big-text showcase mode; must stay last
 
 // Defence in depth: never let Chromium's default drop action navigate the app window to a dropped
 // URL/file (covers every screen, incl. Intro). Main.jsx's React onDragOver/onDrop still run first.

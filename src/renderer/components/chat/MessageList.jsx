@@ -8,7 +8,7 @@ import GhostCore from '../GhostCore.jsx'
 const EXAMPLES = [
   { icon: '◉', text: 'Go to Wikipedia and explain photosynthesis in three simple sentences' },
   { icon: '❯', text: 'How much free space is left on this Chromebook?' },
-  { icon: '⏰', text: 'Remind me in two minutes to drink some water' },
+  { icon: '◷', text: 'Remind me in two minutes to drink some water' },
   { icon: '✦', text: 'Remember that I like short, simple answers' }
 ]
 
