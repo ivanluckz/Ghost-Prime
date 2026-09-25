@@ -26,7 +26,9 @@ contextBridge.exposeInMainWorld('ghost', {
     // Driven via events (chat:delta/done/error); the invoke promise only matters if it REJECTS —
     // then main never got to emit chat:error, so synthesize one for the UI.
     ipcRenderer.invoke('chat:send', { requestId, messages, mode, settings }).catch((e) => {
-      const payload = { requestId, message: e?.message || String(e) }
+      // Never show Electron's "Error invoking remote method…" wrapper or a stack in the chat.
+      const raw = String(e?.message || e || '').replace(/^Error invoking remote method '[^']*':\s*(?:Error:\s*)?/i, '')
+      const payload = { requestId, message: `Something went wrong sending that message: ${raw.split('\n')[0].slice(0, 160) || 'unknown error'}. Please try again.` }
       for (const cb of localErrorCbs) {
         try {
           cb(payload)

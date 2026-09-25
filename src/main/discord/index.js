@@ -1,4 +1,5 @@
 import { streamChat, currentRun, runQueueDepth, abortCurrentRun } from '../agent/provider.js'
+import { friendlyError } from '../agent/friendly-error.js'
 import { onReminderFired } from '../memory/db.js'
 
 // Discord relay for Ghost-Prime. Runs INSIDE the Electron main process, so the bot is online only
@@ -518,7 +519,8 @@ async function respond(msg, content) {
     if (ac.signal.aborted) {
       reply = (liveText.trim() ? liveText.trim() + '\n\n' : '') + '🛑 _Stopped._'
     } else {
-      reply = `⚠️ ${e?.message || e}`
+      console.error('[discord] run failed:', e?.stack || e)
+      reply = `⚠️ ${friendlyError(e)}`
     }
   } finally {
     running.delete(channelId)

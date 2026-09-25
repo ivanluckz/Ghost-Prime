@@ -22,6 +22,7 @@ import { setChatState } from './tools/browser-bridge.js'
 import { getHotkey, setHotkey } from './hotkey.js'
 import * as shell from './tools/shell-sessions.js'
 import { maybeSummarizeSession } from './memory/auto-summary.js'
+import { friendlyError } from './agent/friendly-error.js'
 
 // requestId -> AbortController, so the renderer can cancel an in-flight stream.
 const controllers = new Map()
@@ -130,13 +131,16 @@ export function registerIpc() {
       const aborted = controller.signal.aborted
       // Keep whatever was answered before the Stop / failure: the user turn is already on disk, and
       // a reload (or the next turn's context) should show the partial reply, not a dangling question.
+      // The user sees a plain sentence (friendly-error.js); the raw error goes to the terminal log.
+      const shown = aborted ? '' : friendlyError(err)
+      if (!aborted) console.error('[ghost] chat turn failed:', err?.stack || err)
       if (partial.trim()) {
         try {
-          saveMessage('assistant', partial + (aborted ? '\n\n*[stopped]*' : `\n\n⚠️ ${err?.message || err}`), { sessionId })
+          saveMessage('assistant', partial + (aborted ? '\n\n*[stopped]*' : `\n\n⚠️ ${shown}`), { sessionId })
         } catch {}
       }
       if (aborted) send('chat:done', { requestId, aborted: true })
-      else send('chat:error', { requestId, message: err?.message || String(err) })
+      else send('chat:error', { requestId, message: shown })
     } finally {
       controllers.delete(requestId)
     }

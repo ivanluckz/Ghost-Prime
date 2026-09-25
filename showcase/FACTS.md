@@ -228,9 +228,10 @@ Status key:
 5. Plain Ghost-Prime starts in **FULL AUTO**; `bin/ghost-showcase` starts in **AUTO** (§5). Check
    the badge says AUTO (or PLAN) before a public demo, and set the site policy to strict with a
    short allow-list.
-6. Inconsistency in the code: the Claude system prompt still says "You do NOT have the Jarvis
-   one-shot tools on this brain" (`provider.js`, `claudeToolsSection`), but since commit `5543493`
-   those tools are registered for Claude. Claude may wrongly refuse "what's my battery?". Test it,
-   or route those requests to Gemini.
+6. **Fixed overnight 25 Sep:** the Claude system prompt used to say "You do NOT have the Jarvis
+   one-shot tools on this brain" although `system_power`, `weather_get` and the rest were registered
+   for Claude since `5543493`. The prompt now lists them, and `smoke-claude-prompt.mjs` (12/12) checks
+   that every one of Claude's 64 allowed tools is described in its prompt. Still ask Claude "What's my
+   battery level?" once before the showcase: no live Claude call was possible overnight.
 7. The README describes AUTO as "each action approved", but in practice it uses Claude's automatic
    classifier on the Claude brain and no checks on the Gemini brain (see §5). Use the §5 wording.

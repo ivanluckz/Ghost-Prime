@@ -13,6 +13,7 @@ import * as fileUndo from '../tools/file-undo.js'
 import { saveMemory, recallMemories, memoryDigest, getRunContext, setRunContext } from '../memory/db.js'
 import { getToolSpecs, executeTool } from '../tools/index.js'
 import { envBool } from '../env.js'
+import { errorDetail } from './friendly-error.js'
 
 // Two chat brains, picked PER TURN by pickBrain() below:
 //   gemini — Google AI Studio free tier (Gemini 2.5 Flash) with full tool calling (src/main/tools)
@@ -133,6 +134,23 @@ const CANVA_SERVER = 'canva'
 // browser). Off unless GHOST_SCREEN_TOOLS=1 — limited on Crostini (see src/main/tools/screen.js).
 const SCREEN_ENABLED = envBool('GHOST_SCREEN_TOOLS', false)
 const SCREEN_SERVER = 'ghost-screen'
+// Every tool the Claude brain may call (Canva is added separately when enabled). The system prompt's
+// tool list must describe all of these — scripts/smoke-claude-prompt.mjs checks that it does.
+export function claudeToolNames({ screen = SCREEN_ENABLED } = {}) {
+  return [
+    ...AGENT_TOOLS,
+    ...SHELL_TOOL_NAMES,
+    ...BROWSER_TOOL_NAMES,
+    ...MEMORY_TOOL_NAMES,
+    ...SYSTEM_TOOL_NAMES,
+    ...PHONE_TOOL_NAMES,
+    ...JARVIS_TOOL_NAMES,
+    ...FILES_TOOL_NAMES,
+    ...REMINDER_TOOL_NAMES,
+    ...(screen ? SCREEN_TOOL_NAMES : [])
+  ]
+}
+
 const SCREEN_TOOL_NAMES = ['screen_screenshot', 'screen_type', 'screen_key', 'screen_click', 'launch_app'].map(
   (n) => `mcp__${SCREEN_SERVER}__${n}`
 )
@@ -196,7 +214,7 @@ function claudeToolsSection() {
       ? '\n- screen_screenshot / screen_type / screen_key / screen_click / launch_app — see and drive native Linux apps beyond the browser.'
       : ''
   }
-- You do NOT have the Jarvis one-shot tools on this brain (volume, brightness, battery/power, telemetry, weather, YouTube, Jarvis actions) — use shell_run (pactl, brightnessctl, upower…), WebSearch/WebFetch, or browser_navigate instead, or say so plainly.
+- Quick PC controls (Jarvis Mark-LIII one-shots): system_power — battery level/charging (or lock/sleep); system_volume — get/set/mute the audio volume; system_brightness — screen brightness (ChromeOS may not let the Linux side change it: if it refuses, say to use the brightness keys); system_telemetry — CPU, RAM, disk and battery stats; weather_get — live weather and a 3-day forecast for a city; youtube_play — open a YouTube video or search; jarvis_action_run — run a Jarvis action script. Prefer these one-call tools over shell commands for these asks.
 
 TERMINALS (your shell):
 - Run commands with shell_run. It runs in a real terminal the user is watching, and waits for the command to finish before returning its output + exit code. Terminals are PERSISTENT: a cd, an exported variable, or an activated venv carries over to your next shell_run in that terminal.
@@ -1508,17 +1526,8 @@ async function streamChatClaudeAgent({ messages, signal, onDelta, onEvent, model
           : ''),
       includePartialMessages: true,
       allowedTools: [
-        ...AGENT_TOOLS,
-        ...SHELL_TOOL_NAMES,
-        ...BROWSER_TOOL_NAMES,
-        ...MEMORY_TOOL_NAMES,
-        ...SYSTEM_TOOL_NAMES,
-        ...PHONE_TOOL_NAMES,
-        ...JARVIS_TOOL_NAMES,
-        ...FILES_TOOL_NAMES,
-        ...REMINDER_TOOL_NAMES,
-        ...(CANVA_ENABLED ? [`mcp__${CANVA_SERVER}`] : []), // allow all Canva tools
-        ...(screenServer ? SCREEN_TOOL_NAMES : [])
+        ...claudeToolNames({ screen: !!screenServer }),
+        ...(CANVA_ENABLED ? [`mcp__${CANVA_SERVER}`] : []) // allow all Canva tools
       ],
       mcpServers: {
         [BROWSER_SERVER]: browserServer,
@@ -1649,10 +1658,11 @@ function isHardTask(text) {
   return /\b(refactor|debug|implement|architect(?:ure)?|design|plan(?: out| this)?|multi-?step|step[- ]by[- ]step|analy[sz]e|optimi[sz]e|migrate|algorithm|derive|prove|reason (?:through|about)|think (?:through|hard|carefully|deeply)|write (?:a |the |some )?(?:code|function|script|module|class|test|program|app)|codebase|whole file|entire file|end[- ]to[- ]end|complex|thorough)\b/i.test(t)
 }
 // Computer control — driving the browser, running commands, changing files, opening apps — goes to
-// Claude: it's the stronger agentic brain and its browser tools hand it screenshots natively. The
-// Jarvis one-shot controls (volume, brightness, battery, weather, telemetry, YouTube, reminders,
-// clipboard) exist only on the Gemini path, so those stay there. Set GHOST_CONTROL_BRAIN=gemini to
-// keep everything on the free brain.
+// Claude: it's the stronger agentic brain and its browser tools hand it screenshots natively. In
+// auto mode the Jarvis one-shot controls (volume, brightness, battery, weather, telemetry, YouTube,
+// reminders, clipboard) stay on the free Gemini brain; Claude has them too (ghost-jarvis server),
+// so GHOST_BRAIN_MODE=claude loses nothing. Set GHOST_CONTROL_BRAIN=gemini to keep everything on
+// the free brain.
 const controlBrain = () => (process.env.GHOST_CONTROL_BRAIN || 'claude').toLowerCase() // call-time: see summaryProvider() above
 function isGeminiOnlyControl(t) {
   return /\b(volume|mute|unmute|louder|quieter|brightness|brighter|dimmer|battery|charg(?:e|ing)|weather|forecast|temperature|cpu|ram|memory usage|disk space|telemetry|system stats|remind(?:er|ers)?|youtube|play (?:a |the |some |me )?(?:song|video|music|track)|lock (?:the |my )?screen|suspend|clipboard|notify me)\b/i.test(
@@ -1849,7 +1859,7 @@ export async function streamChat(opts) {
       if (opts.signal?.aborted || streamedAny || usedTools) throw err
       if (!isClaudeUnavailable(err)) throw err // only availability errors fall over to the other brain
       const other = brain === 'claude' ? 'gemini' : 'claude'
-      const reason = (err?.message || String(err)).split('\n')[0].slice(0, 160)
+      const reason = errorDetail(err) // one short line: no stack, paths or JSON body
       console.warn(`[ghost] ${brain} unavailable → ${other}: ${reason}`)
       opts.onEvent?.({ kind: 'brain', brain: other, fallback: true })
       opts.onDelta?.(`*⚡ ${brain} was unavailable (${reason}). Using ${other} for this reply.*\n\n`) // *…* — the renderer has no _italic_ rule
