@@ -13,6 +13,7 @@
     "postinstall": "electron-rebuild -f -o better-sqlite3,node-pty",
     "ext:deploy": "node scripts/deploy-extension.mjs",
     "bridge:smoke": "node scripts/bridge-smoke.mjs",
+    "test:offline": "bash scripts/run-offline-tests.sh",
     "db:bundle": "esbuild src/main/memory/db.js --bundle --platform=node --format=cjs --external:better-sqlite3 --external:electron --outfile=scripts/_db_bundle.cjs --log-level=warning",
     "smoke:db": "npm run -s db:bundle && electron scripts/smoke-db.cjs",
     "smoke:summary": "npm run -s db:bundle && electron scripts/smoke-summary.cjs",
