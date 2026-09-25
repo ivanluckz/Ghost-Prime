@@ -239,6 +239,10 @@ function resolveProfileDir() {
   return p // an explicit user-data-dir path
 }
 
+// The browser binary itself is missing (channel not installed, bundled Chromium not downloaded).
+const isMissingBrowser = (err) =>
+  /No such file|executable doesn'?t exist|channel .* not found|Chromium distribution|spawn .* ENOENT|is not found at/i.test(err?.message || String(err))
+
 // Make launch failures actionable instead of a raw Playwright stack.
 function enrichLaunchError(err, userDataDir) {
   const msg = err?.message || String(err)
@@ -392,7 +396,20 @@ async function ensurePage(retry = true) {
       try {
         context = await chromium.launchPersistentContext(userDataDir, opts)
       } catch (err) {
-        throw enrichLaunchError(err, userDataDir)
+        // The chosen browser isn't installed (or its binary vanished): rather than fail the whole
+        // web demo, fall back to Playwright's bundled Chromium once, and say so in the log.
+        if (!CHANNEL || !isMissingBrowser(err)) throw enrichLaunchError(err, userDataDir)
+        console.warn(`[browser] channel "${CHANNEL}" not available (${String(err?.message || err).split('\n')[0]}) — using the bundled Chromium`)
+        try {
+          context = await chromium.launchPersistentContext(userDataDir, { ...opts, channel: undefined })
+        } catch (err2) {
+          throw isMissingBrowser(err2)
+            ? new Error(
+                `Couldn't launch a browser: Google Chrome (channel "${CHANNEL}") isn't installed and Playwright's own Chromium isn't either. ` +
+                  'Install one: sudo apt install google-chrome-stable, or npx playwright install chromium.'
+              )
+            : enrichLaunchError(err2, userDataDir)
+        }
       }
       attachContext(context)
       page = context.pages()[0] || (await context.newPage())
