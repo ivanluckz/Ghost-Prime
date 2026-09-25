@@ -6,6 +6,8 @@
 // Needs the design server (`npm run design`). This machine is short on RAM, so ALWAYS run it
 // through the shared lock:
 //   flock /tmp/claude-1000/design-capture.lock node showcase/demo/verify-replay.mjs [outdir] [baseUrl]
+// baseUrl defaults to the normal layout; pass 'http://127.0.0.1:5199/?skipIntro=1&showcase=1' to check
+// presenter mode, which is what showcase/demo/replay.sh opens by default.
 import { chromium } from 'playwright'
 import { mkdirSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -69,6 +71,10 @@ const send = async (p, text) => {
   await p.locator('.chat-input textarea').fill(text)
   await p.keyboard.press('Enter')
 }
+async function setMode(p, id) {
+  await send(p, `/mode ${id}`)
+  await p.waitForFunction((cls) => document.querySelector(`.mode.mode-${cls}`), id, { timeout: 5000 }).catch(() => fail(`/mode ${id} did not switch the badge`))
+}
 const runs = (p) => p.evaluate(() => window.__ghostReplay?.runs.length || 0)
 async function sendAndWait(p, text, timeout = 45000) {
   const before = await runs(p)
@@ -84,10 +90,8 @@ try {
   await shot(p, '00-replay-empty')
   for (const [i, r] of REHEARSED.entries()) {
     if (r.title.startsWith('Recall')) await p.keyboard.press('Control+n') // DEMO.md: ask in a brand-new chat
-    if (r.demo === 7) {
-      await p.locator('.chat-input textarea').click()
-      await p.keyboard.press('Shift+Tab') // FULL AUTO → PLAN
-    }
+    // Typed, not Shift+Tab counts: the replay opens in FULL AUTO, presenter mode (&showcase=1) in AUTO.
+    if (r.demo === 7) await setMode(p, 'plan')
     let mid = null
     if (EXPECT[i] === 'photosynthesis') mid = setTimeout(() => shot(p, `${String(i + 1).padStart(2, '0')}-photosynthesis-running`).catch(() => {}), 5200)
     const run = await sendAndWait(p, r.say)
@@ -111,7 +115,7 @@ try {
   }
   const last = await p.locator('.messages').innerText()
   if (!/PLAN mode/.test(last)) fail('PLAN answer missing')
-  await p.keyboard.press('Shift+Tab') // PLAN → AUTO
+  await setMode(p, 'auto')
 
   // The app's own voice toggle on top of the replay's speech: an "On it" ack, then the answer ONCE.
   await send(p, '/voice on')
