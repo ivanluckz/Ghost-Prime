@@ -6,11 +6,11 @@ import { promises as fs } from 'node:fs'
 import { existsSync, mkdirSync, rmSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join, resolve, dirname, basename } from 'node:path'
-import { randomUUID } from 'node:crypto'
+import { randomUUID, createHash } from 'node:crypto'
 import { app } from 'electron'
 
 const MAX_STACK = 50
-const stack = [] // { id, label, at, backup, undo: async () => void }
+const stack = [] // { id, label, at, backup, undo: async () => void, guard: async () => string }
 let trashPurged = false
 
 function trashDir() {
@@ -47,8 +47,22 @@ async function discardBackup(backup) {
   try { await fs.rm(backup, { force: true }) } catch {}
 }
 
-function push(label, undo, backup = null) {
-  stack.push({ id: randomUUID(), label, at: Date.now(), backup, undo })
+// Content fingerprint of a file (null = missing). Undo compares it with what the step left behind, so
+// it never throws away changes made later — e.g. by Claude's Edit tool, which isn't on this stack.
+async function fingerprint(p) {
+  try {
+    return createHash('sha1').update(await fs.readFile(p)).digest('hex')
+  } catch {
+    return null
+  }
+}
+const changedSince = async (p, fp) => {
+  const now = await fingerprint(p)
+  return now !== null && now !== fp ? `${p} has changed since then` : ''
+}
+
+function push(label, undo, backup = null, guard = null) {
+  stack.push({ id: randomUUID(), label, at: Date.now(), backup, undo, guard })
   while (stack.length > MAX_STACK) {
     const dropped = stack.shift()
     void discardBackup(dropped.backup)
@@ -74,10 +88,11 @@ export async function writeFile(path, content = '') {
     await discardBackup(backup) // nothing to undo, don't orphan the snapshot
     throw err
   }
+  const fp = await fingerprint(p)
   push(`write ${p}`, async () => {
     if (existed && backup) await fs.copyFile(backup, p)
     else await fs.rm(p, { force: true })
-  }, backup)
+  }, backup, () => changedSince(p, fp))
   return `Wrote ${p}${existed ? ' (previous version can be undone)' : ' (new file; undo removes it)'}`
 }
 
@@ -86,7 +101,8 @@ export async function createFile(path, content = '') {
   if (existsSync(p)) throw new Error(`already exists: ${p} (use file_write to overwrite)`)
   await fs.mkdir(dirname(p), { recursive: true })
   await fs.writeFile(p, String(content))
-  push(`create ${p}`, async () => fs.rm(p, { force: true }))
+  const fp = await fingerprint(p)
+  push(`create ${p}`, async () => fs.rm(p, { force: true }), null, () => changedSince(p, fp))
   return `Created ${p} (undo removes it)`
 }
 
@@ -97,7 +113,10 @@ export async function deleteFile(path) {
   if (st.isDirectory()) throw new Error(`${p} is a directory — refusing (undo only covers files)`)
   const backup = await snapshot(p)
   await fs.rm(p, { force: true })
-  push(`delete ${p}`, async () => fs.copyFile(backup, p), backup)
+  push(`delete ${p}`, async () => {
+    await fs.mkdir(dirname(p), { recursive: true }) // its folder may have been removed since
+    await fs.copyFile(backup, p)
+  }, backup, async () => (existsSync(p) ? `${p} exists again (a new file with that name)` : ''))
   return `Deleted ${p} (undo restores it)`
 }
 
@@ -114,6 +133,8 @@ async function moveAny(from, to) {
 export async function moveFile(src, dst) {
   const s = requirePath(src)
   let d = requirePath(dst)
+  // "…/Folder/" means INTO that folder, even if it doesn't exist yet (like mv into a new dir).
+  if (/[\\/]$/.test(String(dst).trim())) d = join(d, basename(s))
   if (s === homedir()) throw new Error('refusing to move the home directory')
   if (!existsSync(s)) throw new Error(`not found: ${s}`)
   // Files only: the EXDEV copy+rm fallback would make a half-copied directory move irreversible.
@@ -130,16 +151,25 @@ export async function moveFile(src, dst) {
     await discardBackup(overwrote)
     throw err
   }
+  const fp = await fingerprint(d)
   push(`move ${s} → ${d}`, async () => {
+    await fs.mkdir(dirname(s), { recursive: true })
     await moveAny(d, s)
     if (overwrote) await fs.copyFile(overwrote, d)
-  }, overwrote)
+  }, overwrote, async () => (existsSync(s) ? `${s} exists again (a new file with that name)` : await changedSince(d, fp)))
   return `Moved ${s} → ${d} (undo puts it back)`
 }
 
 export async function undoLast() {
-  const entry = stack.pop()
+  const entry = stack[stack.length - 1]
   if (!entry) throw new Error('nothing to undo')
+  const problem = entry.guard ? await entry.guard() : ''
+  if (problem) {
+    throw new Error(
+      `Not undone: ${problem}. Undoing "${entry.label}" now would lose those later changes, so it stays on the undo list.`
+    )
+  }
+  stack.pop()
   await entry.undo()
   await discardBackup(entry.backup) // only after the restore succeeded
   return `Undid: ${entry.label}`

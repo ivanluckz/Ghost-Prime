@@ -70,6 +70,45 @@ try {
   check(/already exists/.test(await rejects(fu.createFile('~/notes.txt', 'x'))), 'create refuses to overwrite an existing file')
   check(readFileSync(join(HOME, 'notes.txt'), 'utf8') === 'original notes', '…and leaves it untouched')
   check(/refusing to move the home directory/.test(await rejects(fu.moveFile('~', '~/elsewhere'))), 'moving the home folder is refused')
+
+  // --- Regression (overnight 25 Sep): undo must not destroy changes made AFTER the step it undoes.
+  // Claude edits files with its own Edit tool, which is not on the undo stack: "undo that" after an
+  // edit used to pop the earlier create and delete the file, edits and all.
+  await fu.createFile('~/essay.txt', 'first draft')
+  writeFileSync(join(HOME, 'essay.txt'), 'first draft + two hours of edits') // an edit outside the undo tools
+  const refused = await rejects(fu.undoLast())
+  check(/changed since/.test(refused) && existsSync(join(HOME, 'essay.txt')), 'undo refuses to delete a created file that was edited since', refused)
+  check(readFileSync(join(HOME, 'essay.txt'), 'utf8').includes('two hours'), '…and the edits are kept')
+  check(/create .*essay\.txt/.test(fu.undoList()), '…and the step stays on the undo list')
+  writeFileSync(join(HOME, 'essay.txt'), 'first draft') // back to what the step created
+  await fu.undoLast()
+  check(!existsSync(join(HOME, 'essay.txt')), 'once the file matches again, undo works')
+
+  writeFileSync(join(HOME, 'report.txt'), 'v1')
+  await fu.writeFile('~/report.txt', 'v2')
+  writeFileSync(join(HOME, 'report.txt'), 'v3 typed by hand')
+  check(/changed since/.test(await rejects(fu.undoLast())) && readFileSync(join(HOME, 'report.txt'), 'utf8') === 'v3 typed by hand', 'undoing a rewrite never overwrites later changes')
+  writeFileSync(join(HOME, 'report.txt'), 'v2')
+  await fu.undoLast()
+  check(readFileSync(join(HOME, 'report.txt'), 'utf8') === 'v1', 'a clean rewrite still undoes to the previous version')
+
+  writeFileSync(join(HOME, 'old.txt'), 'old')
+  await fu.deleteFile('~/old.txt')
+  writeFileSync(join(HOME, 'old.txt'), 'a NEW file with the same name')
+  check(/changed since|exists again/.test(await rejects(fu.undoLast())) && readFileSync(join(HOME, 'old.txt'), 'utf8').startsWith('a NEW'), 'undoing a delete never overwrites a new file of the same name')
+  rmSync(join(HOME, 'old.txt'))
+  await fu.undoLast()
+  check(readFileSync(join(HOME, 'old.txt'), 'utf8') === 'old', 'with the name free again, the deleted file comes back')
+
+  // A destination ending in "/" means "into this folder", even before the folder exists.
+  writeFileSync(join(HOME, 'plan.txt'), 'plan')
+  const mvMsg = await fu.moveFile('~/plan.txt', '~/Showcase2/')
+  check(readFileSync(join(HOME, 'Showcase2', 'plan.txt'), 'utf8') === 'plan', 'moving into a new folder ("~/Showcase2/") creates it and keeps the file name', mvMsg)
+  await fu.undoLast()
+  check(existsSync(join(HOME, 'plan.txt')), '…and undo puts it back')
+  writeFileSync(join(HOME, 'plan2.txt'), 'plan2')
+  await fu.moveFile(join(HOME, 'plan2.txt'), join(HOME, 'Abs') + '/')
+  check(existsSync(join(HOME, 'Abs', 'plan2.txt')), 'the same with an absolute folder path ending in "/"')
 } catch (e) {
   fail++
   console.log('✗ unexpected error:', e?.stack || e)
