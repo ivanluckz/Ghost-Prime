@@ -282,6 +282,19 @@ const lastNavReq = new WeakMap()
 // Tabs whose renderer crashed ("Aw, Snap!", often out of memory). A crashed Page is not closed, so
 // without this it was reused and every later browser tool failed until the tab was closed by hand.
 const crashedPages = new WeakSet()
+const pendingDownloads = new Set() // saves in progress (promises)
+// Wait (up to `ms`) for downloads that are still being saved.
+async function downloadsSaved(ms = 15000) {
+  if (!pendingDownloads.size) return
+  await Promise.race([Promise.allSettled([...pendingDownloads]), sleep(ms)])
+}
+// Playwright errors carry a colour-coded "Call log" meant for a terminal. The model (and the user,
+// via a tool card) only needs the first line.
+function cleanPlaywrightError(err) {
+  const msg = err?.message || String(err)
+  if (!/\x1b\[|\nCall log:/.test(msg)) return err
+  return new Error(msg.split('\nCall log:')[0].replace(/\x1b\[[0-9;]*m/g, '').trim())
+}
 const navRequestedSince = (pg, t0) => (lastNavReq.get(pg)?.at || 0) >= t0
 let nextPageId = 1
 let pendingEvents = [] // notable things since the last action result: dialog / download / popup
@@ -338,12 +351,18 @@ function trackPage(pg) {
     }
     noteEvent({ kind: 'dialog', type, message, action })
   })
-  pg.on('download', async (dl) => {
-    try {
-      noteEvent({ kind: 'download', path: await saveDownload(dl), url: dl.url() })
-    } catch (e) {
-      noteEvent({ kind: 'download', error: e?.message || String(e), url: dl.url() })
-    }
+  pg.on('download', (dl) => {
+    // Tracked while saving, so an action can wait for it and report "Download saved to …" in its
+    // own result instead of on some later action.
+    const job = (async () => {
+      try {
+        noteEvent({ kind: 'download', path: await saveDownload(dl), url: dl.url() })
+      } catch (e) {
+        noteEvent({ kind: 'download', error: e?.message || String(e), url: dl.url() })
+      }
+    })()
+    pendingDownloads.add(job)
+    job.finally(() => pendingDownloads.delete(job))
   })
   pg.on('framenavigated', (f) => {
     if (f === pg.mainFrame()) lastNavAt.set(pg, Date.now())
@@ -469,6 +488,7 @@ async function settle(p, beforeUrl, grace = 600, since = Date.now()) {
   const popP = context ? context.waitForEvent('page', { timeout: grace }).then((pg) => pg, () => null) : Promise.resolve(null)
   const [started, popup] = await Promise.all([navP, popP])
   if (popup) await followPopup(popup)
+  await downloadsSaved() // a click that started a download: report the saved file in THIS result
   const cur = page && !page.isClosed() ? page : p
   let navStarted = started || (lastNavAt.get(p) || 0) >= t0
   const pending = lastNavReq.get(p)
@@ -559,13 +579,20 @@ export async function browserNavigate({ url, waitUntil } = {}) {
     }
   } catch (err) {
     const msg = err?.message || String(err)
+    // A file link (CSV, PDF, ZIP): the browser downloads it instead of showing a page. That's a
+    // success: the download handler saves it to ~/Downloads, and the result says where.
+    if (/Download is starting/i.test(msg)) {
+      await sleep(200)
+      await downloadsSaved()
+      return actionResult(p, { navigated: false, download: true })
+    }
     const net = msg.match(/net::[A-Z_]+/)?.[0]
     if (net) throw new Error(`Couldn't load ${url} (${net}). Check the address — or the network — and try again.`)
     // Slow page: it's on screen but still loading when the timeout hit — hand it over anyway.
     if (/Timeout/i.test(msg) && p.url() !== before && p.url() !== 'about:blank') {
       return { ...(await actionResult(p, { navigated: true })), partial: true }
     }
-    throw err
+    throw cleanPlaywrightError(err)
   }
   await p.waitForLoadState('load', { timeout: 8000 }).catch(() => {})
   return actionResult(p, { navigated: true })
@@ -1160,7 +1187,7 @@ async function clarifyClickError(page, err, { selector, text, ref }) {
         'or take browser_screenshot { annotate: true } and click the number you see.'
     )
   }
-  return err
+  return cleanPlaywrightError(err)
 }
 
 export async function browserClick({ ref, selector, text, double, button = 'left' } = {}) {
