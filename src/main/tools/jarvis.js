@@ -271,10 +271,22 @@ export async function weatherGet({ location = '', units = 'metric' } = {}) {
       headers: { 'User-Agent': 'curl/7.88.1' },
       signal: AbortSignal.timeout(10_000)
     })
-    if (!res.ok) throw new Error(`Weather service returned ${res.status}`)
-    const data = await res.json()
+    if (!res.ok) throw new Error(`Weather service returned ${res.status}${res.status >= 500 ? ' (busy or unavailable, try again shortly)' : ''}`)
+    // wttr.in answers some failures (unknown place, overload) with plain text, even with a 200.
+    const body = await res.text()
+    let data
+    try {
+      data = JSON.parse(body)
+    } catch {
+      const hint = body.trim().split('\n')[0].slice(0, 120)
+      return { error: `The weather service didn't return a forecast for "${location || 'your location'}"${hint ? ` (it said: ${hint})` : ''}.` }
+    }
 
-    const cur = data.current_condition?.[0] || {}
+    const cur = data.current_condition?.[0]
+    // No current conditions (e.g. a place wttr.in doesn't know): an error, never "undefined°C".
+    if (!cur || cur.temp_C == null) {
+      return { error: `No weather found for "${location || 'your location'}". Try a nearby city name, e.g. "Kigali".` }
+    }
     const area = data.nearest_area?.[0] || {}
     const cityName = area.areaName?.[0]?.value || location || 'Current Location'
     const region = area.region?.[0]?.value || ''
@@ -304,7 +316,10 @@ export async function weatherGet({ location = '', units = 'metric' } = {}) {
     }
   } catch (err) {
     if (err?.name === 'AbortError' || err?.name === 'TimeoutError') {
-      return { error: 'Weather service timed out' }
+      return { error: 'Weather service timed out (no answer in 10 s). Check the internet connection.' }
+    }
+    if (/fetch failed|ENOTFOUND|EAI_AGAIN|ECONN|network/i.test(`${err?.message} ${err?.cause?.code || ''}`)) {
+      return { error: "Couldn't reach the weather service (wttr.in). Check the internet connection." }
     }
     return { error: `Weather lookup failed: ${err.message}` }
   }
