@@ -106,6 +106,30 @@ app
     db.markReminderFired(explicit)
     check(seen.length === 3, 'unsubscribed listener is not called')
 
+    // Deleting chats that produced memories (regression, overnight 25 Sep): memories.session_id
+    // references sessions(id) and better-sqlite3 enforces foreign keys, so deleting such a chat —
+    // or "Delete all chats" — threw "FOREIGN KEY constraint failed" and nothing was deleted.
+    const withMem = db.newSession()
+    db.saveMessage('user', 'remember I like chemistry', { sessionId: withMem })
+    const memId = db.saveMemory('Likes chemistry', 'fact', 5, { sessionId: withMem })
+    let delErr = ''
+    try {
+      db.deleteSession(withMem)
+    } catch (e) {
+      delErr = e.message
+    }
+    check(!delErr && db.sessionMessages(withMem).length === 0, `a chat that saved a memory can be deleted${delErr ? ` (${delErr})` : ''}`)
+    check(db.allMemories().some((m) => m.id === memId), 'its memory is kept (memories are cleared separately)')
+    const again = db.newSession()
+    db.saveMemory('Revises on Fridays', 'fact', 5, { sessionId: again })
+    let allErr = ''
+    try {
+      db.deleteAllSessions()
+    } catch (e) {
+      allErr = e.message
+    }
+    check(!allErr && db.recentSessions().every((s2) => s2.id !== again), `"Delete all chats" works with memories present${allErr ? ` (${allErr})` : ''}`)
+
     console.log(failures.length ? `SMOKE_MISMATCH (${failures.length})` : 'SMOKE_OK')
     app.exit(failures.length ? 2 : 0)
   })

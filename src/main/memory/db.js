@@ -127,10 +127,15 @@ export function deleteSession(id) {
   }
   const tx = db.transaction(() => {
     const delMsg = db.prepare('DELETE FROM messages WHERE session_id = ?')
+    // Memories outlive the chat they came from (cleared separately), but memories.session_id
+    // references sessions(id) and better-sqlite3 enforces foreign keys: detach them first, or the
+    // delete fails with "FOREIGN KEY constraint failed".
+    const detachMem = db.prepare('UPDATE memories SET session_id = NULL WHERE session_id = ?')
     const delSes = db.prepare('DELETE FROM sessions WHERE id = ?')
     let changes = 0
     for (const sid of subtree) {
       delMsg.run(sid)
+      detachMem.run(sid)
       changes += delSes.run(sid).changes
     }
     return changes
@@ -146,6 +151,7 @@ export function deleteAllSessions() {
   if (!db) return null
   db.transaction(() => {
     db.prepare('DELETE FROM messages').run()
+    db.prepare('UPDATE memories SET session_id = NULL WHERE session_id IS NOT NULL').run() // see deleteSession
     db.prepare('DELETE FROM sessions').run()
   })()
   currentSessionId = null
