@@ -47,6 +47,15 @@ echo "App"
 [ -d node_modules ] && ok "node_modules present" || no "node_modules missing: run 'npm install' (needs internet)"
 [ -f out/main/index.js ] && ok "app is built (out/)" || wn "not built yet: bin/ghost-showcase builds it on first start (takes a minute)"
 [ -x bin/ghost-showcase ] && ok "bin/ghost-showcase is executable" || no "bin/ghost-showcase missing or not executable"
+# Memory/chat history (better-sqlite3) and the live terminal (node-pty) are native modules: after an
+# 'npm install' they must be rebuilt for Electron, or memory and the terminal demo silently break.
+if [ -x node_modules/electron/dist/electron ]; then
+  if ELECTRON_RUN_AS_NODE=1 timeout 20 node_modules/electron/dist/electron -e "new (require('better-sqlite3'))(':memory:').close(); require('node-pty').spawn('/bin/true', []).kill()" >/dev/null 2>&1; then
+    ok "native modules load in Electron (memory + live terminal)"
+  else
+    no "memory/terminal modules don't load in Electron: run 'npm run rebuild' (needs internet)"
+  fi
+fi
 if pgrep -f "$GHOST_DIR/node_modules/electron/dist/electron \\." >/dev/null 2>&1; then
   wn "Ghost-Prime is already running: start the showcase with 'bin/ghost-showcase --restart'"
 else
