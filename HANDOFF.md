@@ -99,4 +99,114 @@ and anything the student must do in person: test the phone and extension, fill i
 placeholders, rehearse DEMO.md.
 
 ## Overnight results
-_(fill in)_
+
+_Written by the overnight session, 25→26 Sep 2026. Every change is a small commit on `ghost-prime`,
+pushed. showcase/FACTS.md was updated alongside each fix, so it is still the source of truth._
+
+### What was done
+
+**1. Design pass: finished.** `styles/panels.css` was written, the four half-done sheets were
+completed, and every UI state was captured and reviewed. That includes the 900 px "narrow" state,
+presenter mode and both voice states. Markdown renders GitHub tables and blockquotes, and a
+React key bug in it was fixed. A **Stop** button now sits next to Send while a task runs.
+
+**2. Presenter mode: done.** `/showcase on|off`, and on by default when launched with
+`bin/ghost-showcase` (`GHOST_SHOWCASE=1` reaches the renderer the same way the native-frame flag
+does). It gives big type and a wider chat, a simplified top bar, the chat list tucked away, and it
+starts in **AUTO**, not FULL AUTO. Voice states ("Listening… click the mic again to send",
+"Turning your speech into text…", and a plain reason when the mic fails) are readable from across
+a room. Checked in the design preview and by launching the built app under Xvfb.
+
+**3. Showcase kit: redesigned and fact-checked.**
+A new design system, `showcase/DESIGN.md`, fixes the palette, the type (Archivo, Inter, JetBrains
+Mono, bundled so the PDFs work offline), the 24 px floor on slides, and the canon wording for every
+claim. Each deliverable then went through five steps: an audit, a rebuild, an adversarial fact check
+against FACTS.md, a design review of the rendered previews, and a fix pass. The deliverables are the
+slides, the poster, the pitch card and scripts, and qa.md with DEMO.md and the replay. A final pass
+checked the whole kit against itself. Every item on the judges' list is fixed:
+- The slide footnote about automated tests is replaced by a status chip on each row.
+- The screenshots are fresh, in AUTO, with the photosynthesis demo. There are no flights and no
+  FULL AUTO.
+- "It saves what it found", "two AI brains" and "free and open source" are gone.
+- The impact wording says there's no user study yet.
+- One hero phrase is used everywhere, character for character.
+- The 2-minute pitch has a realistic demo slot.
+- The voice claims match FACTS.
+- The originality Q&A (dictation, Select-to-Speak, ChromeVox, Assistant) is added as qa.md Q12.
+- The old Q18 fallback claim is fixed; it is now Q20 and says what is tested and what isn't.
+- The audience is no longer "young children".
+- The kit says plainly that an AI coding assistant helped write the code.
+
+The numbers match FACTS §6: 64 tools, 523 checks in 34 suites, and about 3 months of building. All
+PDFs are re-exported, and `[YOUR NAME]` / `[YOUR CLASS]` / `[SCHOOL]` stay literal. The replay and
+DEMO.md are in sync, and `showcase/demo/verify-replay.mjs` passes in both layouts.
+
+**4. The app: many real bugs fixed, each with a failing test first.** A read-only bug hunt went over
+every subsystem, and two skeptics checked each finding. The ones that matter most on the day:
+- **PLAN mode was not really read-only on the Claude brain.** The SDK ran every always-allowed tool,
+  so Demo 7 ("Delete the Showcase folder") relied on the model choosing not to. It is enforced now.
+- **Stop now really stops.** Before, text kept typing for about 2 s, a tool called in that window
+  still ran, and late words could appear in the next chat.
+- **No internet no longer means 3 silent minutes of "working…".** Each retry is shown, and it gives
+  up early, trying Gemini or saying to check the Wi-Fi.
+- **Browser (Demo 5):**
+  - Element numbers no longer change meaning between steps, and a form is submitted once on a slow site.
+  - A crashed tab is replaced, and downloads are reported properly.
+  - Launch errors name the real cause, and it falls back to the bundled Chromium if Chrome is missing.
+- **Terminal (Demo 1):** one main terminal, no hang on a bad quote, pagers, multi-line, `~` folders.
+- **Undo (Demo 2):** it never throws away changes made after the step being undone.
+- **Memory and history (Demo 3):** deleting a chat that saved a memory no longer fails.
+- **Reminders (Demo 4):** both brains know today's date and time. A reminder is never reported saved
+  when it wasn't.
+- **Voice:** it never goes silent mid-reply, never records its own voice, and doesn't send silence.
+- **Weather, volume, YouTube and web search:**
+  - Weather: no "undefined°C".
+  - Volume: capped at 100%.
+  - YouTube: song titles with an apostrophe work.
+  - Web search: snippets stay with their own links.
+- **Site access (teachers):** four ways around the allow/block list are closed.
+- **Error messages:** plain English everywhere, including Gemini's real reason. If the window
+  crashes, it reloads by itself.
+- **Phone app (android-connector):** small, safe fixes, and plain HTTP to the Chromebook is now
+  allowed. The APK built before this can't connect; **rebuild it**. It was not compiled here (no
+  Android SDK in the cloud).
+
+### What was verified
+- **Build:** `npx electron-vite build` is clean.
+- **`npm run test:offline`:** new; one command, about 3 minutes, no internet or keys. **34 suites,
+  523 checks, 0 failed.** 21 of those suites were written tonight.
+- **Electron database suites:** `scripts/electron-db-smokes.sh` passes smoke-db, smoke-summary and
+  smoke-persistence (28).
+- **Design capture:** `scripts/design-capture.mjs`, 16 states, no page errors.
+- **Offline replay:** `showcase/demo/verify-replay.mjs` passes in the normal layout and in presenter mode.
+- **UI and window checks:** `scripts/check-stop-ui.mjs` (4) and `scripts/check-renderer-crash.mjs` (5)
+  pass, the latter against the built app under Xvfb.
+- **Not run:** anything that needs the real Claude login, the Gemini key, the Chromebook, the phone
+  or the extension.
+
+### Still open
+- The live AI checks (Claude, Gemini) were not run overnight (no keys in the cloud).
+- The phone app and the Chrome extension are still untested on real devices.
+- There is no "are you sure?" confirmation for irreversible actions yet (it's on the "next" slide).
+- Many fixes were tested only offline. They are marked that way in FACTS.md, with what to try live:
+  PLAN mode, Stop, the retry notices, and battery on Claude.
+- The replay and the app screenshots show the Chromebook's Linux username (`lol`, as in `/home/lol`,
+  `lol@penguin`). If you'd rather not show it, change `HOME`/`PROMPT` in
+  `src/renderer/dev/showcase-scenarios.js`, then re-shoot with `node showcase/app-shots/capture.mjs`.
+
+### What you must do in person (before 29 Sep)
+1. **Rebuild the phone APK** (`android-connector`, see its README), then test it on the Galaxy A05.
+   Test the Chrome extension too. Until then, show both only as "next".
+2. **Fill in the placeholders** `[YOUR NAME]`, `[YOUR CLASS]`, `[SCHOOL]` in the slides, poster, pitch
+   card and scripts. Re-export the PDFs: `node showcase/slides/render.mjs`, `node showcase/poster/export.mjs`
+   and `node showcase/script/export.mjs`.
+3. **Rotate the API keys** that FACTS §5 lists as exposed, and put the new ones in `.env`.
+4. **Run `showcase/demo/preflight.sh --live`** the day before, on the booth network. Then rehearse
+   **DEMO.md** end to end with the real brains. Check especially:
+   - Demo 7: PLAN mode now blocks for real.
+   - Press **Stop** once mid-answer.
+   - Ask "What's my battery level?" once on Claude.
+5. **Try presenter mode on the projector:** `bin/ghost-showcase`, or type `/showcase on`. Check it
+   reads from 2–3 m, and that the badge says AUTO.
+6. **Set site access to strict** with the DEMO.md allow-list. It is currently open on the Chromebook.
+
