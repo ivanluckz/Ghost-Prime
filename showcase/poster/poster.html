@@ -9,19 +9,34 @@
   A2 portrait (420 x 594 mm). Two themes on one page:
     poster.html              light (white paper, print-safe, the default)
     poster.html?theme=dark   dark (for screens or a professional print shop)
-  Export PDFs and previews with:  flock /tmp/claude-1000/design-capture.lock node showcase/poster/export.mjs
-  Every claim on this poster must match showcase/FACTS.md (only rows marked WORKING).
+  Export PDFs and previews with: node showcase/poster/export.mjs (from the repo root)
+  Every claim must match showcase/FACTS.md, and the words and look follow showcase/DESIGN.md.
   Placeholders [YOUR NAME] / [YOUR CLASS] / [SCHOOL] are intentional: fill them in before printing.
+  Before printing, also check the authorship sentence in the footer says exactly what you did
+  (FACTS.md section 7). Do not overstate or understate it.
+  Print shop: Chromium embeds the variable fonts as Type 3 fonts. Ask the shop to preflight the PDF.
+  If they reject it, give them the 300 dpi image instead:
+    node showcase/poster/export.mjs light --print-png     (writes showcase/poster/print/)
+  The screenshot is ../app-shots/hero-working.png (relative, so it works from file://), cropped in CSS
+  to the chat column. Presenter mode hides the Activity panel, so the crop matches what visitors see.
+  Layout spine: every band uses the body grid's two columns, 660 px | 48 px gap | the rest (x = 792).
 -->
 <style>
 @font-face {
-  font-family: 'Inter Poster';
+  font-family: 'Archivo Kit';
+  src: url('fonts/archivo-latin-var.woff2') format('woff2');
+  font-weight: 100 900;
+  font-stretch: 62% 125%;
+  font-style: normal;
+}
+@font-face {
+  font-family: 'Inter Kit';
   src: url('fonts/inter-var.woff2') format('woff2');
   font-weight: 100 900;
   font-style: normal;
 }
 @font-face {
-  font-family: 'JetBrains Poster';
+  font-family: 'JetBrains Kit';
   src: url('fonts/jetbrains-mono-var.woff2') format('woff2');
   font-weight: 100 800;
   font-style: normal;
@@ -29,209 +44,232 @@
 
 @page { size: 420mm 594mm; margin: 0; }
 
-/* ---------- theme tokens ---------- */
+/* ---------- tokens (showcase/DESIGN.md section 1) ---------- */
 :root {
-  --sans: 'Inter Poster', 'Inter', 'Liberation Sans', Arial, sans-serif;
-  --mono: 'JetBrains Poster', 'JetBrains Mono', 'Liberation Mono', monospace;
+  --display: 'Archivo Kit', 'Inter Kit', 'Liberation Sans', Arial, sans-serif;
+  --sans: 'Inter Kit', 'Liberation Sans', Arial, sans-serif;
+  --mono: 'JetBrains Kit', 'Liberation Mono', monospace;
+  /* annotation on top of the dark app screenshot: the same in both themes */
+  --note-bg: #00E6FF; --note-ink: #05070F;
 }
-/* Light = print-safe: white paper, ink only on text, lines and small accents. */
+/* Light paper: colour on text, lines and small marks only. */
 :root[data-theme="light"] {
-  --paper: #ffffff;
-  --ink: #0b1020;
-  --ink-2: #2c3754;
-  --ink-3: #5a6684;
-  --line: #d5dcec;
-  --card: #f6f8fd;
-  --card-brd: #d9e0f0;
-  --cyan: #0891b2;
-  --violet: #5b3df5;
-  --magenta: #c8168f;
-  --g1: #00b8d9; --g2: #6a45ff; --g3: #e0239c;
-  --chip: #eef3ff;
-  --tag-bg: #fff4d6; --tag-ink: #7a4d00; --tag-brd: #e9c46a;
-  --laptop-base: linear-gradient(#e6eaf3, #c4cad8);
-  --laptop-brd: #aeb6c8;
-  --bezel: #10131c;
-  --glow-a: transparent; --glow-b: transparent; --glow-c: transparent;
-  --gem-edge: #5b3df5;
-  --gem-hi: #ffffff;
+  --paper: #FFFFFF;
+  --ink: #0B1020;
+  --ink-2: #3A4563;
+  --line: #D5DCEC;
+  --cyan: #0784A3;
+  --violet: #5B3DF5;
+  --mint: #0E8F66;
+  --amber: #9A5B00;
+  --coral: #C22D4B;
+  --deck: #FFFFFF;
+  --wm-1: #0784A3; --wm-2: #5B3DF5; --wm-3: #B5178F;
+  --bracket: rgba(7, 132, 163, .55);
+  --gem-hi: #FFFFFF; --gem-edge: #5B3DF5;
+  --shot-edge: #0B1020;
 }
-/* Dark = Ghost-Prime's own look: for screens and professional printing. */
+/* Dark: Ghost-Prime's own console look. */
 :root[data-theme="dark"] {
-  --paper: #05070f;
-  --ink: #eef2ff;
-  --ink-2: #c3cde6;
-  --ink-3: #8a97ba;
-  --line: rgba(255,255,255,.14);
-  --card: rgba(255,255,255,.05);
-  --card-brd: rgba(255,255,255,.16);
-  --cyan: #33e9ff;
-  --violet: #9d86ff;
-  --magenta: #ff5fcb;
-  --g1: #00e6ff; --g2: #7c5cff; --g3: #ff45c0;
-  --chip: rgba(0,230,255,.08);
-  --tag-bg: rgba(255,196,77,.12); --tag-ink: #ffd27a; --tag-brd: rgba(255,196,77,.55);
-  --laptop-base: linear-gradient(#3a4256, #1d2231);
-  --laptop-brd: #4b546b;
-  --bezel: #000000;
-  --glow-a: rgba(0,230,255,.16); --glow-b: rgba(124,92,255,.18); --glow-c: rgba(255,69,192,.12);
-  --gem-edge: #00e6ff;
-  --gem-hi: #dffbff;
+  --paper: #05070F;
+  --ink: #EEF2FF;
+  --ink-2: #9AA8CC;
+  --line: #1E2742;
+  --cyan: #00E6FF;
+  --violet: #7C5CFF;
+  --mint: #2EE6A6;
+  --amber: #FFB454;
+  --coral: #FF5D7A;
+  --deck: #0B1020;
+  --wm-1: #00E6FF; --wm-2: #7C5CFF; --wm-3: #FF45C0;
+  --bracket: rgba(0, 230, 255, .5);
+  --gem-hi: #DFFBFF; --gem-edge: #00E6FF;
+  --shot-edge: #1E2742;
 }
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
 html { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-body { font-family: var(--sans); color: var(--ink); background: var(--paper); }
+body { font-family: var(--sans); color: var(--ink); background: var(--paper);
+  font-feature-settings: 'ss01' 0; -webkit-font-smoothing: antialiased; }
 
-/* ---------- the sheet ---------- */
+/* ---------- the sheet: 420 x 594 mm = 1587 x 2245 CSS px ---------- */
 .poster {
   position: relative;
   width: 420mm;
   height: 594mm;
   overflow: hidden;
-  background:
-    radial-gradient(150mm 120mm at 88% 6%, var(--glow-b), transparent 70%),
-    radial-gradient(160mm 140mm at 8% 42%, var(--glow-a), transparent 70%),
-    radial-gradient(170mm 120mm at 92% 78%, var(--glow-c), transparent 70%),
-    var(--paper);
-  padding: 17mm 19mm 14mm;
+  background: var(--paper);
+  padding: 66px 84px 60px;
   display: flex;
   flex-direction: column;
-  gap: 8mm;
+  justify-content: space-between;
+  gap: var(--band-gap);
+  --band-gap: 30px;
+  --left: 660px;      /* the spine: left column width */
+  --col-gap: 48px;    /* right column starts at 84 + 660 + 48 = 792 */
 }
-/* thin holographic rule along the top and bottom edges */
-.poster::before, .poster::after {
-  content: ''; position: absolute; left: 0; right: 0; height: 3.2mm;
-  background: linear-gradient(90deg, var(--g1), var(--g2) 50%, var(--g3));
+/* HUD corner brackets, like the app window (the only ornament) */
+.poster::before {
+  content: ''; position: absolute; inset: 30px; pointer-events: none;
+  --b: var(--bracket); --arm: 64px; --w: 3px;
+  background:
+    linear-gradient(var(--b), var(--b)) top left / var(--arm) var(--w) no-repeat,
+    linear-gradient(var(--b), var(--b)) top left / var(--w) var(--arm) no-repeat,
+    linear-gradient(var(--b), var(--b)) top right / var(--arm) var(--w) no-repeat,
+    linear-gradient(var(--b), var(--b)) top right / var(--w) var(--arm) no-repeat,
+    linear-gradient(var(--b), var(--b)) bottom left / var(--arm) var(--w) no-repeat,
+    linear-gradient(var(--b), var(--b)) bottom left / var(--w) var(--arm) no-repeat,
+    linear-gradient(var(--b), var(--b)) bottom right / var(--arm) var(--w) no-repeat,
+    linear-gradient(var(--b), var(--b)) bottom right / var(--w) var(--arm) no-repeat;
 }
-.poster::before { top: 0; }
-.poster::after { bottom: 0; }
+.spine { display: grid; grid-template-columns: var(--left) minmax(0, 1fr); column-gap: var(--col-gap); }
 
-.eyebrow {
-  font-family: var(--mono); font-weight: 700; font-size: 21pt;
-  letter-spacing: .16em; text-transform: uppercase; color: var(--violet);
-  display: flex; align-items: center; gap: 4mm;
+/* ---------- shared type ---------- */
+.title {
+  font-family: var(--display); font-stretch: 112%; font-weight: 760;
+  letter-spacing: -0.02em; line-height: 1.02; text-wrap: balance;
+  font-size: 44px; color: var(--ink);
+  display: flex; align-items: center; gap: 22px;
 }
-.eyebrow::after { content: ''; flex: 1; height: .5mm; background: var(--line); }
+.title::after { content: ''; flex: 1; height: 2px; background: var(--line); }
+.label { font-family: var(--mono); font-size: 22px; font-weight: 600; letter-spacing: .14em;
+  text-transform: uppercase; font-variant-numeric: tabular-nums; }
+p { text-wrap: pretty; }
 
-/* ---------- header ---------- */
-.top { display: flex; align-items: center; justify-content: space-between; }
-.brand { display: flex; align-items: center; gap: 4mm; font-family: var(--mono); font-weight: 800;
-  font-size: 30pt; letter-spacing: .22em; }
-.brand svg { width: 12mm; height: 17mm; }
-.brand .dash { color: var(--violet); }
-.brand .prime { color: var(--cyan); }
-.event { font-family: var(--mono); font-weight: 600; font-size: 17pt; letter-spacing: .08em; color: var(--ink-3);
-  border: .5mm solid var(--line); border-radius: 30mm; padding: 2.4mm 6mm; }
+/* status chips: pill, border in the status colour at ~45 %, text in the status colour, mono uppercase */
+.chip { --c: var(--mint); display: inline-flex; align-items: center; white-space: nowrap; flex: none;
+  font-family: var(--mono); font-size: 22px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase;
+  line-height: 1; color: var(--c); border: 2px solid color-mix(in srgb, var(--c) 45%, transparent);
+  border-radius: 999px; padding: 6px 13px 5px; }
+.chip.hand, .chip.prog { --c: var(--amber); }
 
-.hero { position: relative; display: grid; grid-template-columns: minmax(0, 1fr) 88mm; align-items: center; gap: 4mm; }
-h1 { font-weight: 850; font-size: 96pt; line-height: .96; letter-spacing: -.035em; }
-h1 .l1 { display: block; }
-h1 .l2 { display: block; width: 276.9mm; height: 33.2mm; overflow: visible; margin-bottom: 2mm; }
-h1 .l2 text { font-family: var(--sans); font-weight: 850; font-size: 36.69px; letter-spacing: -.035em; }
-.try .h2svg { width: 112mm; height: 17mm; overflow: visible; }
-.try .h2svg text { font-family: var(--sans); font-weight: 900; font-size: 16.23px; letter-spacing: -.02em; }
-.promise { margin-top: 5mm; font-size: 37pt; font-weight: 600; line-height: 1.15; letter-spacing: -.012em; color: var(--ink); }
-.promise-sub { margin-top: 3.5mm; display: flex; flex-wrap: wrap; gap: 3mm; }
-.pill { font-size: 19pt; font-weight: 600; color: var(--ink-2); background: var(--chip); border: .45mm solid var(--card-brd);
-  border-radius: 30mm; padding: 2mm 5.5mm; display: inline-flex; align-items: center; gap: 2.5mm; }
-.pill svg { width: 6.5mm; height: 6.5mm; color: var(--cyan); }
-.hero-gem { width: 88mm; height: 104mm; }
-/* the problem, in one line, full width under the headline */
-.problem { grid-column: 1 / -1; margin-top: 1mm; font-size: 26pt; font-weight: 600; line-height: 1.2; letter-spacing: -.01em;
-  color: var(--ink-2); border-radius: 0 3mm 3mm 0; padding: 3mm 6mm 3mm 9mm;
-  background: linear-gradient(var(--g1), var(--g2), var(--g3)) left / 2.2mm 100% no-repeat, var(--card); }
-.problem b { color: var(--ink); font-weight: 800; }
-.problem strong { color: var(--magenta); font-weight: 850; }
+/* ---------- 1. top bar ---------- */
+.top { display: flex; align-items: center; justify-content: space-between; gap: 32px; }
+.brand { display: flex; align-items: center; gap: 20px; }
+.brand .gem { width: 36px; height: 54px; flex: none; }
+/* The wordmark (DESIGN: the one gradient text) is drawn as outlines with a gradient fill: GHOST-PRIME in
+   Archivo at wdth 125 / wght 800, 42 px, letter-spacing .14em, baseline 35, outlined with HarfBuzz +
+   fontTools from fonts/archivo-latin-var.woff2. Two live-text versions failed in the PDFs:
+   background-clip:text (and an SVG text clip) export as a soft mask that shows as a hairline box or a
+   line after the E, and SVG text with a gradient fill does not appear at all in Chrome's PDF viewer. */
+.wordmark { display: block; width: 457px; height: 42px; overflow: visible; flex: none; }
+.event { color: var(--ink-2); }
 
-/* ---------- body: two columns ---------- */
-.body { display: grid; grid-template-columns: 201mm 1fr; gap: 10mm; flex: 1; min-height: 0; }
-.col { display: flex; flex-direction: column; gap: 6.5mm; min-height: 0; }
+/* ---------- 2. hero ---------- */
+.hero { display: flex; flex-direction: column; gap: 18px; }
+h1 {
+  font-family: var(--display); font-stretch: 112%; font-weight: 760;
+  letter-spacing: -0.02em; line-height: 1.02; text-wrap: balance;
+  font-size: 128px; color: var(--ink);
+}
+h1 .accent { color: var(--cyan); display: block; }
+.oneliner { font-size: 36px; line-height: 1.25; font-weight: 500; color: var(--ink); letter-spacing: -.005em; }
 
-/* laptop mock-up around the real screenshot */
-.laptop { position: relative; }
-.laptop .screen { background: var(--bezel); border-radius: 5mm 5mm 1.5mm 1.5mm; padding: 4.2mm 4.2mm 5mm;
-  border: .5mm solid var(--laptop-brd); position: relative; }
-.laptop .screen img { display: block; width: 100%; border-radius: 1mm; }
-.laptop .base { height: 7mm; margin: 0 -6mm; background: var(--laptop-base); border-radius: 0 0 9mm 9mm;
-  border: .5mm solid var(--laptop-brd); border-top: none; position: relative; }
-.laptop .base::before { content: ''; position: absolute; left: 50%; top: 0; width: 34mm; height: 2.4mm; transform: translateX(-50%);
-  background: rgba(0,0,0,.18); border-radius: 0 0 3mm 3mm; }
-.callout { position: absolute; display: flex; align-items: center; gap: 2mm; pointer-events: none; }
-.callout .dot { width: 11mm; height: 11mm; border-radius: 50%; border: 1mm solid #ffd23f; box-shadow: 0 0 0 1.2mm rgba(0,0,0,.55); }
-.callout .lbl { background: #ffd23f; color: #111; font-weight: 800; font-size: 15pt; border-radius: 2mm; padding: 1mm 3mm; white-space: nowrap; }
-.caption { margin-top: 3.5mm; font-size: 14pt; color: var(--ink-3); text-align: center; }
+/* ---------- 3. body: the spine, two rows so the section titles line up ---------- */
+.body { grid-template-rows: auto auto; row-gap: 32px; align-items: stretch; }
+.col { min-height: 0; }
 
-/* what it does */
-.does { display: grid; grid-template-columns: 1fr; gap: 5.8mm; }
-.do { display: grid; grid-template-columns: 21mm 1fr; gap: 5mm; align-items: center; }
-.ico { width: 21mm; height: 21mm; border-radius: 5mm; display: grid; place-items: center;
-  border: .6mm solid currentColor; }
-.ico svg { width: 12.5mm; height: 12.5mm; }
-.c-cyan { color: var(--cyan); } .c-violet { color: var(--violet); } .c-magenta { color: var(--magenta); }
-.do h3 { font-size: 34pt; font-weight: 800; letter-spacing: -.015em; line-height: 1.05; color: var(--ink); }
-.do p { font-size: 22.5pt; line-height: 1.2; color: var(--ink-2); margin-top: 1mm; }
+/* The real app screen, cropped to the chat column: hero-working.png is 2400 x 1500; the frame shows
+   x 0-1920 (the Activity panel, hidden in presenter mode, is cut off) and y 20-1480 (the empty margin). */
+.shot { display: flex; flex-direction: column; gap: 12px; }
+.shot .frame { position: relative; box-sizing: content-box; width: calc(var(--left) - 4px); aspect-ratio: 1920 / 1460;
+  border-radius: 12px; overflow: hidden; border: 2px solid var(--shot-edge); background: #05070F; }
+.shot img { position: absolute; display: block; left: 0; top: calc(-20 / 1460 * 100%); width: calc(2400 / 1920 * 100%); height: auto; }
+/* The mic button's centre is at (196, 1404) in hero-working.png: 10.2 % x, 94.8 % y of the crop.
+   (Ctrl+Shift+G only brings the window up and focuses the chat box, so the note does not mention it.) */
+.callout { position: absolute; left: 10.2%; top: 94.8%; width: 44px; height: 44px; transform: translate(-50%, -50%);
+  border-radius: 50%; border: 3px solid var(--note-bg); pointer-events: none; }
+/* The note sits in the message box, right of the mic, and ends before the app's Send button
+   (Send starts at about 576 px into the frame). Solid cyan so it can't be mistaken for app UI. */
+.callout .tag { position: absolute; left: calc(100% + 12px); top: 50%; transform: translateY(-50%); white-space: nowrap;
+  font-family: var(--sans); font-size: 22px; line-height: 1.2; font-weight: 600; letter-spacing: -.005em;
+  color: var(--note-ink); background: var(--note-bg); border-radius: 8px; padding: 5px 12px 6px; }
+.callout .tag b { font-weight: 800; }
+.callout .tag::before { content: ''; position: absolute; right: 100%; top: 50%; width: 12px; height: 3px; margin-top: -1.5px; background: var(--note-bg); }
+.caption { font-size: 22px; line-height: 1.35; color: var(--ink-2); }
 
-/* try it with me: the presenter speaks every request */
-.try { border-radius: 7mm; padding: 7mm 7mm 6.5mm; position: relative; color: var(--ink);
-  background: linear-gradient(var(--paper), var(--paper)) padding-box,
-              linear-gradient(135deg, var(--g1), var(--g2), var(--g3)) border-box;
-  border: 1.3mm solid transparent; }
-.try h2 { font-size: 46pt; font-weight: 900; letter-spacing: -.02em; line-height: 1; display: flex; align-items: center; gap: 4mm; }
-.try h2 .mic { width: 17mm; height: 17mm; border-radius: 50%; display: grid; place-items: center; flex: none;
-  background: linear-gradient(135deg, var(--g1), var(--g2)); color: #fff; }
-.try h2 .mic svg { width: 10mm; height: 10mm; }
-.steps { list-style: none; margin-top: 5mm; display: flex; flex-direction: column; gap: 3.4mm; }
-.steps li { display: grid; grid-template-columns: 11mm 1fr; gap: 3mm; font-size: 23.5pt; line-height: 1.2; font-weight: 600; }
-.steps .n { width: 11mm; height: 11mm; border-radius: 50%; background: var(--ink); color: var(--paper); font-weight: 800;
-  font-size: 16pt; display: grid; place-items: center; margin-top: .3mm; }
-.steps .say { display: block; margin-top: 1.2mm; font-size: 20.5pt; line-height: 1.22; font-weight: 700; color: var(--violet); font-style: italic; }
-/* privacy note: part of the call to action, big enough to read from the aisle */
-.privacy { margin-top: 5mm; display: grid; grid-template-columns: 8mm 1fr; gap: 3mm; align-items: start;
-  background: var(--tag-bg); border: .45mm solid var(--tag-brd); border-radius: 3mm; padding: 2.6mm 3.6mm;
-  font-size: 18pt; line-height: 1.25; font-weight: 600; color: var(--ink); }
-.privacy svg { width: 8mm; height: 8mm; margin-top: .6mm; color: var(--tag-ink); }
+/* try it with me: the one call to action. A cyan rule, no box, text flush on the spine. */
+.try { border-top: 3px solid var(--cyan); padding-top: 20px; display: flex; flex-direction: column; }
+.try .title::after { display: none; }
+.steps { list-style: none; margin: 20px 0 0; display: flex; flex-direction: column; gap: 14px; }
+.steps > li { display: grid; grid-template-columns: 42px 1fr; column-gap: 16px; align-items: start; }
+/* numbered circles: only here, for the visitor's real sequence */
+.step-n { width: 42px; height: 42px; border-radius: 50%; border: 2.5px solid var(--cyan); color: var(--cyan);
+  font-family: var(--mono); font-weight: 700; font-size: 22px; display: grid; place-items: center; line-height: 1; }
+.steps p { font-size: 26px; line-height: 1.3; font-weight: 500; padding-top: 4px; }
+.steps .phrase { margin-top: 8px; padding-top: 0; font-size: 32px; line-height: 1.25; font-weight: 600; color: var(--cyan);
+  letter-spacing: -.01em; text-wrap: balance; text-indent: -.4em; } /* the opening quote hangs, so the words line up */
+.ex { color: var(--cyan); font-weight: 600; }
+.notes { margin-top: auto; padding-top: 14px; border-top: 2px solid var(--line); display: flex; flex-direction: column; gap: 8px; }
+.notes p { font-size: 22px; line-height: 1.4; color: var(--ink-2); }
+.notes b { color: var(--ink); font-weight: 700; }
 
-/* how it works */
-.flow { --fg: 3mm; display: flex; flex-direction: column; gap: var(--fg); }
-.flow-main { position: relative; display: flex; flex-direction: column; gap: var(--fg); }
-.flow-main::before { content: ''; position: absolute; left: 8.5mm; top: 9mm; bottom: 9mm; width: .9mm;
-  background: linear-gradient(var(--g1), var(--g2), var(--g3)); }
-.node { position: relative; display: grid; grid-template-columns: 18mm 1fr; gap: 4mm; align-items: center; }
-.node .dot { width: 18mm; height: 18mm; border-radius: 50%; background: var(--paper); border: .7mm solid currentColor;
-  display: grid; place-items: center; }
-.node .dot svg { width: 10mm; height: 10mm; }
-.node h4 { font-size: 23.5pt; font-weight: 800; line-height: 1.05; }
-.node p { font-size: 17.5pt; color: var(--ink-2); line-height: 1.25; margin-top: .6mm; }
-.brains { display: flex; gap: 2.5mm; margin-top: 1.4mm; flex-wrap: wrap; }
-.brain { font-size: 16pt; line-height: 1.2; border: .45mm solid var(--card-brd); background: var(--card); border-radius: 2.5mm; padding: 1.4mm 2.6mm; color: var(--ink-2); }
-.brain b { color: var(--ink); font-weight: 800; display: block; font-size: 18pt; }
-.next { position: relative; margin-left: 22mm; border: .6mm dashed var(--ink-3); border-radius: 3mm; padding: 2.2mm 3mm; display: grid;
-  grid-template-columns: 9mm 1fr; gap: 2.6mm; align-items: center; }
-.next::before { content: ''; position: absolute; left: -13.4mm; top: calc(-1 * var(--fg)); width: 12.8mm; height: calc(var(--fg) + 50%);
-  border-left: .8mm dashed var(--ink-3); border-bottom: .8mm dashed var(--ink-3); }
-.next svg { width: 9mm; height: 9mm; color: var(--ink-3); }
-.next p { font-size: 16.5pt; line-height: 1.22; color: var(--ink-2); }
-.next b { color: var(--ink); }
-.tag { display: inline-block; font-family: var(--mono); font-size: 11.5pt; font-weight: 800; letter-spacing: .08em; text-transform: uppercase;
-  background: var(--tag-bg); color: var(--tag-ink); border: .4mm solid var(--tag-brd); border-radius: 1.4mm; padding: .2mm 1.8mm; vertical-align: .6mm; }
+/* how it works: the numbered-ref motif, [1] [2] [3], echoing the [6] in the trace */
+.how { display: flex; flex-direction: column; gap: 22px; }
+.flow { list-style: none; display: flex; flex-direction: column; gap: 20px; }
+.flow > li { display: grid; grid-template-columns: 48px 1fr; column-gap: 14px; align-items: baseline; }
+.ref-n { font-family: var(--mono); font-size: 27px; font-weight: 800; color: var(--cyan); letter-spacing: -.04em; line-height: 1.2; }
+.flow h3 { font-size: 27px; line-height: 1.2; font-weight: 700; letter-spacing: -.01em; }
+.flow p { font-size: 22px; line-height: 1.38; color: var(--ink-2); margin-top: 5px; }
+.tagword { font-family: var(--mono); font-size: 1em; font-weight: 700; letter-spacing: .04em; color: var(--ink); }
 
-/* who it helps */
-.helps { display: grid; grid-template-columns: repeat(3, 1fr); gap: 7mm; }
-.help { border-top: 1.1mm solid currentColor; padding-top: 4mm; display: grid; grid-template-columns: 15mm 1fr; gap: 4mm; align-items: start; }
-.help svg { width: 15mm; height: 15mm; }
-.help h3 { font-size: 25pt; font-weight: 800; line-height: 1.08; color: var(--ink); letter-spacing: -.01em; }
-.help p { font-size: 18pt; line-height: 1.25; color: var(--ink-2); margin-top: 1.2mm; }
+/* a real tool trace, hung to the column edge */
+.trace { margin: 14px 0 0 -62px; background: var(--deck); border: 2px solid var(--line); border-radius: 12px;
+  padding: 12px 20px 10px; font-family: var(--mono); font-size: 22px; line-height: 1.45; letter-spacing: -.01em; font-variant-numeric: tabular-nums; }
+.trace .tr { display: grid; grid-template-columns: 9.9em 1fr; white-space: nowrap; }
+.trace .tool { color: var(--ink); font-weight: 600; }
+.trace .arg { color: var(--ink-2); }
+.trace .ref { color: var(--cyan); font-weight: 800; }
+.trace svg { width: .95em; height: .95em; vertical-align: -.12em; margin-left: .35em; color: var(--ink-2); }
 
-/* footer */
-.foot { display: grid; grid-template-columns: 1fr auto; gap: 8mm; align-items: end; padding-top: 5mm; border-top: .5mm solid var(--line); }
-.who { font-size: 28pt; font-weight: 800; letter-spacing: -.01em; }
-.who .sep { color: var(--violet); padding: 0 2.5mm; }
-.credits { margin-top: 2mm; font-size: 12.5pt; line-height: 1.35; color: var(--ink-3); max-width: 250mm; }
-.stats { display: flex; gap: 6mm; }
-.stat { text-align: right; }
-.stat b { display: block; font-size: 40pt; font-weight: 900; line-height: 1; letter-spacing: -.02em; }
-.stat span { font-size: 13.5pt; color: var(--ink-3); line-height: 1.2; display: block; margin-top: 1mm; }
+/* what works, and what's next */
+.works { display: flex; flex-direction: column; gap: 22px; }
+.works .title::after { display: none; } /* the title fills the column; the list's first hairline follows */
+.wlist { list-style: none; }
+.wlist > li { padding: 11px 0 11px; border-top: 2px solid var(--line); }
+.wlist > li:last-child { padding-bottom: 0; }
+.wtop { display: flex; align-items: center; gap: 14px; }
+.wtop h3 { flex: 1; }
+/* the check date sits on the chip it belongs to */
+.when { font-family: var(--mono); font-size: 22px; font-weight: 600; color: var(--ink-2); letter-spacing: .06em;
+  text-transform: uppercase; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.wlist h3 { font-size: 27px; line-height: 1.2; font-weight: 700; letter-spacing: -.01em; }
+.wlist p { font-size: 22px; line-height: 1.4; color: var(--ink-2); margin-top: 4px; }
+
+/* ---------- 4. who it's for ---------- */
+.who { display: flex; flex-direction: column; gap: 16px; }
+/* the heading's two lines start on the second group column (x = 438), a real grid line */
+.who-head { display: grid; grid-template-columns: calc((var(--left) - var(--col-gap)) / 2) minmax(0, 1fr);
+  column-gap: var(--col-gap); align-items: start; }
+.who-head .title { padding-top: 6px; }
+.who-head .title::after { display: none; }
+.who-head .lead { font-size: 26px; line-height: 1.3; font-weight: 500; color: var(--ink-2); }
+.who-head .lead b { color: var(--ink); font-weight: 700; }
+/* on the spine: two columns in the left 660 px, two in the right; subgrid rows share one baseline */
+.groups { list-style: none; display: grid; column-gap: var(--col-gap);
+  grid-template-columns: calc((var(--left) - var(--col-gap)) / 2) calc((var(--left) - var(--col-gap)) / 2) minmax(0, 1fr) minmax(0, 1fr);
+  grid-template-rows: auto auto; }
+.groups li { display: grid; grid-row: span 2; grid-template-rows: subgrid; row-gap: 6px; align-content: start;
+  border-top: 2px solid var(--line); padding-top: 14px; }
+.groups h3 { font-size: 27px; line-height: 1.2; font-weight: 700; letter-spacing: -.01em; text-wrap: balance; }
+.groups p { font-size: 22px; line-height: 1.4; color: var(--ink-2); }
+.honest { font-size: 26px; line-height: 1.3; font-weight: 650; color: var(--amber); margin-top: 4px; }
+
+/* ---------- 5. footer: who made it | the numbers ---------- */
+.foot { padding-top: 20px; border-top: 2px solid var(--line); align-items: start; }
+.who-made { font-family: var(--display); font-stretch: 112%; font-weight: 760; letter-spacing: -.01em; font-size: 36px; line-height: 1.05; }
+.affil { margin-top: 6px; font-size: 24px; line-height: 1.3; font-weight: 600; color: var(--ink-2); }
+.affil .sep { color: var(--cyan); padding: 0 8px; }
+.credits { margin-top: 14px; display: flex; flex-direction: column; gap: 8px; }
+.credits p, .built { font-size: 22px; line-height: 1.42; color: var(--ink-2); }
+.credits b { color: var(--ink); font-weight: 700; }
+/* one grid for all three rows: the number column is as wide as "523", so it starts on the spine (x = 792) */
+.stats { display: grid; grid-template-columns: max-content minmax(0, 1fr); column-gap: 20px; row-gap: 8px; align-items: center; }
+.stat { display: contents; }
+.stat .num { font-family: var(--display); font-stretch: 125%; font-weight: 820; font-size: 56px; line-height: 1;
+  letter-spacing: -.02em; color: var(--ink); font-variant-numeric: tabular-nums; text-align: right; }
+.stat .what { font-size: 22px; line-height: 1.3; color: var(--ink-2); text-wrap: balance; }
+.built { margin-top: 14px; }
 
 /* ---------- screen-only viewer (hidden when printing) ---------- */
 .toolbar { display: none; }
@@ -261,7 +299,7 @@ h1 .l2 text { font-family: var(--sans); font-weight: 850; font-size: 36.69px; le
   <button type="button" onclick="window.print()">Print…</button>
 </div>
 
-<!-- Shared SVG defs: gradients used by the gem and icons -->
+<!-- Shared SVG defs: the gem (brand mark) and the wordmark gradient -->
 <svg width="0" height="0" style="position:absolute" aria-hidden="true">
   <defs>
     <linearGradient id="gemA" x1="0" y1="0" x2="1" y2="1">
@@ -273,27 +311,23 @@ h1 .l2 text { font-family: var(--sans); font-weight: 850; font-size: 36.69px; le
     <linearGradient id="gemC" x1="0" y1="0" x2="0" y2="1">
       <stop offset="0" stop-color="#00c8ec"/><stop offset="1" stop-color="#4b2fd6"/>
     </linearGradient>
-    <linearGradient id="textGrad" x1="0" y1="0" x2="1" y2="0">
-      <stop offset="0" style="stop-color: var(--g1)"/><stop offset=".55" style="stop-color: var(--g2)"/><stop offset="1" style="stop-color: var(--g3)"/>
+    <!-- spans the whole wordmark box (457 px), like the old CSS gradient: cyan, violet at 58 %, magenta -->
+    <linearGradient id="wmGrad" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="457" y2="0">
+      <stop offset="0" style="stop-color: var(--wm-1)"/><stop offset=".58" style="stop-color: var(--wm-2)"/><stop offset="1" style="stop-color: var(--wm-3)"/>
     </linearGradient>
-    <radialGradient id="gemGlow" cx=".5" cy=".5" r=".5">
-      <stop offset="0" stop-color="#00e6ff" stop-opacity=".45"/><stop offset=".6" stop-color="#7c5cff" stop-opacity=".12"/><stop offset="1" stop-color="#7c5cff" stop-opacity="0"/>
-    </radialGradient>
     <symbol id="gem" viewBox="0 0 200 300">
-      <!-- faceted bipyramid, like the app's holographic core -->
       <polygon points="100,8 28,118 74,134" fill="url(#gemB)" opacity=".95"/>
       <polygon points="100,8 74,134 126,134" fill="url(#gemA)" opacity=".85"/>
       <polygon points="100,8 126,134 172,118" fill="url(#gemC)" opacity=".95"/>
       <polygon points="28,118 74,134 100,292" fill="url(#gemC)" opacity=".9"/>
       <polygon points="74,134 126,134 100,292" fill="url(#gemB)" opacity=".75"/>
       <polygon points="126,134 172,118 100,292" fill="url(#gemA)" opacity=".95"/>
-      <g fill="none" style="stroke: var(--gem-hi)" stroke-width="2.2" stroke-linejoin="round" opacity=".9">
-        <polygon points="100,8 172,118 100,292 28,118"/>
+      <g fill="none" style="stroke: var(--gem-hi)" stroke-width="3" stroke-linejoin="round" opacity=".9">
         <polyline points="28,118 74,134 126,134 172,118"/>
         <line x1="100" y1="8" x2="74" y2="134"/><line x1="100" y1="8" x2="126" y2="134"/>
         <line x1="74" y1="134" x2="100" y2="292"/><line x1="126" y1="134" x2="100" y2="292"/>
       </g>
-      <polygon points="100,8 172,118 100,292 28,118" fill="none" style="stroke: var(--gem-edge)" stroke-width="4" stroke-linejoin="round"/>
+      <polygon points="100,8 172,118 100,292 28,118" fill="none" style="stroke: var(--gem-edge)" stroke-width="6" stroke-linejoin="round"/>
     </symbol>
   </defs>
 </svg>
@@ -301,156 +335,142 @@ h1 .l2 text { font-family: var(--sans); font-weight: 850; font-size: 36.69px; le
 <div class="stage">
 <main class="poster" aria-label="Ghost-Prime booth poster">
 
-  <!-- 1. Brand + event -->
-  <div class="top">
+  <!-- 1. Wordmark + event -->
+  <header class="top">
     <div class="brand">
-      <svg viewBox="0 0 200 300" aria-hidden="true"><use href="#gem"/></svg>
-      <span>GHOST<span class="dash">-</span><span class="prime">PRIME</span></span>
+      <svg class="gem" viewBox="0 0 200 300" aria-hidden="true"><use href="#gem"/></svg>
+      <svg class="wordmark" viewBox="0 0 457 42" role="img" aria-label="Ghost-Prime"><title>GHOST-PRIME</title><path fill="url(#wmGrad)" d="M19.85 35.5Q11.09 35.5 6.7 31.81Q2.31 28.11 2.31 20.57Q2.31 15.63 4.59 12.31Q6.88 8.98 11.2 7.3Q15.53 5.62 21.59 5.62Q25.34 5.62 28.55 6.29Q31.76 6.97 34.16 8.31Q36.56 9.66 37.89 11.7Q39.22 13.74 39.22 16.47H30.91Q30.91 15.3 30.18 14.43Q29.46 13.56 28.2 13.02Q26.94 12.48 25.34 12.22Q23.73 11.96 21.95 11.96Q19.43 11.96 17.41 12.46Q15.4 12.96 13.98 13.98Q12.56 15.01 11.82 16.52Q11.08 18.04 11.08 20.05V21.06Q11.08 23.9 12.27 25.69Q13.45 27.48 15.73 28.32Q18 29.17 21.25 29.17Q24.21 29.17 26.38 28.63Q28.54 28.1 29.71 27.07Q30.88 26.03 30.88 24.61V24.37H20.78V18.87H39.26V35H34.27L33.46 31.54Q31.84 32.89 29.75 33.78Q27.67 34.67 25.19 35.09Q22.71 35.5 19.85 35.5ZM51.93 35V6.12H60.49V16.87H77.82V6.12H86.37V35H77.82V23.75H60.49V35ZM117.05 35.5Q111.24 35.5 106.98 33.73Q102.72 31.95 100.42 28.61Q98.11 25.27 98.11 20.57Q98.11 15.83 100.42 12.49Q102.72 9.15 106.98 7.38Q111.24 5.62 117.05 5.62Q122.93 5.62 127.17 7.38Q131.41 9.15 133.71 12.49Q136.02 15.83 136.02 20.57Q136.02 25.27 133.71 28.61Q131.41 31.95 127.17 33.73Q122.93 35.5 117.05 35.5ZM117.07 29.17Q119.33 29.17 121.19 28.61Q123.06 28.06 124.41 27Q125.77 25.95 126.5 24.43Q127.23 22.91 127.23 21.01V20.03Q127.23 18.14 126.5 16.63Q125.77 15.13 124.41 14.09Q123.06 13.05 121.19 12.5Q119.33 11.96 117.07 11.96Q114.8 11.96 112.94 12.5Q111.08 13.05 109.72 14.09Q108.37 15.13 107.64 16.63Q106.92 18.14 106.92 20.03V21.01Q106.92 22.91 107.64 24.43Q108.37 25.95 109.72 27Q111.08 28.06 112.94 28.61Q114.8 29.17 117.07 29.17ZM163.19 35.5Q159.67 35.5 156.61 35.08Q153.54 34.66 151.24 33.61Q148.94 32.56 147.64 30.67Q146.34 28.79 146.34 25.89Q146.34 25.81 146.34 25.67Q146.34 25.54 146.38 25.41H154.76Q154.72 25.57 154.71 25.76Q154.7 25.94 154.7 26.15Q154.7 27.43 155.67 28.17Q156.65 28.9 158.43 29.2Q160.21 29.5 162.57 29.5Q163.56 29.5 164.59 29.44Q165.62 29.38 166.59 29.23Q167.55 29.08 168.31 28.79Q169.08 28.5 169.54 28.05Q169.99 27.6 169.99 26.96Q169.99 26.05 169.03 25.52Q168.06 24.99 166.42 24.68Q164.77 24.36 162.73 24.11Q160.69 23.86 158.5 23.52Q156.31 23.17 154.26 22.56Q152.22 21.95 150.58 20.94Q148.93 19.93 147.97 18.34Q147 16.75 147 14.46Q147 12.17 148.16 10.5Q149.32 8.83 151.42 7.75Q153.51 6.67 156.37 6.14Q159.22 5.62 162.58 5.62Q166.01 5.62 168.8 6.15Q171.6 6.68 173.6 7.75Q175.6 8.82 176.68 10.44Q177.76 12.07 177.76 14.25V14.84H169.47V14.49Q169.47 13.62 168.71 12.94Q167.95 12.26 166.5 11.85Q165.06 11.44 162.99 11.44Q160.51 11.44 158.92 11.75Q157.32 12.06 156.57 12.6Q155.81 13.13 155.81 13.77Q155.81 14.62 156.77 15.12Q157.74 15.62 159.38 15.9Q161.03 16.19 163.07 16.44Q165.12 16.69 167.31 17.03Q169.5 17.38 171.54 17.95Q173.58 18.53 175.23 19.53Q176.87 20.53 177.84 22.05Q178.8 23.58 178.8 25.81Q178.8 29.28 176.79 31.42Q174.78 33.56 171.25 34.53Q167.73 35.5 163.19 35.5ZM200.06 35V13.01H187.55V6.12H221.12V13.01H208.61V35ZM230.12 26.68V20.26H243.39V26.68ZM254.92 35V6.12H277.21Q280.04 6.12 282.18 7.38Q284.31 8.63 285.5 10.84Q286.69 13.05 286.69 15.94Q286.69 18.85 285.48 21.09Q284.27 23.34 282.12 24.58Q279.96 25.82 277.13 25.82H263.47V35ZM263.47 19.48H274.75Q276.65 19.48 277.63 18.57Q278.61 17.66 278.61 15.98Q278.61 14.84 278.16 14.06Q277.72 13.28 276.86 12.87Q276.01 12.46 274.75 12.46H263.47ZM296.96 35V6.12H321Q324.15 6.12 326.22 7.42Q328.29 8.72 329.32 10.83Q330.36 12.95 330.36 15.45Q330.36 18.19 329.06 20.44Q327.76 22.69 325.14 23.99L331.05 35H321.4L316.61 25.39H305.51V35ZM305.51 19.08H318.2Q319.75 19.08 320.67 18.15Q321.59 17.22 321.59 15.69Q321.59 14.65 321.17 13.93Q320.76 13.21 320 12.83Q319.25 12.46 318.2 12.46H305.51ZM341.99 35V6.12H350.54V35ZM363.53 35V6.12H376.91L381.86 18.64Q382.18 19.43 382.58 20.6Q382.99 21.78 383.4 23.01Q383.81 24.24 384.11 25.2H384.41Q384.69 24.32 385.1 23.15Q385.5 21.98 385.92 20.78Q386.35 19.57 386.68 18.68L391.63 6.12H404.64V35H396.09V20.1Q396.09 19.2 396.11 18.11Q396.13 17.03 396.18 15.97Q396.22 14.92 396.24 14.15H395.9Q395.64 14.96 395.27 16.06Q394.9 17.16 394.53 18.24Q394.16 19.31 393.85 20.1L387.8 35H379.96L373.89 20.1Q373.47 18.99 373.06 17.85Q372.66 16.72 372.35 15.74Q372.05 14.77 371.84 14.15H371.5Q371.54 14.75 371.56 15.72Q371.58 16.7 371.6 17.83Q371.63 18.97 371.63 20.1V35ZM417.63 35V6.12H447.73V12.46H426.2V17.31H445.05V23.44H426.2V28.66H448.07V35Z"/></svg>
     </div>
-    <div class="event">RWANDA INNOVATION SHOWCASE · 29 SEP 2026</div>
-  </div>
+    <div class="event label">Rwanda Innovation Showcase · 29 Sep 2026</div>
+  </header>
 
-  <!-- 2. Headline + one-line promise -->
+  <!-- 2. Tagline (DESIGN.md: "Use a computer just by talking.") + one-liner -->
   <section class="hero">
-    <div>
-      <h1><span class="l1">Just talk.</span><svg class="l2" viewBox="0 0 300 36" role="img" aria-label="It does the task."><text x="-.6" y="31" fill="url(#textGrad)">It does the task.</text></svg></h1>
-      <p class="promise">A voice assistant that uses the computer for you.</p>
-      <div class="promise-sub">
-        <span class="pill">
-          <svg viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round"><rect x="8" y="9" width="32" height="22" rx="3"/><path d="M3 38h42l-3-7H6z"/></svg>
-          Built on a school Chromebook
-        </span>
-        <span class="pill">
-          <svg viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round"><circle cx="24" cy="24" r="18"/><path d="M29.5 17.5c-1.2-1.6-3.2-2.5-5.5-2.5-3.3 0-6 1.9-6 4.5 0 6 12 3 12 9 0 2.6-2.7 4.5-6 4.5-2.4 0-4.5-1-5.7-2.7M24 11.5v3.5M24 33v3.5"/><path d="M11 11l26 26"/></svg>
-          No pay-per-use bills
-        </span>
-      </div>
-    </div>
-    <svg class="hero-gem" viewBox="-40 -20 280 340" aria-hidden="true">
-      <ellipse cx="100" cy="160" rx="135" ry="165" fill="url(#gemGlow)"/>
-      <use href="#gem" x="0" y="0" width="200" height="300"/>
-      <ellipse cx="100" cy="312" rx="62" ry="7" fill="#7c5cff" opacity=".22"/>
-    </svg>
-    <p class="problem">Computers expect you to <b>type fast</b> and <b>read small text</b>. <strong>Not everyone can.</strong></p>
+    <h1>Use a computer <span class="accent">just by talking.</span></h1>
+    <p class="oneliner">A voice assistant that does the task for you, built on a school Chromebook.</p>
   </section>
 
-  <!-- 3. Body -->
-  <section class="body">
-    <!-- left column: real app + what it does -->
-    <div class="col">
-      <figure class="laptop">
-        <div class="screen">
-          <img src="img/app-screen.png" alt="The Ghost-Prime app: a glowing gem, 'Ask Ghost-Prime anything to begin', example requests and a message box with a microphone button">
-          <!-- mic button sits at 24.6% / 92.7% of the 1280x840 screenshot -->
-          <div class="callout" style="left: calc(4.2mm + (100% - 8.4mm) * .246 - 5.5mm); top: calc(4.2mm + (100% - 9.2mm) * .927 - 5.5mm);">
-            <span class="dot"></span><span class="lbl">The mic button</span>
+  <!-- 3. Body on the spine. Row 1: the real app screen | the visitor call to action.
+       Row 2: how it works | what works, and what's next. -->
+  <section class="body spine">
+    <figure class="shot col">
+      <div class="frame">
+        <img src="../app-shots/hero-working.png" alt="Ghost-Prime in AUTO mode working on the photosynthesis request: browser_navigate, browser_get_page and browser_fill cards, with the mic button in the message box">
+        <div class="callout" aria-hidden="true"><span class="tag"><b>Mic button:</b> click, speak, click again</span></div>
+      </div>
+      <figcaption class="caption">The real app screen, with a scripted sample of the demo.</figcaption>
+    </figure>
+
+    <aside class="try col" aria-label="Try it with me">
+      <h2 class="title">Try it with me</h2>
+      <!-- I (the presenter) say or type every request: privacy + the free-tier daily limit
+           (script/pitch-30s.md visitor notes; demo/DEMO.md section 2 "Talking vs typing").
+           The phrase is Demo 5 (the hero demo) in demo/DEMO.md, word for word, as in the slides,
+           the pitch, the pitch card, the screenshot and the offline replay. The replay (Plan C)
+           only knows photosynthesis: a visitor's own topic works only in the live app. -->
+      <ol class="steps">
+        <li><span class="step-n">1</span><p>Give me a topic, or use mine: <span class="ex">photosynthesis</span>.</p></li>
+        <li><span class="step-n">2</span><div>
+          <p>I ask Ghost-Prime for you, by voice or by typing:</p>
+          <p class="phrase">“Go to the Wikipedia website, search for photosynthesis, and explain it to me in three simple sentences.”</p>
+        </div></li>
+        <li><span class="step-n">3</span><p>Watch it work, and hear the answer.</p></li>
+      </ol>
+      <!-- Privacy: FACTS.md section 5. Safety: DESIGN.md section 2 "Safety" (the showcase launch starts in AUTO). -->
+      <div class="notes">
+        <p><b>Privacy.</b> What you ask goes over the internet to Claude (Anthropic) and Google. Please don’t share anything private.</p>
+        <p><b>Safety.</b> It runs in AUTO: Claude’s automatic safety check decides each action. PLAN only looks. There is no “Are you sure?” pop-up yet.</p>
+      </div>
+    </aside>
+
+    <div class="how col">
+      <h2 class="title">How it works</h2>
+      <ol class="flow">
+        <li><span class="ref-n">[1]</span><div>
+          <h3>You ask, by voice or by typing.</h3>
+          <p>Google turns your voice into text, unless offline voice is on.</p>
+        </div></li>
+        <li><span class="ref-n">[2]</span><div>
+          <h3>Claude plans the steps.</h3>
+          <p>Claude does the thinking in today’s demo, so every answer shows a <span class="tagword">CLAUDE</span> tag. Normally a router can also send quick questions to Google’s free Gemini.</p>
+        </div></li>
+        <li><span class="ref-n">[3]</span><div>
+          <h3>The app does each step where you can see it.</h3>
+          <p>It reads the page as a numbered list, then types and clicks:</p>
+          <div class="trace" role="img" aria-label="Tool trace: browser_navigate wikipedia.org; browser_get_page [6] Search Wikipedia (search); browser_fill [6] photosynthesis, Enter; browser_get_text Photosynthesis - Wikipedia">
+            <div class="tr"><span class="tool">browser_navigate</span><span class="arg">wikipedia.org</span></div>
+            <div class="tr"><span class="tool">browser_get_page</span><span class="arg"><span class="ref">[6]</span> Search Wikipedia (search)</span></div>
+            <div class="tr"><span class="tool">browser_fill</span><span class="arg"><span class="ref">[6]</span> "photosynthesis"<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 5v7a3 3 0 0 1-3 3H5"/><path d="M9 11l-4 4 4 4"/></svg></span></div>
+            <div class="tr"><span class="tool">browser_get_text</span><span class="arg">Photosynthesis - Wikipedia</span></div>
           </div>
-        </div>
-        <div class="base"></div>
-        <figcaption class="caption">The real Ghost-Prime app screen. The chats in the sidebar are examples.</figcaption>
-      </figure>
-
-      <div class="eyebrow">What it does</div>
-      <div class="does">
-        <div class="do">
-          <div class="ico c-cyan"><svg viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round"><rect x="17" y="4" width="14" height="24" rx="7"/><path d="M10 22a14 14 0 0 0 28 0M24 36v7M17 43h14"/></svg></div>
-          <div><h3>Listens and talks</h3><p>Understands speech. It can answer aloud.</p></div>
-        </div>
-        <div class="do">
-          <div class="ico c-violet"><svg viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="7" width="40" height="30" rx="4"/><path d="M4 15h40"/><path d="M22 21l12 5.2-5.2 2-2 5.3z" fill="currentColor"/></svg></div>
-          <div><h3>Uses websites for you</h3><p>Reads pages, clicks buttons, fills forms.</p></div>
-        </div>
-        <div class="do">
-          <div class="ico c-magenta"><svg viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12a3 3 0 0 1 3-3h10l4 5h20a3 3 0 0 1 3 3v19a3 3 0 0 1-3 3H7a3 3 0 0 1-3-3z"/><path d="M19 25h10a5 5 0 0 1 0 10h-4M23 20.5l-4.5 4.5 4.5 4.5"/></svg></div>
-          <div><h3>Sorts your files</h3><p>Finds, moves and tidies files, with undo.</p></div>
-        </div>
-        <div class="do">
-          <div class="ico c-cyan"><svg viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 33V22a12 12 0 0 1 24 0v11l4 4H8z"/><path d="M20 41a4 4 0 0 0 8 0"/></svg></div>
-          <div><h3>Remembers and reminds</h3><p>Remembers you day to day. Sets reminders.</p></div>
-        </div>
-      </div>
+        </div></li>
+      </ol>
     </div>
 
-    <!-- right column: try it + how it works -->
-    <div class="col">
-      <div class="try">
-        <h2><span class="mic"><svg viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"><rect x="17" y="4" width="14" height="24" rx="7"/><path d="M10 22a14 14 0 0 0 28 0M24 36v7M17 43h14"/></svg></span><svg class="h2svg" viewBox="0 0 112 17" role="img" aria-label="Try it with me"><text x="0" y="13.9" fill="url(#textGrad)">Try it with me</text></svg></h2>
-        <!-- The presenter speaks every request (privacy + the free-tier daily quota): see script/pitch-30s.md.
-             The example is Demo 5 in demo/DEMO.md, word for word, and is scripted in the offline replay. -->
-        <ol class="steps">
-          <li><span class="n">1</span><span>Tell me a topic to look up.</span></li>
-          <li><span class="n">2</span><span>I ask Ghost-Prime out loud, like: <span class="say">“Go to the Wikipedia website, search for photosynthesis, and explain it to me in three simple sentences.”</span></span></li>
-          <li><span class="n">3</span><span>Watch it work, and hear the answer.</span></li>
-        </ol>
-        <p class="privacy"><svg viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="3.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="21" width="30" height="22" rx="3"/><path d="M15 21v-6a9 9 0 0 1 18 0v6M24 30v5"/></svg><span>Voices are sent to Google, so I do the talking. Please don’t share anything private.</span></p>
-      </div>
-
-      <div class="eyebrow">How it works</div>
-      <div class="flow">
-        <div class="flow-main">
-        <div class="node c-cyan">
-          <span class="dot"><svg viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="3.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="24" cy="15" r="8"/><path d="M8 43a16 16 0 0 1 32 0"/></svg></span>
-          <div><h4>You speak or type</h4><p>Your voice is turned into text.</p></div>
-        </div>
-        <div class="node c-cyan">
-          <span class="dot"><svg viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="3.6" stroke-linecap="round" stroke-linejoin="round"><rect x="8" y="9" width="32" height="22" rx="3"/><path d="M3 38h42l-3-7H6z"/></svg></span>
-          <div><h4>The app on the Chromebook</h4><p>Picks the right AI brain for the job.</p></div>
-        </div>
-        <div class="node c-violet">
-          <span class="dot"><svg viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="3.6" stroke-linecap="round" stroke-linejoin="round"><path d="M24 5l4.5 12.5L41 22l-12.5 4.5L24 39l-4.5-12.5L7 22l12.5-4.5z"/></svg></span>
-          <div><h4>AI brains plan the steps</h4>
-            <div class="brains">
-              <span class="brain"><b>Claude</b>hard, many-step tasks</span>
-              <span class="brain"><b>Gemini (free)</b>speech, quick answers</span>
-            </div>
-          </div>
-        </div>
-        <div class="node c-magenta">
-          <span class="dot"><svg viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="3.6" stroke-linecap="round" stroke-linejoin="round"><path d="M30 6a10 10 0 0 0-9.6 12.8L6 33.2a4 4 0 0 0 5.7 5.7l14.4-14.4A10 10 0 0 0 38.9 15l-6 6-5.6-1.4-1.4-5.6 6-6A10 10 0 0 0 30 6z"/></svg></span>
-          <div><h4>Tools do the work</h4><p>Browser · files · terminal · memory · reminders</p></div>
-        </div>
-        <div class="node c-magenta">
-          <span class="dot"><svg viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="3.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="24" cy="24" r="17"/><path d="M16 24.5l5.5 5.5L32.5 19"/></svg></span>
-          <div><h4>Done</h4><p>You see the result, and it can say it out loud.</p></div>
-        </div>
-        </div>
-        <div class="next">
-          <svg viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="3.6" stroke-linecap="round" stroke-linejoin="round"><rect x="13" y="4" width="22" height="40" rx="4"/><path d="M21 38h6"/></svg>
-          <p><span class="tag">In progress</span> <b>Phone control:</b> Android app built, not yet tested on a real phone.</p>
-        </div>
-      </div>
+    <div class="works col">
+      <h2 class="title">What works, and what’s next</h2>
+      <!-- Status and "how it was checked" wording: DESIGN.md section 2 (from FACTS.md section 2).
+           The date on each row is the check date DESIGN gives. -->
+      <ul class="wlist">
+        <li>
+          <div class="wtop"><h3>Uses websites for you</h3><span class="when">25 Sep</span><span class="chip">Works · Tested</span></div>
+          <p>In its own browser window: reads pages, clicks, fills forms.</p>
+        </li>
+        <li>
+          <div class="wtop"><h3>Files, with undo</h3><span class="when">25 Sep</span><span class="chip">Works · Tested</span></div>
+          <p>Creates and moves files, and can undo it.</p>
+        </li>
+        <li>
+          <div class="wtop"><h3>Remembers and reminds</h3><span class="when">25 Sep</span><span class="chip">Works · Tested</span></div>
+          <p>Remembers you from day to day. Sets reminders.</p>
+        </li>
+        <li>
+          <div class="wtop"><h3>Listens and talks</h3><span class="chip hand">Works · By hand</span></div>
+          <p>Voice works in my own testing; the real mic and speaker are only checked by hand.</p>
+        </li>
+        <li>
+          <div class="wtop"><h3>Phone control</h3><span class="chip prog">In progress</span></div>
+          <p>Built, tested only on a simulated phone.</p>
+        </li>
+      </ul>
     </div>
   </section>
 
-  <!-- 4. Who it helps -->
-  <section>
-    <div class="eyebrow" style="margin-bottom:5mm">Who it helps</div>
-    <div class="helps">
-      <div class="help c-cyan">
-        <svg viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round"><path d="M3 18l21-9 21 9-21 9z"/><path d="M12 22v9c0 3 5.5 6 12 6s12-3 12-6v-9M45 18v11"/></svg>
-        <div><h3>Students</h3><p>Research, organise schoolwork, get reminders to revise.</p></div>
-      </div>
-      <div class="help c-violet">
-        <svg viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round"><circle cx="24" cy="7.5" r="4"/><path d="M8 16l16 3.5L40 16M24 19.5v10L17 44M24 29.5L31 44"/></svg>
-        <div><h3>People who find typing or small text hard</h3><p>Speak instead of typing. Hear answers instead of reading them.</p></div>
-      </div>
-      <div class="help c-magenta">
-        <svg viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="5" width="40" height="27" rx="3"/><path d="M15 43l9-11 9 11M11 14h16M11 21h10"/></svg>
-        <div><h3>Teachers</h3><p>Open class websites, sort lesson files and set reminders by voice.</p></div>
+  <!-- 4. Who it's for (never "who it helps": no user study yet; no young children) -->
+  <section class="who">
+    <div class="who-head">
+      <h2 class="title">Who it’s for</h2>
+      <div>
+        <p class="lead">Computers expect you to <b>type fast</b> and <b>read small text</b>. Not everyone can.</p>
+        <p class="honest">I haven’t tested it with these groups yet. That’s my next step, and my ask.</p>
       </div>
     </div>
+    <ul class="groups">
+      <li><h3>Students who type slowly</h3><p>Say it instead of typing it.</p></li>
+      <li><h3>People who find small text hard to read</h3><p>Hear the answer read aloud.</p></li>
+      <li><h3>People new to computers</h3><p>Ask in plain words.</p></li>
+      <li><h3>Busy teachers</h3><p>Look things up, set reminders.</p></li>
+    </ul>
   </section>
 
-  <!-- 5. Footer: who made it + honest numbers + credits -->
-  <footer class="foot">
+  <!-- 5. Who made it and the cost | the numbers and the tools (FACTS.md sections 4, 6, 7) -->
+  <footer class="foot spine">
     <div>
-      <div class="who">[YOUR NAME]<span class="sep">·</span>[YOUR CLASS]<span class="sep">·</span>[SCHOOL]</div>
-      <p class="credits">Designed and tested by [YOUR NAME], with much of the code written using an AI coding assistant (Claude Code). Powered by Claude (Anthropic) on a subscription the maker already had, and Google Gemini’s free tier. Built with open-source software: Electron, React, Playwright, SQLite, Whisper, espeak-ng. What you say is sent to Claude or Google Gemini to be understood, so please don’t share private things.</p>
+      <div class="who-made">[YOUR NAME]</div>
+      <div class="affil">[YOUR CLASS]<span class="sep">·</span>[SCHOOL]</div>
+      <div class="credits">
+        <!-- Authorship: change this so it says what you really did (FACTS.md section 7). -->
+        <p>I designed it, decided what it should do, tested it, and used an AI coding assistant (Claude Code) to write much of the code.</p>
+        <p><b>No pay-per-use bills.</b> It runs on Google’s free AI plus a Claude subscription I already had, and it can run on the free tier alone (less capable at long tasks).</p>
+      </div>
     </div>
-    <div class="stats">
-      <div class="stat"><b class="c-cyan">64</b><span>tools it<br>can use</span></div>
-      <div class="stat"><b class="c-violet">244</b><span>automated<br>checks passed</span></div>
-      <div class="stat"><b class="c-magenta">3</b><span>months<br>of building</span></div>
+    <div>
+      <div class="stats">
+        <div class="stat"><span class="num">64</span><span class="what">tools (Claude brain), counted 25&nbsp;Sep&nbsp;2026</span></div>
+        <div class="stat"><span class="num">523</span><span class="what">automated checks passed, 0 failed, in 34 offline test suites (25–26&nbsp;Sep&nbsp;2026)</span></div>
+        <div class="stat"><span class="num">3</span><span class="what">months of building, 17&nbsp;Jun – 25&nbsp;Sep&nbsp;2026</span></div>
+      </div>
+      <p class="built">Built with free, open-source tools (Electron, Playwright, SQLite, Whisper, three.js).</p>
     </div>
   </footer>
 

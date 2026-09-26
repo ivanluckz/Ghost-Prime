@@ -4,44 +4,62 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Ghost-Prime Pitch Card</title>
-<meta name="description" content="Printable A4 presenter card: the 30-second Ghost-Prime pitch and the seven most important judge answers, matched to showcase/FACTS.md.">
+<meta name="description" content="Printable A4 presenter card. Front: the 30-second pitch, the 2-minute slot with the hero demo drawn to scale, and what never to claim. Back: ten judge questions with short answers, the numbers and the booth rules. Matched to showcase/FACTS.md and showcase/DESIGN.md.">
+<!--
+  Presenter card for the Rwanda Innovation Showcase, 29 Sep 2026. Two A4 sheets (front and back).
+  Design: showcase/DESIGN.md (light paper palette, Archivo / Inter / JetBrains Mono, numbered-ref motif).
+  Words: showcase/script/pitch-30s.md, pitch-2min.md and qa.md. Every claim: showcase/FACTS.md.
+  [YOUR NAME] / [YOUR CLASS] / [SCHOOL] are intentional placeholders. Fill them in by hand.
+  Export (PDF + previews + layout checks), from the repo root: node showcase/script/export.mjs
+-->
 <style>
   @font-face {
-    font-family: "Inter";
+    font-family: "Archivo Kit";
+    src: url("fonts/archivo-latin-var.woff2") format("woff2");
+    font-weight: 100 900;
+    font-stretch: 62% 125%;
+    font-style: normal;
+    font-display: block;
+  }
+  @font-face {
+    font-family: "Inter Kit";
     src: url("fonts/inter-latin-var.woff2") format("woff2");
     font-weight: 100 900;
     font-style: normal;
     font-display: block;
   }
   @font-face {
-    font-family: "JetBrains Mono";
+    font-family: "JetBrains Mono Kit";
     src: url("fonts/jetbrains-mono-latin-var.woff2") format("woff2");
     font-weight: 100 800;
     font-style: normal;
     font-display: block;
   }
 
+  /* ---------- tokens: DESIGN.md light (paper) theme ---------- */
   :root {
-    --paper: #ffffff;
-    --ink: #0d1326;
-    --ink-2: #3c4763;
-    --ink-3: #66708a;
-    --rule: #d9deea;
-    --wash: #f2f5fb;
-    --accent: #007a94;        /* print-safe version of the app's cyan */
-    --accent-wash: #e6f5f8;
-    --violet: #5a3fd6;
-    --warn: #a8213a;
-    --warn-wash: #fbecef;
-    --desk: #e9ecf3;          /* screen-only background around the sheets */
-    --shadow: 0 1px 2px rgba(13, 19, 38, .08), 0 8px 28px rgba(13, 19, 38, .10);
-    --sans: "Inter", system-ui, "Segoe UI", Roboto, Arial, sans-serif;
-    --mono: "JetBrains Mono", ui-monospace, Menlo, Consolas, monospace;
+    --paper: #FFFFFF;
+    --ink: #0B1020;
+    --ink-2: #3A4563;
+    --line: #D5DCEC;
+    --cyan: #0784A3;
+    --violet: #5B3DF5;
+    --mint: #0E8F66;
+    --amber: #9A5B00;
+    --coral: #C22D4B;
+    --wait: #A9B0C2;                                     /* Ink-2 at ~45 % on paper: "it is working" bars */
+    --wm-1: #0784A3; --wm-2: #5B3DF5; --wm-3: #B5178F;   /* wordmark gradient, used once */
+    --bracket: rgba(7, 132, 163, .5);
+    --desk: #E7EBF3;                                     /* screen only, around the sheets */
+    --shadow: 0 1px 2px rgba(11, 16, 32, .08), 0 10px 30px rgba(11, 16, 32, .12);
+    --display: "Archivo Kit", "Inter Kit", "Liberation Sans", Arial, sans-serif;
+    --sans: "Inter Kit", "Liberation Sans", Arial, sans-serif;
+    --mono: "JetBrains Mono Kit", "Liberation Mono", monospace;
   }
   @media (prefers-color-scheme: dark) {
-    :root:not([data-theme="light"]) { --desk: #10141f; --shadow: 0 8px 28px rgba(0, 0, 0, .5); }
+    :root:not([data-theme="light"]) { --desk: #05070F; --shadow: 0 10px 30px rgba(0, 0, 0, .6); }
   }
-  :root[data-theme="dark"] { --desk: #10141f; --shadow: 0 8px 28px rgba(0, 0, 0, .5); }
+  :root[data-theme="dark"] { --desk: #05070F; --shadow: 0 10px 30px rgba(0, 0, 0, .6); }
 
   @page { size: A4 portrait; margin: 0; }
 
@@ -51,245 +69,554 @@
     background: var(--desk);
     color: var(--ink);
     font-family: var(--sans);
-    font-feature-settings: "cv11", "ss01";
+    font-size: 11pt;
+    line-height: 1.42;
     -webkit-print-color-adjust: exact;
     print-color-adjust: exact;
+    -webkit-font-smoothing: antialiased;
   }
+  p, ol, ul { margin: 0; padding: 0; }
+  ol, ul { list-style: none; }
+  b, strong { font-weight: 650; }
+  .nw { white-space: nowrap; }
 
+  /* ---------- the sheet ---------- */
   .sheet {
     width: 210mm;
     height: 297mm;
     margin: 24px auto;
-    padding: 13mm 15mm 11mm;
+    padding: 11mm 13mm 11mm;
     background: var(--paper);
     box-shadow: var(--shadow);
     display: flex;
     flex-direction: column;
+    gap: 3.2mm;
     position: relative;
     overflow: hidden;
   }
-  .sheet::before {             /* brand bar: the app's cyan-to-violet glow, toned for paper */
+  /* HUD corner brackets, like the app window: the only ornament */
+  .sheet::before {
     content: "";
     position: absolute;
-    inset: 0 0 auto 0;
-    height: 3.2mm;
-    background: linear-gradient(90deg, #00b8d4 0%, #3d8bf2 45%, #7c5cff 100%);
+    inset: 5mm;
+    pointer-events: none;
+    --b: var(--bracket); --arm: 7mm; --w: .45mm;
+    background:
+      linear-gradient(var(--b), var(--b)) top left / var(--arm) var(--w) no-repeat,
+      linear-gradient(var(--b), var(--b)) top left / var(--w) var(--arm) no-repeat,
+      linear-gradient(var(--b), var(--b)) top right / var(--arm) var(--w) no-repeat,
+      linear-gradient(var(--b), var(--b)) top right / var(--w) var(--arm) no-repeat,
+      linear-gradient(var(--b), var(--b)) bottom left / var(--arm) var(--w) no-repeat,
+      linear-gradient(var(--b), var(--b)) bottom left / var(--w) var(--arm) no-repeat,
+      linear-gradient(var(--b), var(--b)) bottom right / var(--arm) var(--w) no-repeat,
+      linear-gradient(var(--b), var(--b)) bottom right / var(--w) var(--arm) no-repeat;
   }
 
-  /* ---------- header ---------- */
-  .top {
-    display: flex;
-    justify-content: space-between;
-    align-items: baseline;
-    gap: 6mm;
+  /* ---------- shared type ---------- */
+  .label {                                     /* mono eyebrow: only for labels that tell you what to do */
+    display: block;
     font-family: var(--mono);
-    font-size: 8.5pt;
-    letter-spacing: .08em;
+    font-size: 7.5pt;
+    font-weight: 600;
+    line-height: 1.3;
+    letter-spacing: .14em;
     text-transform: uppercase;
-    color: var(--ink-3);
-    padding-top: 1mm;
-  }
-  .top b { color: var(--ink); font-weight: 700; letter-spacing: .14em; }
-  .who {
-    margin-top: 2.2mm;
-    font-size: 10.5pt;
+    font-variant-numeric: tabular-nums;
     color: var(--ink-2);
   }
-  .who span { font-weight: 600; color: var(--ink); }
-
-  h1 {
-    margin: 7mm 0 1.2mm;
-    font-size: 27pt;
-    line-height: 1.05;
-    font-weight: 800;
+  .label + * { margin-top: 1.3mm; }
+  h1, h2 {
+    margin: 0;
+    font-family: var(--display);
+    font-stretch: 112%;
+    font-weight: 760;
     letter-spacing: -.02em;
+    line-height: 1.02;
+    text-wrap: balance;
+    color: var(--ink);
   }
-  .sub {
-    margin: 0 0 6mm;
-    font-size: 10.5pt;
-    color: var(--ink-3);
+  h1 { font-size: 17pt; }
+  .sec-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 6mm;
+    padding-bottom: 1.6mm;
+    border-bottom: 1px solid var(--ink);
+    margin-bottom: 2mm;
+  }
+  .sec-head .label { text-align: right; }
+
+  .ph {                                        /* [YOUR NAME]-style placeholders: fill in by hand */
+    font-weight: 700;
+    color: var(--ink);
+    text-decoration: underline dashed rgba(58, 69, 99, .55);
+    text-decoration-thickness: 1px;
+    text-underline-offset: .2em;
+    white-space: nowrap;
+  }
+  .dir { color: var(--ink-2); }               /* stage directions: what you do, not what you say */
+
+  /* pause mark: two bars plus the word, in ink */
+  .cue {
+    display: inline-flex;
+    align-items: center;
+    gap: .45em;
+    margin-left: .3em;
+    font-family: var(--mono);
+    font-size: 7.5pt;
+    font-weight: 700;
+    letter-spacing: .12em;
+    text-transform: uppercase;
+    color: var(--ink);
+    vertical-align: .18em;
+    white-space: nowrap;
+  }
+  .cue::before {
+    content: "";
+    width: .62em;
+    height: .95em;
+    border-left: 2px solid currentColor;
+    border-right: 2px solid currentColor;
+  }
+  .key {                                       /* a key or a button on screen */
+    display: inline-flex;
+    align-items: center;
+    gap: .35em;
+    font-family: var(--mono);
+    font-size: .8em;
+    font-weight: 700;
+    line-height: 1.2;
+    padding: .05em .5em;
+    border: 1px solid var(--ink-2);
+    border-bottom-width: 2px;
+    border-radius: 3px;
+    white-space: nowrap;
+    vertical-align: .04em;
+  }
+  .key svg { width: .8em; height: .8em; }
+
+  /* status chips: pill, 1 px border in the status colour at ~45 %, mono uppercase */
+  .chip {
+    --c: var(--mint);
+    display: inline-block;
+    font-family: var(--mono);
+    font-size: 7pt;
+    font-weight: 700;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+    line-height: 1;
+    color: var(--c);
+    border: 1px solid color-mix(in srgb, var(--c) 45%, transparent);
+    border-radius: 99px;
+    padding: .38em .75em .3em;
+    white-space: nowrap;
+    vertical-align: .18em;
+    margin-right: .45em;
+  }
+  .chip.amber { --c: var(--amber); }
+
+  .must {                                      /* MUST: never cut this line */
+    display: inline-block;
+    font-family: var(--mono);
+    font-size: 7pt;
+    font-weight: 800;
+    letter-spacing: .12em;
+    text-transform: uppercase;
+    line-height: 1;
+    color: var(--paper);
+    background: var(--ink);
+    border-radius: 2px;
+    padding: .38em .5em .3em;
+    vertical-align: .18em;
+    margin-right: .4em;
   }
 
-  /* ---------- page 1: the pitch ---------- */
+  /* ---------- masthead ---------- */
+  .mast {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 6mm;
+  }
+  /* The wordmark (DESIGN.md: the one gradient text) is drawn as outlines with a gradient fill, the same
+     outlines as the poster: GHOST-PRIME in Archivo at wdth 125 / wght 800, letter-spacing .14em,
+     outlined at 42 px with the baseline at 35. background-clip:text printed a hairline box in some PDF
+     viewers. 1em = the wordmark size (14pt); the SVG drops by 7/42 em so its baseline sits on the line. */
+  .wordmark { display: inline-block; font-size: 14pt; line-height: 1; white-space: nowrap; }
+  .wordmark svg { display: inline-block; width: calc(457 / 42 * 1em); height: 1em; vertical-align: calc(-7 / 42 * 1em); overflow: visible; }
+  .who { font-size: 11pt; color: var(--ink-2); white-space: nowrap; }
+  .who .sep { color: var(--line); margin: 0 .3em; }
+
+  /* ---------- front, top band: the 30-second pitch, with "never claim" beside it ---------- */
+  .band {
+    display: grid;
+    grid-template-columns: 1fr 66mm;
+    column-gap: 8mm;
+    align-items: start;
+  }
+  .pitch { display: flex; flex-direction: column; gap: 1.5mm; }
   .pitch p {
-    margin: 0 0 4.2mm;
-    font-size: 19.5pt;
-    line-height: 1.38;
-    letter-spacing: -.005em;
+    font-size: 13pt;
+    line-height: 1.36;
+    letter-spacing: -.006em;
     text-wrap: pretty;
   }
   .pitch strong { font-weight: 700; }
-  .ph {                                   /* [YOUR NAME]-style placeholders */
-    font-weight: 700;
-    color: var(--violet);
-  }
-  .cue {
-    display: inline-block;
-    font-family: var(--mono);
-    font-size: .52em;
-    font-weight: 600;
-    letter-spacing: .1em;
-    text-transform: uppercase;
-    color: var(--accent);
-    background: var(--accent-wash);
-    border: 1px solid #b5e0e8;
-    border-radius: 99px;
-    padding: .18em .7em .14em;
-    vertical-align: .32em;
-    margin-left: .15em;
-  }
 
-  .short {
-    margin: 2mm 0 0;
-    padding: 3.6mm 4.5mm;
-    background: var(--wash);
-    border-radius: 2.5mm;
-    font-size: 12.5pt;
-    line-height: 1.45;
+  /* ---------- run sheets: a fixed gutter for the time or step, then the line ---------- */
+  .cues { display: flex; flex-direction: column; }
+  .cues > li, .hook {
+    display: grid;
+    grid-template-columns: var(--gut, 9mm) 1fr;
+    align-items: baseline;
+    padding: 1.4mm 0 1.5mm;
+    border-top: 1px solid var(--line);
+    text-wrap: pretty;
   }
-  .label {
-    display: block;
+  .g {
+    font-family: var(--mono);
+    font-size: 9pt;
+    font-weight: 800;
+    line-height: 1;
+    letter-spacing: .02em;
+    text-transform: uppercase;
+    font-variant-numeric: tabular-nums;
+    color: var(--ink);
+  }
+  .g.sw { align-self: start; padding-top: 2.4mm; }
+  .sw i { display: block; width: 6.4mm; height: 1.6mm; border-radius: .3mm; background: var(--cyan); }
+  .reads { color: var(--cyan); font-weight: 700; }
+
+  /* ---------- front: the 2-minute slot ---------- */
+  .hook { border-top: 0; padding-top: 0; }
+  .hero {
+    display: grid;
+    grid-template-columns: 1fr 84mm;
+    column-gap: 6mm;
+    align-items: start;
+    margin-top: 2.2mm;
+  }
+  .hero .label { color: var(--cyan); }
+  .phrase {
+    font-size: 14pt;
+    line-height: 1.3;
+    font-weight: 600;
+    letter-spacing: -.01em;
+    color: var(--cyan);
+    text-wrap: pretty;
+  }
+  /* the numbered-ref motif: a real tool trace */
+  .trace {
+    border: 1px solid var(--line);
+    border-radius: 2mm;
+    padding: 1.8mm 2.6mm 2mm;
+    font-family: var(--mono);
+    font-size: 8pt;
+    line-height: 1.5;
+    font-variant-numeric: tabular-nums;
+  }
+  .trace .label { font-size: 7pt; }
+  .trace .label + * { margin-top: .8mm; }
+  .trace .tr { display: grid; grid-template-columns: 17ch 1fr; white-space: nowrap; }
+  .trace .tool { color: var(--ink); font-weight: 600; }
+  .trace .arg { color: var(--ink-2); }
+  .trace .ref { color: var(--cyan); font-weight: 800; }
+  .trace svg { width: 1em; height: 1em; vertical-align: -.15em; margin-left: .3em; color: var(--ink-2); }
+
+  /* timeline: drawn to scale, 0:00 to 2:00 */
+  .tl-wrap { margin-top: 3.4mm; }
+  .tl { position: relative; padding-left: 18mm; }
+  .tl-key {
+    display: flex;
+    flex-wrap: wrap;
+    column-gap: 5.5mm;
+    row-gap: 1mm;
+    margin-bottom: 2mm;
+    font-size: 8.5pt;
+    line-height: 1;
+    color: var(--ink-2);
+  }
+  .tl-key span { display: inline-flex; align-items: center; gap: 1.6mm; white-space: nowrap; }
+  .tl-key i { display: inline-block; width: 6.4mm; height: 1.6mm; border-radius: .3mm; background: var(--ink); }
+  .tl-key i.wait { background: var(--wait); }
+  .tl-key i.gp { background: var(--cyan); }
+  .tl-lane { position: relative; height: 6mm; }
+  .tl-lane + .tl-lane { margin-top: 1.3mm; }
+  .tl-name {
+    position: absolute;
+    left: -18mm;
+    bottom: 0;
+    font-family: var(--mono);
+    font-size: 8pt;
+    font-weight: 700;
+    letter-spacing: .06em;
+    text-transform: uppercase;
+    color: var(--ink-2);
+    line-height: 1;
+  }
+  .seg {
+    --c: var(--ink);
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: calc(var(--a) / 120 * 100%);
+    width: calc((var(--b) - var(--a)) / 120 * 100% - .8mm);
+  }
+  .seg > span {
+    position: absolute;
+    left: 0;
+    top: 0;
     font-family: var(--mono);
     font-size: 8pt;
     font-weight: 600;
-    letter-spacing: .12em;
+    letter-spacing: .03em;
     text-transform: uppercase;
-    color: var(--ink-3);
-    margin-bottom: 1.4mm;
+    line-height: 1;
+    color: var(--ink);
+    white-space: nowrap;
+  }
+  .seg::after {                                 /* the bar itself: a line, not a fill */
+    content: "";
+    position: absolute;
+    left: 0; right: 0; bottom: 0;
+    height: 1.6mm;
+    background: var(--c);
+    border-radius: .3mm;
+  }
+  .seg .unit { text-transform: none; }
+  .seg.wait { --c: var(--wait); }
+  .seg.gp { --c: var(--cyan); }
+  .seg.gp > span { color: var(--cyan); font-weight: 700; }
+  .seg.stop::before {                           /* the Stop button: a square on the bar */
+    content: "";
+    position: absolute;
+    left: 0;
+    bottom: -.5mm;
+    width: 2.6mm;
+    height: 2.6mm;
+    border-radius: .3mm;
+    background: var(--ink);
+    z-index: 1;
+  }
+  .seg.stop > span { font-weight: 800; }
+  .tl-scale { position: relative; height: 4.4mm; margin-top: 1.3mm; border-top: 1px solid var(--line); }
+  .tl-scale span {
+    position: absolute;
+    top: 1.1mm;
+    left: calc(var(--t) / 120 * 100%);
+    transform: translateX(-50%);
+    font-family: var(--mono);
+    font-size: 8pt;
+    color: var(--ink-2);
+    font-variant-numeric: tabular-nums;
+    line-height: 1;
+  }
+  .tl-scale span::before {
+    content: "";
+    position: absolute;
+    left: 50%;
+    top: -2mm;
+    height: 1.4mm;
+    border-left: 1px solid var(--line);
+  }
+  .tl-scale span:first-child { transform: none; }
+  .tl-scale span:first-child::before { left: 0; }
+  .tl-scale span:last-child { transform: translateX(-100%); }
+  .tl-scale span:last-child::before { left: auto; right: 0; }
+  .phone-only { display: none; }
+
+  .run {
+    display: grid;
+    grid-template-columns: 1.14fr 1fr;
+    column-gap: 7mm;
+    margin-top: 3.4mm;
   }
 
-  .lower {
-    margin-top: auto;
-    display: grid;
-    grid-template-columns: 1.08fr 1fr;
-    gap: 5mm;
-  }
-  .box {
-    border: 1px solid var(--rule);
-    border-radius: 2.5mm;
-    padding: 3.6mm 4.5mm 3.2mm;
-  }
-  .box.never { border-color: #efc3cc; background: var(--warn-wash); }
-  .box.never .label { color: var(--warn); }
-  .box ul { margin: 0; padding: 0; list-style: none; }
-  .box li {
-    font-size: 10.5pt;
-    line-height: 1.38;
-    padding-left: 4.2mm;
+  /* never claim: coral marks on text, no fill */
+  .never .sec-head { border-bottom-color: var(--coral); }
+  .never h1 { color: var(--coral); }
+  .never li {
     position: relative;
-    margin-bottom: 1.1mm;
+    padding: .5mm 0 .5mm 4.4mm;
+    white-space: nowrap;
+    line-height: 1.35;
   }
-  .box.never li::before {
+  .never li + li { border-top: 1px solid var(--line); }
+  .never li:first-child { padding-top: 0; }
+  .never li::before {
     content: "\00d7";
     position: absolute;
     left: 0;
-    top: -.05em;
+    top: .15mm;
     font-weight: 800;
-    color: var(--warn);
+    font-size: 12pt;
+    line-height: 1.2;
+    color: var(--coral);
   }
-  .box li em { font-style: normal; color: var(--ink-3); }
+  .never li span { color: var(--ink-2); }
+
+  .foot {
+    margin-top: auto;
+    padding-top: 2mm;
+    border-top: 1px solid var(--line);
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 4mm;
+  }
+  .foot .label { font-weight: 500; letter-spacing: .1em; font-size: 7pt; }
+
+  /* ---------- back: answers ---------- */
+  .howto { font-size: 9.5pt; color: var(--ink-2); text-align: right; }
+  .howto b { color: var(--ink); }
+  .qa {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    column-gap: 7mm;
+    align-items: start;
+  }
+  .q { padding: 1.6mm 0 1.8mm; }
+  .q:first-child { padding-top: 0; }
+  .q + .q { border-top: 1px solid var(--line); }
+  .q h2 {
+    font-size: 12pt;
+    font-weight: 720;
+    line-height: 1.14;
+    letter-spacing: -.012em;
+    margin-bottom: .9mm;
+  }
+  .q h2 .flag, .q h2 .chip { margin-left: .4em; }
+  .q h2 .chip { margin-right: 0; vertical-align: .22em; }
+  .q p { text-wrap: pretty; }
+  .q .more {
+    margin-top: .7mm;
+    font-size: 10pt;
+    line-height: 1.38;
+    color: var(--ink-2);
+  }
+  .q .more b { font-weight: 650; color: var(--ink-2); }
+  .q .credit {
+    margin-top: .8mm;
+    font-family: var(--mono);
+    font-size: 8pt;
+    letter-spacing: .01em;
+    line-height: 1.4;
+    color: var(--ink-2);
+  }
+  .flag {
+    font-family: var(--mono);
+    font-size: 7pt;
+    font-weight: 700;
+    letter-spacing: .1em;
+    text-transform: uppercase;
+    color: var(--ink-2);
+    white-space: nowrap;
+    vertical-align: .18em;
+  }
 
   .nums {
     display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 2.4mm 3mm;
+    grid-template-columns: 26fr 28fr 34fr 40fr 40fr;
+    column-gap: 4mm;
   }
-  .num b {
+  .nums div { border-top: 1px solid var(--line); padding-top: 1.4mm; }
+  .nums b {
     display: block;
-    font-size: 17pt;
-    font-weight: 800;
-    line-height: 1.05;
-    letter-spacing: -.02em;
-    color: var(--accent);
-    font-variant-numeric: tabular-nums;
-  }
-  .num span { font-size: 9pt; line-height: 1.3; color: var(--ink-2); }
-
-  .setup {
-    margin-top: 4mm;
-    font-size: 10pt;
-    color: var(--ink-2);
-    line-height: 1.4;
-  }
-  .setup b { color: var(--ink); }
-
-  .foot {
-    margin-top: 4mm;
-    padding-top: 2.6mm;
-    border-top: 1px solid var(--rule);
-    display: flex;
-    justify-content: space-between;
-    gap: 4mm;
-    font-family: var(--mono);
-    font-size: 7.5pt;
-    letter-spacing: .04em;
-    color: var(--ink-3);
-  }
-
-  /* ---------- page 2: answers ---------- */
-  .back h1 { font-size: 23pt; margin: 5.5mm 0 1mm; }
-  .back .sub { margin-bottom: 3.6mm; }
-  .qa { display: flex; flex-direction: column; gap: 2.2mm; }
-  .q {
-    display: grid;
-    grid-template-columns: 9mm 1fr;
-    column-gap: 2mm;
-    padding-bottom: 2.2mm;
-    border-bottom: 1px solid var(--rule);
-  }
-  .q:last-child { border-bottom: 0; padding-bottom: 0; }
-  .q .n {
-    font-family: var(--mono);
-    font-size: 15pt;
-    font-weight: 700;
-    color: var(--accent);
-    line-height: 1.15;
-  }
-  .q h2 {
-    margin: 0 0 1mm;
-    font-size: 13.8pt;
-    line-height: 1.2;
-    font-weight: 750;
+    font-family: var(--display);
+    font-stretch: 125%;
+    font-weight: 820;
+    font-size: 16pt;
+    line-height: 1;
     letter-spacing: -.01em;
-  }
-  .q p {
-    margin: 0;
-    font-size: 11.6pt;
-    line-height: 1.37;
+    font-variant-numeric: tabular-nums;
     color: var(--ink);
-    text-wrap: pretty;
+    margin-bottom: 1.2mm;
   }
-  .q p strong { font-weight: 680; }
-  .q .note {
-    margin-top: 1mm;
-    font-size: 9.5pt;
-    color: var(--ink-3);
+  .nums span {
+    display: block;
+    font-family: var(--mono);
+    font-size: 8pt;
+    line-height: 1.38;
+    color: var(--ink-2);
   }
-  .rule-strip {
-    margin-top: auto;
-    flex-shrink: 0;
-    padding: 3.4mm 4.5mm;
-    border-radius: 2.5mm;
-    background: var(--accent-wash);
-    font-size: 11pt;
-    line-height: 1.4;
-  }
-  .rule-strip b { color: var(--accent); }
 
-  /* ---------- screen only: fit narrow screens ---------- */
+  .table-rules {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    column-gap: 5mm;
+  }
+  .table-rules li {
+    padding: .9mm 0 1mm;
+    border-top: 1px solid var(--line);
+    line-height: 1.38;
+  }
+  .table-rules li b { font-weight: 650; }
+
+  .foot.dontknow { border-top-color: var(--ink); }
+  .dontknow p { flex: 1; }
+  .dontknow p .label { display: inline; margin-right: 2.4mm; }
+
+  /* ---------- screen only: phones and narrow windows ---------- */
   @media screen and (max-width: 840px) {
+    body { background: var(--paper); font-size: 16px; }
     .sheet {
       width: auto;
       height: auto;
-      margin: 16px;
-      padding: 28px 16px 16px;
+      margin: 0;
+      padding: 28px 16px 32px;
+      box-shadow: none;
+      gap: 26px;
+      overflow: visible;
     }
-    .pitch p { font-size: 20px; }
-    h1 { font-size: 28px; }
-    .lower { grid-template-columns: 1fr; }
-    .top, .foot { flex-direction: column; gap: 4px; }
-    .q p { font-size: 16px; }
-    .q h2 { font-size: 18px; }
+    .sheet + .sheet { border-top: 6px solid var(--desk); }
+    .sheet::before { inset: 8px; --arm: 18px; --w: 2px; }
+    .label { font-size: 11px; }
+    h1 { font-size: 25px; }
+    .mast, .sec-head, .foot { flex-direction: column; align-items: flex-start; gap: 6px; }
+    .sec-head .label, .howto { text-align: left; }
+    .howto { font-size: 15px; }
+    .wordmark { font-size: 21px; }
+    .who { font-size: 16px; white-space: normal; }
+    .pitch { gap: 12px; }
+    .pitch p { font-size: 20px; line-height: 1.42; }
+    .cues > li, .hook { --gut: 46px; padding: 8px 0 9px; }
+    .hook { padding-top: 0; }
+    .g { font-size: 13px; }
+    .g.sw { padding-top: 10px; }
+    .sw i { width: 30px; height: 6px; }
+    .hero { grid-template-columns: 1fr; row-gap: 14px; }
+    .phrase { font-size: 20px; }
+    .trace { font-size: 12px; overflow-x: auto; }
+    .trace .label { font-size: 10px; }
+    .tl-wrap {
+      overflow-x: auto;
+      margin-left: -16px; margin-right: -16px; padding: 4px 16px 2px;
+      -webkit-mask-image: linear-gradient(90deg, #000 82%, transparent);
+      mask-image: linear-gradient(90deg, #000 82%, transparent);
+    }
+    .tl { min-width: 680px; }
+    .tl-key { font-size: 12px; }
+    .seg > span, .tl-name, .tl-scale span { font-size: 11px; }
+    .tl-lane { height: 24px; }
+    .phone-only { display: block; margin-top: 6px; font-size: 13px; color: var(--ink-2); }
+    .run { grid-template-columns: 1fr; row-gap: 18px; }
+    .band { grid-template-columns: 1fr; row-gap: 26px; }
+    .table-rules { grid-template-columns: 1fr; }
+    .never li { white-space: normal; padding-left: 22px; }
+    .never li::before { font-size: 18px; top: 2px; }
+    .table-rules li:not(:first-child) { border-top: 1px solid var(--line); }
+    .qa { grid-template-columns: 1fr; }
+    .qa-col + .qa-col { border-top: 1px solid var(--line); padding-top: 8px; }
+    .q h2 { font-size: 19px; }
+    .q .more { font-size: 15px; }
+    .q .credit { font-size: 12px; }
+    .chip, .must, .flag, .cue { font-size: 10px; }
+    .nums { grid-template-columns: 1fr 1fr; row-gap: 14px; }
+    .nums div:last-child { grid-column: span 2; }
+    .nums b { font-size: 26px; }
+    .nums span { font-size: 12px; }
+    .dontknow { flex-direction: column; gap: 4px; }
   }
 
   @media print {
@@ -300,140 +627,226 @@
 </style>
 </head>
 <body>
+<!-- ======================= FRONT: SAY IT ======================= -->
+<section class="sheet" aria-label="Front: the 30-second pitch, the 2-minute slot and what never to claim">
+  <header class="mast">
+    <span class="wordmark"><svg viewBox="0 0 457 42" role="img" aria-label="Ghost-Prime"><title>GHOST-PRIME</title><defs><linearGradient id="wmGrad" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="457" y2="0"><stop offset="0" style="stop-color: var(--wm-1)"/><stop offset=".58" style="stop-color: var(--wm-2)"/><stop offset="1" style="stop-color: var(--wm-3)"/></linearGradient></defs><path fill="url(#wmGrad)" d="M19.85 35.5Q11.09 35.5 6.7 31.81Q2.31 28.11 2.31 20.57Q2.31 15.63 4.59 12.31Q6.88 8.98 11.2 7.3Q15.53 5.62 21.59 5.62Q25.34 5.62 28.55 6.29Q31.76 6.97 34.16 8.31Q36.56 9.66 37.89 11.7Q39.22 13.74 39.22 16.47H30.91Q30.91 15.3 30.18 14.43Q29.46 13.56 28.2 13.02Q26.94 12.48 25.34 12.22Q23.73 11.96 21.95 11.96Q19.43 11.96 17.41 12.46Q15.4 12.96 13.98 13.98Q12.56 15.01 11.82 16.52Q11.08 18.04 11.08 20.05V21.06Q11.08 23.9 12.27 25.69Q13.45 27.48 15.73 28.32Q18 29.17 21.25 29.17Q24.21 29.17 26.38 28.63Q28.54 28.1 29.71 27.07Q30.88 26.03 30.88 24.61V24.37H20.78V18.87H39.26V35H34.27L33.46 31.54Q31.84 32.89 29.75 33.78Q27.67 34.67 25.19 35.09Q22.71 35.5 19.85 35.5ZM51.93 35V6.12H60.49V16.87H77.82V6.12H86.37V35H77.82V23.75H60.49V35ZM117.05 35.5Q111.24 35.5 106.98 33.73Q102.72 31.95 100.42 28.61Q98.11 25.27 98.11 20.57Q98.11 15.83 100.42 12.49Q102.72 9.15 106.98 7.38Q111.24 5.62 117.05 5.62Q122.93 5.62 127.17 7.38Q131.41 9.15 133.71 12.49Q136.02 15.83 136.02 20.57Q136.02 25.27 133.71 28.61Q131.41 31.95 127.17 33.73Q122.93 35.5 117.05 35.5ZM117.07 29.17Q119.33 29.17 121.19 28.61Q123.06 28.06 124.41 27Q125.77 25.95 126.5 24.43Q127.23 22.91 127.23 21.01V20.03Q127.23 18.14 126.5 16.63Q125.77 15.13 124.41 14.09Q123.06 13.05 121.19 12.5Q119.33 11.96 117.07 11.96Q114.8 11.96 112.94 12.5Q111.08 13.05 109.72 14.09Q108.37 15.13 107.64 16.63Q106.92 18.14 106.92 20.03V21.01Q106.92 22.91 107.64 24.43Q108.37 25.95 109.72 27Q111.08 28.06 112.94 28.61Q114.8 29.17 117.07 29.17ZM163.19 35.5Q159.67 35.5 156.61 35.08Q153.54 34.66 151.24 33.61Q148.94 32.56 147.64 30.67Q146.34 28.79 146.34 25.89Q146.34 25.81 146.34 25.67Q146.34 25.54 146.38 25.41H154.76Q154.72 25.57 154.71 25.76Q154.7 25.94 154.7 26.15Q154.7 27.43 155.67 28.17Q156.65 28.9 158.43 29.2Q160.21 29.5 162.57 29.5Q163.56 29.5 164.59 29.44Q165.62 29.38 166.59 29.23Q167.55 29.08 168.31 28.79Q169.08 28.5 169.54 28.05Q169.99 27.6 169.99 26.96Q169.99 26.05 169.03 25.52Q168.06 24.99 166.42 24.68Q164.77 24.36 162.73 24.11Q160.69 23.86 158.5 23.52Q156.31 23.17 154.26 22.56Q152.22 21.95 150.58 20.94Q148.93 19.93 147.97 18.34Q147 16.75 147 14.46Q147 12.17 148.16 10.5Q149.32 8.83 151.42 7.75Q153.51 6.67 156.37 6.14Q159.22 5.62 162.58 5.62Q166.01 5.62 168.8 6.15Q171.6 6.68 173.6 7.75Q175.6 8.82 176.68 10.44Q177.76 12.07 177.76 14.25V14.84H169.47V14.49Q169.47 13.62 168.71 12.94Q167.95 12.26 166.5 11.85Q165.06 11.44 162.99 11.44Q160.51 11.44 158.92 11.75Q157.32 12.06 156.57 12.6Q155.81 13.13 155.81 13.77Q155.81 14.62 156.77 15.12Q157.74 15.62 159.38 15.9Q161.03 16.19 163.07 16.44Q165.12 16.69 167.31 17.03Q169.5 17.38 171.54 17.95Q173.58 18.53 175.23 19.53Q176.87 20.53 177.84 22.05Q178.8 23.58 178.8 25.81Q178.8 29.28 176.79 31.42Q174.78 33.56 171.25 34.53Q167.73 35.5 163.19 35.5ZM200.06 35V13.01H187.55V6.12H221.12V13.01H208.61V35ZM230.12 26.68V20.26H243.39V26.68ZM254.92 35V6.12H277.21Q280.04 6.12 282.18 7.38Q284.31 8.63 285.5 10.84Q286.69 13.05 286.69 15.94Q286.69 18.85 285.48 21.09Q284.27 23.34 282.12 24.58Q279.96 25.82 277.13 25.82H263.47V35ZM263.47 19.48H274.75Q276.65 19.48 277.63 18.57Q278.61 17.66 278.61 15.98Q278.61 14.84 278.16 14.06Q277.72 13.28 276.86 12.87Q276.01 12.46 274.75 12.46H263.47ZM296.96 35V6.12H321Q324.15 6.12 326.22 7.42Q328.29 8.72 329.32 10.83Q330.36 12.95 330.36 15.45Q330.36 18.19 329.06 20.44Q327.76 22.69 325.14 23.99L331.05 35H321.4L316.61 25.39H305.51V35ZM305.51 19.08H318.2Q319.75 19.08 320.67 18.15Q321.59 17.22 321.59 15.69Q321.59 14.65 321.17 13.93Q320.76 13.21 320 12.83Q319.25 12.46 318.2 12.46H305.51ZM341.99 35V6.12H350.54V35ZM363.53 35V6.12H376.91L381.86 18.64Q382.18 19.43 382.58 20.6Q382.99 21.78 383.4 23.01Q383.81 24.24 384.11 25.2H384.41Q384.69 24.32 385.1 23.15Q385.5 21.98 385.92 20.78Q386.35 19.57 386.68 18.68L391.63 6.12H404.64V35H396.09V20.1Q396.09 19.2 396.11 18.11Q396.13 17.03 396.18 15.97Q396.22 14.92 396.24 14.15H395.9Q395.64 14.96 395.27 16.06Q394.9 17.16 394.53 18.24Q394.16 19.31 393.85 20.1L387.8 35H379.96L373.89 20.1Q373.47 18.99 373.06 17.85Q372.66 16.72 372.35 15.74Q372.05 14.77 371.84 14.15H371.5Q371.54 14.75 371.56 15.72Q371.58 16.7 371.6 17.83Q371.63 18.97 371.63 20.1V35ZM417.63 35V6.12H447.73V12.46H426.2V17.31H445.05V23.44H426.2V28.66H448.07V35Z"/></svg></span>
+    <p class="who" aria-label="Presenter"><span class="ph">[YOUR NAME]</span><span class="sep">/</span><span class="ph">[YOUR CLASS]</span><span class="sep">/</span><span class="ph">[SCHOOL]</span></p>
+  </header>
 
-<!-- ======================= FRONT: THE 30-SECOND PITCH ======================= -->
-<section class="sheet" aria-label="Front: the 30-second pitch">
-  <div class="top">
-    <span><b>Ghost-Prime</b> &middot; pitch card &middot; front</span>
-    <span>Rwanda Innovation Showcase &middot; 29 Sep 2026</span>
-  </div>
-  <div class="who">Presenter: <span class="ph">[YOUR NAME]</span> &middot; <span class="ph">[YOUR CLASS]</span> &middot; <span class="ph">[SCHOOL]</span></div>
-
-  <h1>The 30-second pitch</h1>
-  <p class="sub">About 80 words. Smile, slow down, and point at the screen.</p>
-
-  <div class="pitch">
-    <p>Hi! I&rsquo;m <span class="ph">[YOUR NAME]</span>. <span class="cue">pause</span></p>
-    <p>This is <strong>Ghost-Prime</strong>, a voice assistant I built on a <strong>school Chromebook</strong>.</p>
-    <p>You just talk to it, and <strong>it does the job for you</strong>. It opens websites, clicks and types, tidies files, sets reminders, and reads the answers out loud. <span class="cue">pause</span></p>
-    <p>It&rsquo;s for anyone who finds computers hard: slow typers, people who can&rsquo;t read small screens, and busy teachers. There are <strong>no pay-per-use bills</strong>.</p>
-    <p>Want to see it? Tell me a topic, and <strong>I&rsquo;ll ask it to look it up on Wikipedia</strong>.</p>
-  </div>
-
-  <div class="short">
-    <span class="label">10-second version, for a crowd</span>
-    &ldquo;This is Ghost-Prime. You talk, and it uses the computer for you. I built it on a school Chromebook. Want to see?&rdquo;
-  </div>
-
-  <div class="lower">
-    <div class="box never">
-      <span class="label">Never claim</span>
+  <div class="band">
+    <section aria-label="The 30-second pitch">
+      <div class="sec-head">
+        <h1>The 30-second pitch</h1>
+        <span class="label">For visitors</span>
+      </div>
+      <div class="pitch">
+        <p>Hi! I&rsquo;m <span class="ph">[YOUR NAME]</span>. <span class="cue">pause</span></p>
+        <p>This is <strong>Ghost-Prime</strong>. You talk, and it <strong>opens websites, clicks, types and reads the answer aloud</strong>. <span class="cue">pause</span></p>
+        <p>I built it on a school Chromebook, with help from an AI coding assistant. It has <span class="nw">no pay-per-use bills.</span></p>
+        <p>It&rsquo;s for students who type slowly, people who find small text hard to read, people new to computers, and busy teachers. <strong>I haven&rsquo;t tested it with these groups yet.</strong> That&rsquo;s my next step, and my ask.</p>
+        <p>Give me a topic, and watch.</p>
+      </div>
+    </section>
+    <section class="never" aria-label="Never claim">
+      <div class="sec-head">
+        <h1>Never claim</h1>
+      </div>
       <ul>
-        <li>It controls a real phone. <em>Tested only on a simulated phone.</em></li>
-        <li>&ldquo;Just say hey Ghost.&rdquo; <em>Wake word not installed.</em></li>
-        <li>&ldquo;It always asks first.&rdquo; <em>Nothing asks yet.</em></li>
-        <li>&ldquo;Completely free&rdquo; or &ldquo;works offline.&rdquo;</li>
-        <li>It speaks Kinyarwanda, or controls any app.</li>
-        <li>&ldquo;It&rsquo;s the first&rdquo; or &ldquo;the only one.&rdquo;</li>
+        <li>&ldquo;It controls my phone&rdquo;</li>
+        <li>&ldquo;Just say &lsquo;Hey Ghost&rsquo;&rdquo;</li>
+        <li>&ldquo;It always asks first&rdquo;</li>
+        <li>&ldquo;It&rsquo;s free and works offline&rdquo;</li>
+        <li>&ldquo;Ghost-Prime is open source&rdquo;</li>
+        <li>&ldquo;It&rsquo;s made for children&rdquo;</li>
+        <li>&ldquo;It helps teachers&rdquo; <span>(as proven)</span></li>
+        <li>&ldquo;Voice is fully tested&rdquo;</li>
+        <li>&ldquo;It runs on two AI brains&rdquo;</li>
+        <li>&ldquo;The first&rdquo; or &ldquo;the only one&rdquo;</li>
+        <li>&ldquo;It speaks Kinyarwanda&rdquo;</li>
+        <li>&ldquo;It controls any app&rdquo;</li>
       </ul>
+    </section>
+  </div>
+
+  <section aria-label="The 2-minute slot">
+    <div class="sec-head">
+      <h1>The 2-minute slot</h1>
+      <span class="label">For judges &middot; start a stopwatch on your first word</span>
     </div>
-    <div class="box">
-      <span class="label">Numbers you can quote</span>
-      <div class="nums">
-        <div class="num"><b>3 months</b><span>17 June to 25 Sep 2026</span></div>
-        <div class="num"><b>58</b><span>saved versions (commits)</span></div>
-        <div class="num"><b>64</b><span>tools the Claude brain can use</span></div>
-        <div class="num"><b>244 / 0</b><span>checks passed / failed, 25 Sep</span></div>
+
+    <div class="hook">
+      <span class="g">0:00</span>
+      <p>Name, class, school. &ldquo;What if you could use a computer just by talking?&rdquo; <span class="dir">(Point at the chat box.)</span> &ldquo;I typed this before we started, so you don&rsquo;t wait. I could also say it.&rdquo; <span class="key">Enter</span></p>
+    </div>
+
+    <div class="hero">
+      <div>
+        <span class="label">Hero phrase &middot; type it in before your slot</span>
+        <p class="phrase">&ldquo;Go to the Wikipedia website, search for photosynthesis, and explain it to me in three simple sentences.&rdquo;</p>
+      </div>
+      <div class="trace" role="img" aria-label="Example step cards: browser_navigate wikipedia.org; browser_get_page [6] Search Wikipedia (search); browser_fill [6] photosynthesis, Enter; browser_get_text Photosynthesis - Wikipedia">
+        <span class="label">Step cards to point at (example)</span>
+        <div class="tr"><span class="tool">browser_navigate</span><span class="arg">wikipedia.org</span></div>
+        <div class="tr"><span class="tool">browser_get_page</span><span class="arg"><span class="ref">[6]</span> Search Wikipedia (search)</span></div>
+        <div class="tr"><span class="tool">browser_fill</span><span class="arg"><span class="ref">[6]</span> "photosynthesis"<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 5v7a3 3 0 0 1-3 3H5"/><path d="M9 11l-4 4 4 4"/></svg></span></div>
+        <div class="tr"><span class="tool">browser_get_text</span><span class="arg">Photosynthesis - Wikipedia</span></div>
       </div>
     </div>
-  </div>
 
-  <p class="setup"><b>At the table:</b> mode <b>AUTO</b> (never FULL AUTO) &middot; Site access <b>strict</b>: only <b>wikipedia.org</b> and <b>example.com</b> &middot; <b>you</b> speak visitors&rsquo; requests into the mic (voice goes to Google, and the free tier has a daily limit) &middot; children <b>watch</b>; the AI services are for over-18s (qa.md, question 16).</p>
+    <div class="tl-wrap">
+      <div class="tl" role="img" aria-label="The slot drawn to scale, 0:00 to 2:00. Best case: hook and send to 0:20, talk while it works until 0:50, it reads aloud for 30 to 40 seconds, then the MUST lines and the cost line, and the ask by about 1:55. Worst case: hook and send, talk over the wait with the filler line at 1:10, it reads from 1:20 to about 1:55, then the ask by about 2:00. Too slow: nothing read by 1:25, so press Stop at 1:25, then the cost line and the ask by about 1:40.">
+        <div class="tl-key" aria-hidden="true">
+          <span><i></i>You talk</span>
+          <span><i class="wait"></i>It works, you talk over it</span>
+          <span><i class="gp"></i>It reads aloud, you stay quiet</span>
+        </div>
+        <div class="tl-lane">
+          <span class="tl-name">Best</span>
+          <span class="seg" style="--a:0;--b:20"><span>Hook + send</span></span>
+          <span class="seg wait" style="--a:20;--b:50"><span>Talk</span></span>
+          <span class="seg gp" style="--a:50;--b:85"><span>It reads &middot; 30&ndash;40<span class="unit"> s</span></span></span>
+          <span class="seg" style="--a:85;--b:108"><span>MUST lines, cost</span></span>
+          <span class="seg" style="--a:108;--b:114"><span>Ask</span></span>
+        </div>
+        <div class="tl-lane">
+          <span class="tl-name">Worst</span>
+          <span class="seg" style="--a:0;--b:20"><span>Hook + send</span></span>
+          <span class="seg wait" style="--a:20;--b:80"><span>Talk over the wait &middot; 1:10 filler</span></span>
+          <span class="seg gp" style="--a:80;--b:114"><span>It reads</span></span>
+          <span class="seg" style="--a:114;--b:120"><span>Ask</span></span>
+        </div>
+        <div class="tl-lane">
+          <span class="tl-name">Too slow</span>
+          <span class="seg" style="--a:0;--b:20"><span>Hook + send</span></span>
+          <span class="seg wait" style="--a:20;--b:85"><span>Talk over the wait &middot; 1:10 filler</span></span>
+          <span class="seg stop" style="--a:85;--b:101"><span>1:25 Stop &middot; cost &middot; ask</span></span>
+        </div>
+        <div class="tl-scale" aria-hidden="true">
+          <span style="--t:0">0:00</span><span style="--t:20">0:20</span><span style="--t:40">0:40</span><span style="--t:60">1:00</span><span style="--t:80">1:20</span><span style="--t:100">1:40</span><span style="--t:120">2:00</span>
+        </div>
+      </div>
+    </div>
+    <p class="phone-only">Swipe the timeline sideways to see the whole 2 minutes.</p>
 
-  <div class="foot">
-    <span>Every line matches showcase/FACTS.md, checked 25 Sep 2026</span>
-    <span>Answers overleaf &middot; all 22 in qa.md</span>
-  </div>
+    <div class="run">
+      <div>
+        <span class="label">Talk over the wait, in this order</span>
+        <ol class="cues">
+          <li><span class="g">1</span><p><b>Problem.</b> A chatbot only tells you the steps.</p></li>
+          <li><span class="g">2</span><p><b>Idea.</b> &ldquo;Ghost-Prime does the whole job.&rdquo; <span class="dir">(Point at the browser, then the step cards.)</span></p></li>
+          <li><span class="g">3</span><p><span class="must">Must</span><b>Who it&rsquo;s for</b>, as in the 30-second pitch.</p></li>
+          <li><span class="g">4</span><p><span class="must">Must</span>&ldquo;I designed it, decided what it should do, tested it, and used an AI coding assistant <span class="nw">(Claude Code)</span> to write much of the code.&rdquo;</p></li>
+          <li><span class="g">5</span><p><b>Cost.</b> &ldquo;No pay-per-use bills,&rdquo; then the free-tier sentence. Short: &ldquo;No pay-per-use bills, just a Claude subscription I already had.&rdquo;</p></li>
+        </ol>
+      </div>
+      <div>
+        <span class="label">When to change course</span>
+        <ol class="cues">
+          <li><span class="g sw" aria-label="It reads"><i></i></span><p><span class="reads">It reads.</span> Stop talking, even mid-sentence. After it: MUST lines left, the short cost line (until 1:45), the ask.</p></li>
+          <li><span class="g">1:10</span><p>Not reading yet? &ldquo;It reads the article first, so it can take up to a minute.&rdquo;</p></li>
+          <li><span class="g">1:25</span><p>Still not reading? &ldquo;It&rsquo;s taking longer than usual here. I&rsquo;ll show you the answer at the booth.&rdquo; <span class="key"><svg viewBox="0 0 10 10" aria-hidden="true"><rect x="1" y="1" width="8" height="8" rx="1.2" fill="currentColor"/></svg>Stop</span></p></li>
+          <li><span class="g">Ask</span><p><b>&ldquo;My ask: help me test it with real students and teachers. Thank you!&rdquo;</b></p></li>
+        </ol>
+      </div>
+    </div>
+  </section>
+
+
+  <footer class="foot">
+    <span class="label">Rwanda Innovation Showcase &middot; 29 Sep 2026</span>
+    <span class="label">Answers on the back</span>
+  </footer>
 </section>
 
-<!-- ======================= BACK: THE SIX KEY ANSWERS ======================= -->
-<section class="sheet back" aria-label="Back: the seven most important answers">
-  <div class="top">
-    <span><b>Ghost-Prime</b> &middot; pitch card &middot; back</span>
-    <span>Say 2&ndash;3 sentences, then stop</span>
-  </div>
-
-  <h1>Top 7 questions</h1>
-  <p class="sub">Short, true answers. Full versions and follow-ups are in qa.md.</p>
-
-  <div class="qa">
-    <div class="q">
-      <div class="n">1</div>
-      <div>
-        <h2>Chromebooks already have dictation and read-aloud. What&rsquo;s new?</h2>
-        <p>Those tools <strong>type your words or read text aloud</strong>, but you still do every step. With Ghost-Prime, <strong>one sentence becomes a whole job</strong>: it opens the site, searches, reads and explains, or moves files and can undo that. It runs on a <strong>school Chromebook</strong> with no pay-per-use bill, <strong>shows every step</strong>, and works <strong>alongside</strong> those tools, not instead of them.</p>
-        <p class="note">Tech judges often ask this first. Never say &ldquo;the first&rdquo; or &ldquo;the only one&rdquo;.</p>
+<!-- ======================= BACK: ANSWER IT ======================= -->
+<section class="sheet back" aria-label="Back: ten judge questions, the numbers and the booth rules">
+  <section aria-label="Judge questions">
+    <div class="sec-head">
+      <h1>The questions judges ask</h1>
+      <p class="howto"><b>Say the dark text, then stop.</b> Grey is for follow-ups.</p>
+    </div>
+    <div class="qa">
+      <div class="qa-col">
+        <div class="q">
+          <h2>Chromebooks already have dictation, Select-to-Speak, ChromeVox and Google Assistant. Why this?</h2>
+          <p>Those are good tools, and I&rsquo;m not trying to replace them. Each one helps with one step at a time. Here, one sentence becomes a whole job: it opens the site, searches, reads, explains, and shows every step.</p>
+        </div>
+        <div class="q">
+          <h2>How much does it cost to run?</h2>
+          <p>No pay-per-use bills. It runs on Google&rsquo;s free AI plus a Claude subscription I already had, and it can run on the free tier alone (less capable at long tasks).</p>
+          <p class="more"><b>If asked:</b> With extra usage turned off, Claude pauses at its limit and never charges extra.</p>
+        </div>
+        <div class="q">
+          <h2>Why does every answer say CLAUDE?</h2>
+          <p>Claude does the thinking in today&rsquo;s demo, so every answer shows a CLAUDE tag. Normally a router can also send quick questions to Google&rsquo;s free Gemini.</p>
+        </div>
+        <div class="q">
+          <h2>Is it safe?</h2>
+          <p>PLAN only looks. In AUTO, on the Claude brain, an automatic safety check decides each action. FULL AUTO runs everything. There&rsquo;s no &ldquo;Are you sure?&rdquo; pop-up yet.</p>
+          <p class="more"><b>If asked:</b> The showcase launch starts in AUTO; plain Ghost-Prime starts in FULL AUTO. Single-file changes made with its file tools can be undone.</p>
+        </div>
+        <div class="q">
+          <h2>Have you tested it with the people it&rsquo;s for? <span class="flag">Update if someone tried it</span></h2>
+          <p>No, not yet. So far I&rsquo;m the only one who has tested it. I haven&rsquo;t tested it with these groups yet. That&rsquo;s my next step, and my ask.</p>
+        </div>
+      </div>
+      <div class="qa-col">
+        <div class="q">
+          <h2>Is it private?</h2>
+          <p>Partly. Chats, memories and files are saved on the Chromebook. Requests, my top memories and the pages it reads go to Anthropic or Google. So don&rsquo;t tell it anything private.</p>
+          <p class="more"><b>If asked:</b> Voice goes to Google unless offline voice is on. The free tier may use it to improve Google&rsquo;s products.</p>
+        </div>
+        <div class="q">
+          <h2>What did YOU build? <span class="flag">Edit to what you did</span></h2>
+          <p>I designed it, decided what it should do, tested it, and used an AI coding assistant <span class="nw">(Claude Code)</span> to write much of the code.</p>
+          <p class="more"><b>If asked:</b> Google and Anthropic make the AI brains. The app and the tools around them are Ghost-Prime.</p>
+          <p class="credit">Battery, weather and volume tools: MARK LIII JARVIS by FatihMakes <span class="nw">(CC BY-NC 4.0)</span></p>
+        </div>
+        <div class="q">
+          <h2>Is voice tested? What if the free AI runs out? <span class="chip amber">Works &middot; by hand</span></h2>
+          <p>Voice works in my own testing; the real mic and speaker are only checked by hand. If Google&rsquo;s free limit runs out, voice is built to switch to offline, but I haven&rsquo;t tried that for real.</p>
+          <p class="more"><b>If asked:</b> Today Claude does the thinking and Google does the voice. I can restart in offline voice in about 15&nbsp;s.</p>
+        </div>
+        <div class="q">
+          <h2>Can it work in Kinyarwanda?</h2>
+          <p>Not yet. The app and the offline speech model are English only. Typing in Kinyarwanda might partly work; I haven&rsquo;t tested that.</p>
+        </div>
+        <div class="q">
+          <h2>Does the phone part work? <span class="chip amber">In progress</span></h2>
+          <p>Built, not finished. The Android app passes its tests on a simulated phone. I haven&rsquo;t run it on my real Galaxy A05 yet. It&rsquo;s second on my list, after testing with real students and teachers.</p>
+        </div>
       </div>
     </div>
+  </section>
 
-    <div class="q">
-      <div class="n">2</div>
-      <div>
-        <h2>How much does it cost to run?</h2>
-        <p><strong>No pay-per-use bills and no servers.</strong> Voice and quick answers use Google&rsquo;s <strong>Gemini free tier</strong>. Harder jobs use <strong>Claude</strong>, on a subscription I already had. If its allowance runs out, it <strong>pauses and never charges extra</strong>. It can also run on the free tier alone (weaker at long jobs; still testing).</p>
-      </div>
+  <section aria-label="Numbers you can quote">
+    <span class="label">Numbers you can quote</span>
+    <div class="nums">
+      <div><b>~3</b><span>months, 17&nbsp;Jun to 25&nbsp;Sep</span></div>
+      <div><b>89+</b><span>commits, to 26&nbsp;Sep</span></div>
+      <div><b>64</b><span>tools the Claude brain can use, 25&nbsp;Sep</span></div>
+      <div><b>500+</b><span>automated checks passed, 0 failed, 25&ndash;26&nbsp;Sep</span></div>
+      <div><b>~25,000</b><span>lines of code, 25&ndash;26&nbsp;Sep</span></div>
     </div>
+  </section>
 
-    <div class="q">
-      <div class="n">3</div>
-      <div>
-        <h2>Is it safe? What if it does something wrong?</h2>
-        <p>It can make mistakes, like any AI. So <strong>every step shows live</strong>, file changes have <strong>undo</strong> (&ldquo;undo that&rdquo;), and I can <strong>limit which websites</strong> it opens. <strong>PLAN</strong> mode only looks and never changes anything, and I don&rsquo;t use FULL AUTO in public. <strong>Not yet:</strong> an &ldquo;Are you sure?&rdquo; pop-up before big actions. That&rsquo;s next.</p>
-      </div>
-    </div>
+  <section aria-label="At the table">
+    <span class="label">At the table</span>
+    <ul class="table-rules">
+      <li>Start with <b>bin/ghost-showcase</b> (AUTO). Never FULL AUTO.</li>
+      <li>Sites <b>strict</b>: only wikipedia.org and example.com.</li>
+      <li><b>You</b> give visitors&rsquo; requests. Voice goes to Google.</li>
+      <li>Keep visitor demos short: they use the Claude allowance.</li>
+      <li>Younger visitors may watch; it isn&rsquo;t made for them.</li>
+      <li>No deleting, buying, posting, logging in or personal data.</li>
+    </ul>
+  </section>
 
-    <div class="q">
-      <div class="n">4</div>
-      <div>
-        <h2>Is it private?</h2>
-        <p><strong>Chats, memories and files stay on the Chromebook.</strong> Requests go to <strong>Anthropic</strong> or <strong>Google</strong>. <strong>Voice recordings go to Google</strong> unless I use offline voice, and the free tier can use them to improve Google&rsquo;s products. So: <strong>don&rsquo;t tell it anything private.</strong></p>
-      </div>
-    </div>
-
-    <div class="q">
-      <div class="n">5</div>
-      <div>
-        <h2>What did YOU build?</h2>
-        <p>Google and Anthropic make the <strong>AI brains</strong>. I built <strong>everything around them</strong>: the app, voice, browser, terminal and file tools, memory, reminders, the brain-picker and the phone app. I <strong>designed it, decided what it should do, tested it</strong>, and used an <strong>AI coding assistant (Claude Code)</strong> to write much of the code.</p>
-        <p class="note">Credit: quick controls adapted from MARK LIII JARVIS by FatihMakes. Edit to match exactly what you did.</p>
-      </div>
-    </div>
-
-    <div class="q">
-      <div class="n">6</div>
-      <div>
-        <h2>Can it work in Kinyarwanda?</h2>
-        <p><strong>Not yet.</strong> The app is in English, the offline speech model is English-only, and the offline voice has no Kinyarwanda. Typing in Kinyarwanda might partly work, but <strong>I haven&rsquo;t tested it</strong>. It needs Kinyarwanda <strong>speech recognition</strong>, a Kinyarwanda <strong>voice</strong>, a <strong>translated app</strong>, and Kinyarwanda <strong>keywords</strong> for the brain-picker.</p>
-      </div>
-    </div>
-
-    <div class="q">
-      <div class="n">7</div>
-      <div>
-        <h2>Does the phone part work?</h2>
-        <p><strong>Built, not finished.</strong> The Android app lets Ghost-Prime see the phone screen as a numbered list and tap, swipe and type. It <strong>passes all its tests on a simulated phone</strong>, but I <strong>haven&rsquo;t run it on my real Galaxy A05 yet</strong>. That&rsquo;s my next step.</p>
-      </div>
-    </div>
-  </div>
-
-  <div class="rule-strip">
-    <b>Don&rsquo;t know?</b> &ldquo;Good question. I haven&rsquo;t tested that yet.&rdquo; Then write it down.
-  </div>
-
-  <div class="foot">
-    <span>Every line matches showcase/FACTS.md, checked 25 Sep 2026</span>
-    <span><span class="ph">[YOUR NAME]</span> &middot; <span class="ph">[SCHOOL]</span></span>
-  </div>
+  <footer class="foot dontknow">
+    <p><span class="label">Don&rsquo;t know?</span>&ldquo;Good question. I haven&rsquo;t tested that yet.&rdquo; Then write it down.</p>
+    <span class="label"><span class="ph">[YOUR NAME]</span> &middot; <span class="ph">[SCHOOL]</span></span>
+  </footer>
 </section>
 
 </body>

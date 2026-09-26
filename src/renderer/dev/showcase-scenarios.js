@@ -3,7 +3,8 @@
 // terminal dock and Activity panel) on top of the design-preview mock backend. Nothing here touches
 // the network.
 //
-//   npm run design   →   http://127.0.0.1:5199/?skipIntro=1&replay=1   (or showcase/demo/replay.sh)
+//   npm run design   →   http://127.0.0.1:5199/?skipIntro=1&replay=1&showcase=1   (or showcase/demo/replay.sh)
+//   &showcase=1 is presenter mode (big text, starts in AUTO), what the booth uses; leave it out for normal size.
 //
 // Loaded by dev/mock-ghost.js ONLY when the URL has ?replay=1. Without the flag this file is never
 // imported and the design mock behaves exactly as before. Optional flag: &speak=0 stops the replay
@@ -32,7 +33,7 @@ export const REHEARSED = [
   { demo: 5, title: 'Backup page', say: 'Open example.com and tell me what it says.' },
   { demo: 6, title: 'Battery', say: "What's my battery level?" },
   { demo: 6, title: 'Weather', say: "What's the weather in Kigali right now?" },
-  { demo: 7, title: 'PLAN mode (Shift+Tab to PLAN first)', say: 'Delete the Showcase folder.' }
+  { demo: 7, title: 'PLAN mode (/mode plan first)', say: 'Delete the Showcase folder.' }
 ]
 
 // ---------------------------------------------------------------------------------------------
@@ -361,7 +362,20 @@ export const SCENARIOS = [
       if (folder) {
         return {
           changes: true,
-          plan: [`Check what's inside \`~/Showcase\` (read-only).`, 'Delete the folder with `rm -r ~/Showcase`. Undo only covers single files, not whole folders, so I would tell you that first.'],
+          plan: ['Delete the folder with `rm -r ~/Showcase`. Undo only covers single files, not whole folders.'],
+          // PLAN mode (Demo 7): the answer follows from what the read-only Glob card just showed.
+          planAnswer: (r) => {
+            if (!state.dirs.has(PLAN_DIR)) return { text: "I only looked: there's no `~/Showcase` folder, so there's nothing to delete.", offer: false }
+            const found = String(r[0] || '')
+              .split('\n')
+              .filter((l) => l.startsWith(`${PLAN_DIR}/`))
+              .map((l) => `\`${l.slice(PLAN_DIR.length + 1)}\``)
+            const what = found.length ? `it has ${found.length === 1 ? 'one file' : `${found.length} files`}, ${found.join(', ')}` : "it's empty"
+            return {
+              text: `I only looked inside \`~/Showcase\`: ${what}.\n\nTo delete it, I would run \`rm -r ~/Showcase\`${found.length ? ', which removes the folder and everything in it' : ''}. Undo only covers single files, so a deleted folder can't be brought back.`,
+              offer: true
+            }
+          },
           planSteps: [
             {
               name: T.glob,
@@ -788,7 +802,7 @@ In short: **carbon dioxide + water + light → glucose + oxygen**. I left the Wi
 - **Remember you**: things you tell me stay remembered from one day to the next.
 - **Reminders and quick answers**: like your battery level or the weather.
 
-I can also control an Android phone. That part is built, but it hasn't been tested on a real phone yet, so it's next.`
+I also have an Android phone app. It's built, but it hasn't been tested on a real phone yet, so it's next.`
           }
         : {
             steps: [],
@@ -832,7 +846,7 @@ export function speakable(md) {
 }
 
 // ---------------------------------------------------------------------------------------------
-// installReplay: swap the design mock's scripted flight demo for these scenarios.
+// installReplay: swap the design mock's scripted demo for these scenarios.
 // ---------------------------------------------------------------------------------------------
 export function installReplay(ghost, { emit, running }) {
   const params = new URLSearchParams(location.search)
@@ -845,23 +859,81 @@ export function installReplay(ghost, { emit, running }) {
   badge.setAttribute('role', 'status')
   const badgeText = '● Offline replay · scripted demo'
   badge.textContent = badgeText
-  Object.assign(badge.style, {
-    position: 'fixed',
-    left: '28px',
-    bottom: '22px',
-    zIndex: '9999',
-    pointerEvents: 'none',
-    font: "600 10.5px/1 'JetBrains Mono Variable', ui-monospace, monospace",
-    letterSpacing: '0.06em',
-    textTransform: 'uppercase',
-    color: 'rgba(255, 212, 121, 0.92)',
-    background: 'rgba(24, 18, 6, 0.72)',
-    border: '1px solid rgba(255, 212, 121, 0.38)',
-    borderRadius: '999px',
-    padding: '6px 11px',
-    backdropFilter: 'blur(6px)'
-  })
+  // Where it sits: bottom-left inside the chat-history sidebar when that is open (the normal layout).
+  // Presenter mode (the booth) hides the sidebar, and bottom-left would then sit on the composer, so
+  // the badge moves under the bar at the conversation's left edge and grows with the presenter zoom,
+  // big enough to read from the back of the room.
+  const badgeCss = document.createElement('style')
+  badgeCss.textContent = `
+.replay-badge {
+  position: fixed; left: var(--rb-left, 28px); bottom: var(--rb-bottom, 22px); max-width: var(--rb-max, 220px);
+  z-index: 9999; pointer-events: none;
+  font: 600 10.5px/1.25 'JetBrains Mono Variable', ui-monospace, monospace;
+  letter-spacing: 0.06em; text-transform: uppercase;
+  color: rgba(255, 212, 121, 0.92); background: rgba(24, 18, 6, 0.72);
+  border: 1px solid rgba(255, 212, 121, 0.38); border-radius: 12px; padding: 5px 11px;
+  backdrop-filter: blur(6px);
+}
+.replay-badge.at-bar {
+  top: var(--rb-top, 102px); bottom: auto; font-size: 12px; padding: 0.45em 0.95em;
+  background: rgba(24, 18, 6, 0.88); border-color: rgba(255, 212, 121, 0.5); border-radius: 999px;
+}
+:root.presenter .replay-badge.at-bar { font-size: calc(10px * var(--presenter-zoom, 1.45)); }
+/* Under the bar, the thread keeps a clear band behind the badge: the first message starts below it,
+   and text scrolling up fades out there instead of running behind the badge. Only while the badge
+   shows, so the app-shots stills (badge hidden) keep the app's own layout. */
+body[data-replay-badge='bar'] .messages:not(:has(> .empty)) {
+  padding-top: var(--rb-pad, 44px);
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0, transparent var(--rb-clear, 30px), #000 calc(var(--rb-clear, 30px) + 12px));
+  mask-image: linear-gradient(to bottom, transparent 0, transparent var(--rb-clear, 30px), #000 calc(var(--rb-clear, 30px) + 12px));
+}`
+  document.head.appendChild(badgeCss)
   document.body.appendChild(badge)
+  const placeBadge = () => {
+    const box = (sel) => document.querySelector(sel)?.getBoundingClientRect()
+    const bar = box('.topbar')
+    const side = box('.sidebar')
+    const shown = badge.getBoundingClientRect().width > 0 // app-shots/capture.mjs hides it for its stills
+    const atBar = shown && !!bar && !(side && side.width >= 180)
+    badge.classList.toggle('at-bar', atBar)
+    if (!shown) delete document.body.dataset.replayBadge
+    else document.body.dataset.replayBadge = atBar ? 'bar' : 'sidebar'
+    const set = (k, v) => badge.style.setProperty(k, `${Math.round(v)}px`)
+    if (atBar) {
+      set('--rb-top', bar.bottom + 8)
+      set('--rb-left', bar.left + 1)
+      set('--rb-max', bar.width - 2)
+      // The clear band ends just under the badge. In presenter mode .messages is zoomed, so its
+      // padding and mask are in zoomed px.
+      const list = box('.messages')
+      const zoom = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--presenter-zoom')) || 1
+      if (list) {
+        const clear = Math.max(0, Math.round((badge.getBoundingClientRect().bottom + 2 - list.top) / zoom))
+        document.body.style.setProperty('--rb-clear', `${clear}px`)
+        document.body.style.setProperty('--rb-pad', `${clear + 14}px`)
+      }
+    } else if (side) {
+      set('--rb-left', side.left + 14)
+      set('--rb-bottom', innerHeight - side.bottom + 10)
+      set('--rb-max', side.width - 28) // a longer message wraps inside the sidebar instead of reaching the composer
+    }
+  }
+  // The bar mounts after this runs, moves when /showcase toggles the side panels, and scales on resize.
+  const placeSoon = () => [0, 60, 450].forEach((ms) => setTimeout(placeBadge, ms))
+  window.addEventListener('resize', placeSoon)
+  new MutationObserver(placeSoon).observe(document.documentElement, { attributes: true, attributeFilter: ['class'] })
+  const RO = typeof ResizeObserver !== 'undefined' ? ResizeObserver : null
+  if (RO) new RO(placeSoon).observe(badge) // shown, hidden, or a longer message
+  const waitBar = setInterval(() => {
+    if (!document.querySelector('.topbar')) return
+    clearInterval(waitBar)
+    for (const sel of ['.topbar', '.sidebar']) {
+      const el = document.querySelector(sel)
+      if (el && RO) new RO(placeSoon).observe(el) // e.g. the history panel opened or collapsed (async: no RO loop)
+    }
+    placeSoon()
+  }, 100)
+  setTimeout(() => clearInterval(waitBar), 20000)
   let flashTimer = null
   const flash = (msg) => {
     badge.textContent = msg
@@ -1147,7 +1219,8 @@ export function installReplay(ghost, { emit, running }) {
 
     let answer
     if (planMode) {
-      answer = `**I'm in PLAN mode, so I haven't changed anything.** Here's what I would do:\n\n${plan.plan.map((p, i) => `${i + 1}. ${p}`).join('\n')}\n\nSwitch to AUTO or FULL AUTO with Shift+Tab and ask again if you want me to do it.`
+      const pa = plan.planAnswer?.(results) || { text: `Here's what I would do:\n\n${plan.plan.map((p, i) => `${i + 1}. ${p}`).join('\n')}`, offer: true }
+      answer = `**I'm in PLAN mode, so I haven't changed anything.** ${pa.text}${pa.offer ? '\n\nSwitch back to AUTO with `/mode auto` and ask again if you want me to do it.' : ''}`
     } else {
       answer = typeof plan.answer === 'function' ? plan.answer(results) : plan.answer
     }

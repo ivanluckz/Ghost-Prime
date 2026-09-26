@@ -1,20 +1,23 @@
 // Check the showcase OFFLINE REPLAY end to end in headless Chromium: types every rehearsed phrase
 // from src/renderer/dev/showcase-scenarios.js (the same list DEMO.md uses), screenshots each result,
-// and fails on page errors or a phrase that lands on the wrong scenario. Also checks that the plain
-// design preview (no ?replay=1) still runs its own scripted demo (the design screenshots rely on it).
+// and fails on page errors or a phrase that lands on the wrong scenario. It also runs the hero demo at
+// half the screen (683×768, Ghost-Prime snapped left as in DEMO.md §2), fails if the "Offline replay"
+// badge covers the composer, and checks that the plain design preview (no ?replay=1) still runs its
+// own scripted demo (the design screenshots rely on it).
 //
-// Needs the design server (`npm run design`). This machine is short on RAM, so ALWAYS run it
-// through the shared lock:
-//   flock /tmp/claude-1000/design-capture.lock node showcase/demo/verify-replay.mjs [outdir] [baseUrl]
-// baseUrl defaults to the normal layout; pass 'http://127.0.0.1:5199/?skipIntro=1&showcase=1' to check
-// presenter mode, which is what showcase/demo/replay.sh opens by default.
+// Needs the design server (`npm run design`). Run it directly from the repo root (no flock needed):
+//   node showcase/demo/verify-replay.mjs [outdir] [baseUrl]
+// baseUrl defaults to presenter mode ('…&showcase=1', starts in AUTO), which is what
+// showcase/demo/replay.sh opens at the booth. Pass 'http://127.0.0.1:5199/?skipIntro=1' to check the
+// normal layout (replay.sh --small), which starts in FULL AUTO.
 import { chromium } from 'playwright'
 import { mkdirSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { REHEARSED } from '../../src/renderer/dev/showcase-scenarios.js'
 
-const [outdir = join(tmpdir(), 'ghost-replay-shots'), base = 'http://127.0.0.1:5199/?skipIntro=1'] = process.argv.slice(2)
+const [outdir = join(tmpdir(), 'ghost-replay-shots'), base = 'http://127.0.0.1:5199/?skipIntro=1&showcase=1'] = process.argv.slice(2)
+const PRESENTER = /[?&]showcase=1\b/.test(base) // booth layout: must start in AUTO, never FULL AUTO
 mkdirSync(outdir, { recursive: true })
 const EXPECT = ['hello', 'disk-space', 'revision-plan', 'undo', 'memory-save', 'memory-recall', 'reminder', 'photosynthesis', 'example-com', 'battery', 'weather', 'delete']
 const failures = []
@@ -27,8 +30,8 @@ const consoleErrors = []
 const external = new Set() // any request that would need the internet (all are blocked below)
 
 const browser = await chromium.launch({ args: ['--use-gl=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'] })
-async function open(url, label) {
-  const ctx = await browser.newContext({ viewport: { width: 1366, height: 768 }, deviceScaleFactor: 1 })
+async function open(url, label, viewport = { width: 1366, height: 768 }) {
+  const ctx = await browser.newContext({ viewport, deviceScaleFactor: 1 })
   // Record what would be spoken (headless Chromium has no voices, so capture the utterances).
   await ctx.addInitScript(() => {
     window.__utter = []
@@ -76,6 +79,18 @@ async function setMode(p, id) {
   await p.waitForFunction((cls) => document.querySelector(`.mode.mode-${cls}`), id, { timeout: 5000 }).catch(() => fail(`/mode ${id} did not switch the badge`))
 }
 const runs = (p) => p.evaluate(() => window.__ghostReplay?.runs.length || 0)
+// The honesty badge must never sit on the composer (or the bar): in presenter mode the history
+// sidebar it normally lives in is hidden.
+async function badgeClear(p, where) {
+  const hit = await p.evaluate(() => {
+    const box = (s) => document.querySelector(s)?.getBoundingClientRect()
+    const b = box('.replay-badge')
+    if (!b || !b.width) return 'badge not visible'
+    const over = (o) => o && b.left < o.right && o.left < b.right && b.top < o.bottom && o.top < b.bottom
+    return over(box('.chat-input')) ? 'composer' : over(box('.topbar')) ? 'bar' : b.right > innerWidth || b.bottom > innerHeight ? 'window edge' : ''
+  })
+  if (hit) fail(`${where}: the replay badge overlaps the ${hit}`)
+}
 async function sendAndWait(p, text, timeout = 45000) {
   const before = await runs(p)
   await send(p, text)
@@ -88,15 +103,17 @@ try {
   const p = await open(`${base}&replay=1`, 'replay')
   if (!(await p.locator('.replay-badge').count())) fail('replay badge missing')
   await shot(p, '00-replay-empty')
+  await badgeClear(p, 'start screen')
   for (const [i, r] of REHEARSED.entries()) {
     if (r.title.startsWith('Recall')) await p.keyboard.press('Control+n') // DEMO.md: ask in a brand-new chat
-    // Typed, not Shift+Tab counts: the replay opens in FULL AUTO, presenter mode (&showcase=1) in AUTO.
+    // Typed, as DEMO.md says: from AUTO (presenter mode) one Shift+Tab would go to FULL AUTO.
     if (r.demo === 7) await setMode(p, 'plan')
     let mid = null
     if (EXPECT[i] === 'photosynthesis') mid = setTimeout(() => shot(p, `${String(i + 1).padStart(2, '0')}-photosynthesis-running`).catch(() => {}), 5200)
     const run = await sendAndWait(p, r.say)
     clearTimeout(mid)
     if (run.scenario !== EXPECT[i]) fail(`"${r.say}" → ${run.scenario}, expected ${EXPECT[i]}`)
+    if (i === 0 && PRESENTER && run.mode !== 'auto') fail(`presenter mode started in mode ${run.mode}, expected auto`)
     if (r.demo === 7 && run.mode !== 'plan') fail(`PLAN demo ran in mode ${run.mode}`)
     console.log(`ok   ${run.scenario.padEnd(15)} ${(run.ms / 1000).toFixed(1).padStart(5)}s brain=${run.brain} mode=${run.mode}  "${r.say}"`)
     await shot(p, `${String(i + 1).padStart(2, '0')}-${run.scenario}`)
@@ -115,6 +132,7 @@ try {
   }
   const last = await p.locator('.messages').innerText()
   if (!/PLAN mode/.test(last)) fail('PLAN answer missing')
+  if (/FULL AUTO|Shift\+Tab/.test(last.split('Delete the Showcase folder.').pop())) fail('PLAN answer suggests FULL AUTO or Shift+Tab (DEMO.md says /mode auto)')
   await setMode(p, 'auto')
 
   // The app's own voice toggle on top of the replay's speech: an "On it" ack, then the answer ONCE.
@@ -139,6 +157,7 @@ try {
   await p.locator('button[aria-label="Voice input"]').click()
   await p.waitForTimeout(1500)
   await shot(p, '22-mic-no-speech-service')
+  await badgeClear(p, 'mic message')
 
   const spoken = await p.evaluate(() => ({ answers: window.__ghostReplay.spoken, utter: window.__utter }))
   const n = await runs(p)
@@ -146,6 +165,17 @@ try {
   console.log(`spoken: ${spoken.answers.length} answers, ${spoken.utter.length} utterances queued (lang ${[...new Set(spoken.utter.map((u) => u.lang))].join(',') || 'n/a'})`)
   console.log('first spoken line:', spoken.answers[0])
   await p.context().close()
+
+  // ---- half the screen (DEMO.md §2: Ghost-Prime snapped left for the hero demo) ----------------
+  const half = await open(`${base}&replay=1&speak=0`, 'replay half-screen', { width: 683, height: 768 })
+  await shot(half, '40-half-empty')
+  await badgeClear(half, 'half-screen start screen')
+  const hero = REHEARSED.find((r) => r.demo === 5)
+  const hr = await sendAndWait(half, hero.say)
+  if (hr.scenario !== 'photosynthesis') fail(`half-screen: hero phrase → ${hr.scenario}`)
+  await shot(half, '41-half-hero')
+  await badgeClear(half, 'half-screen hero answer')
+  await half.context().close()
 
   // ---- &speak=0: the replay stays silent unless the app's voice toggle is on --------------------
   const quiet = await open(`${base}&replay=1&speak=0`, 'replay quiet')

@@ -1,9 +1,12 @@
 // Render the pitch deck: one PNG per slide (preview/slide-NN.png) and slides.pdf (1920x1080 pages).
-// Also prints layout warnings: text that overflows its box or the slide, and text smaller than 22px.
+// Also prints layout warnings: text that overflows its box or the slide, text smaller than 24px
+// (DESIGN.md: nothing on a slide below 24px), and Inter body text smaller than 30px (HTML and SVG
+// alike; mono labels and captions may be 24px). It also prints each slide's on-slide word count as
+// information (DESIGN.md: about 30 words; screenshots and the footer are not counted).
 //
-// Memory is tight on the Chromebook, so always run it through the shared lock:
-//   flock /tmp/claude-1000/design-capture.lock node showcase/slides/render.mjs [--png] [--pdf]
-// With no flag it does both.
+// Run it from the repo folder:
+//   node showcase/slides/render.mjs [--png] [--pdf] [N]
+// With no flag it does both. N renders only slide N's PNG.
 import { chromium } from '../../node_modules/playwright/index.mjs'
 import { mkdirSync } from 'node:fs'
 import { dirname, join } from 'node:path'
@@ -29,9 +32,11 @@ try {
   const fonts = await page.evaluate(() => [...document.fonts].filter((f) => f.status === 'loaded').map((f) => f.family))
   console.log('fonts loaded:', [...new Set(fonts)].join(', ') || 'NONE')
 
-  // Swap gradient words to SVG text (what the browser does on print), so PNGs match the PDF.
-  const swapped = await page.evaluate(() => window.__gradToSvg())
-  console.log('gradient words drawn as SVG:', swapped)
+  // The PNGs are taken in print media, so they match the PDF. (The wordmark is outlined SVG, so
+  // there is no live gradient text to swap before printing.)
+  const liveGrad = await page.evaluate(() =>
+    [...document.querySelectorAll('.slide *')].filter((el) => /text/.test(getComputedStyle(el).backgroundClip)).length)
+  if (liveGrad) console.log(`WARNING: ${liveGrad} element(s) use background-clip:text, which prints badly`)
 
   // Layout checks
   const warnings = await page.evaluate(() => {
@@ -41,32 +46,49 @@ try {
       const hasFooter = !!slide.querySelector('.footer')
       slide.querySelectorAll('*').forEach((el) => {
         if (el.closest('svg') && el.tagName !== 'svg') return
-        if (el.closest('.footer') || el.closest('.credits') || el.classList.contains('wrap')) return
         const r = el.getBoundingClientRect()
-        // Content must end >= 20px above the footer line (footer text starts ~1012px down)
-        if (hasFooter && r.bottom - sr.top > 990 && r.width > 0)
-          out.push(`slide ${i + 1}: <${el.tagName.toLowerCase()} class="${el.className.baseVal ?? el.className}"> runs into the footer (bottom ${Math.round(r.bottom - sr.top)}px)`)
-        if (r.width === 0 || r.height === 0) return
         const cs = getComputedStyle(el)
         const hasText = [...el.childNodes].some((n) => n.nodeType === 3 && n.textContent.trim())
+        // Text floor applies everywhere, footer and credits included
+        if (hasText && r.width > 0 && parseFloat(cs.fontSize) < 24)
+          out.push(`slide ${i + 1}: small text ${cs.fontSize} in <${el.tagName.toLowerCase()}>: ${el.textContent.trim().slice(0, 40)}`)
+        else if (hasText && r.width > 0 && /Inter Kit/.test(cs.fontFamily.split(',')[0]) && parseFloat(cs.fontSize) < 30)
+          out.push(`slide ${i + 1}: body text ${cs.fontSize} (< 30px) in <${el.tagName.toLowerCase()}>: ${el.textContent.trim().slice(0, 40)}`)
+        if (el.closest('.footer')) return
+        if (el.tagName === 'IMG' && el.closest('.shot')) return // a crop: the frame clips it on purpose
+        // Content must end above the footer (footer text starts ~995px down)
+        if (hasFooter && r.bottom - sr.top > 975 && r.width > 0)
+          out.push(`slide ${i + 1}: <${el.tagName.toLowerCase()} class="${el.className.baseVal ?? el.className}"> runs into the footer (bottom ${Math.round(r.bottom - sr.top)}px)`)
+        if (r.width === 0 || r.height === 0) return
         if (r.right > sr.right - 40 || r.bottom > sr.bottom - 30 || r.left < sr.left + 40)
           out.push(`slide ${i + 1}: <${el.tagName.toLowerCase()} class="${el.className.baseVal ?? el.className}"> outside safe area (${Math.round(r.left - sr.left)},${Math.round(r.top - sr.top)} ${Math.round(r.width)}x${Math.round(r.height)})`)
         if (hasText && el.scrollWidth > el.clientWidth + 2 && cs.overflow !== 'visible')
           out.push(`slide ${i + 1}: text clipped in <${el.tagName.toLowerCase()}>`)
-        if (hasText && parseFloat(cs.fontSize) < 22)
-          out.push(`slide ${i + 1}: small text ${cs.fontSize} in <${el.tagName.toLowerCase()}>: ${el.textContent.trim().slice(0, 40)}`)
       })
       // SVG text: measure against the slide at its rendered size
       slide.querySelectorAll('svg text').forEach((t) => {
         const r = t.getBoundingClientRect()
         if (r.right > sr.right - 40 || r.bottom > sr.bottom - 30) out.push(`slide ${i + 1}: svg text outside safe area: ${t.textContent}`)
-        const px = r.height
-        if (px < 26) out.push(`slide ${i + 1}: svg text renders ~${px.toFixed(0)}px tall: ${t.textContent}`)
+        const tcs = getComputedStyle(t)
+        const px = parseFloat(tcs.fontSize) * (r.height / (t.getBBox().height || r.height))
+        if (px < 23.5) out.push(`slide ${i + 1}: svg text renders ~${px.toFixed(0)}px: ${t.textContent}`)
+        else if (/Inter Kit/.test(tcs.fontFamily.split(',')[0]) && px < 29.5)
+          out.push(`slide ${i + 1}: svg body text renders ~${px.toFixed(0)}px (< 30px): ${t.textContent}`)
       })
     })
     return out
   })
   console.log(warnings.length ? warnings.join('\n') : 'layout: no warnings')
+
+  // Word budget (information only): visible words per slide, without the footer and screenshots
+  const words = await page.evaluate(() =>
+    [...document.querySelectorAll('.slide')].map((slide) => {
+      const clone = slide.cloneNode(true)
+      clone.querySelectorAll('.footer, img, svg:not(.diagram), title').forEach((n) => n.remove())
+      return (clone.textContent.match(/[A-Za-z0-9][^\s·→]*/g) || []).length
+    })
+  )
+  console.log('on-slide words (DESIGN.md: about 30; info only):', words.map((n, i) => `${i + 1}:${n}`).join('  '))
 
   if (doPng) {
     mkdirSync(join(here, 'preview'), { recursive: true })

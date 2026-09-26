@@ -1,6 +1,5 @@
 // Export the presenter pitch card: pitch-card.pdf (2 A4 pages) plus PNG previews.
-// Run from the repo root, ALWAYS through the shared memory lock:
-//   flock /tmp/claude-1000/design-capture.lock node showcase/script/export.mjs
+// Run from the repo root: node showcase/script/export.mjs
 // Output (next to pitch-card.html):
 //   pitch-card.pdf
 //   preview/pitch-card-p1.png  preview/pitch-card-p2.png   (each A4 sheet at 110 dpi, print styles)

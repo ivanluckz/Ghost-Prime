@@ -45,7 +45,7 @@ Declare it as `@font-face { font-family:'Archivo Kit'; src:url('…/archivo-lati
 with a real fallback stack (`'Archivo Kit', 'Inter Kit', 'Liberation Sans', Arial, sans-serif`).
 Headings get `text-wrap: balance`.
 
-**Slide scale (1920×1080 px):** eyebrow 22 mono · body 34 · title 84–96 (max 2 lines) · statement
+**Slide scale (1920×1080 px):** eyebrow 24 mono · body 34 · title 84–96 (max 2 lines) · statement
 120–150 · big number 150–180 · caption 24 mono. **Nothing on a slide below 24 px**, body copy never
 below 30 px. About **30 words of on-slide text at most** (the speaker notes carry the rest).
 
@@ -107,8 +107,10 @@ Never use the old flight/Lisbon shots or anything showing FULL AUTO.
   brains" as the headline of how it works; the demo is all-Claude.)
 - **Open source:** "Built with free, open-source tools (Electron, Playwright, SQLite, Whisper,
   three.js)." Never say or imply that Ghost-Prime itself is open source.
-- **Voice:** "Voice works in my own testing; it has no automated test yet." Voice needs the internet
-  (Google) unless the offline voice mode is switched on. Mic button or Ctrl+Shift+G. Never "Hey Ghost".
+- **Voice:** "Voice works in my own testing; the real mic and speaker are only checked by hand."
+  (Only the voice logic has an automated test, with pretend speakers and a pretend Google.) Voice
+  needs the internet (Google) unless the offline voice mode is switched on. To speak: the mic button.
+  Ctrl+Shift+G only brings the window up and puts the cursor in the chat box. Never "Hey Ghost".
 - **Phone / Chrome extension:** built, tested only on a simulated phone / a headless browser.
   "In progress." Never "it controls my phone".
 - **Safety:** PLAN only looks. AUTO: on the Claude brain an automatic safety check decides each
@@ -123,11 +125,17 @@ Never use the old flight/Lisbon shots or anything showing FULL AUTO.
   as literal placeholders.
 - **Credit** wherever battery / weather / volume / brightness / YouTube tools appear: "MARK LIII
   JARVIS by FatihMakes (CC BY-NC 4.0)".
-- **Numbers** (FACTS §6, 25 Sep): 64 tools (Claude brain) · 244 checks passed, 0 failed, in 13
-  offline test scripts · 23 test scripts · about 3 months (17 Jun – 25 Sep) · 58 commits · about
-  22,000 lines · 127 bugs fixed in one audit. Quote the date with the checks.
+- **Numbers** (FACTS §6, counted 25 Sep and the night of 25–26 Sep): 64 tools (Claude brain) ·
+  "over 500 automated checks passed, 0 failed" (exact: 523 checks in 34 offline test suites,
+  25–26 Sep 2026) · 45 test scripts · about 3 months (17 Jun – 25 Sep) · at least 89 commits (to
+  26 Sep) · about 25,000 lines · 127 bugs fixed in one audit (20 Sep). Quote the date with the
+  checks. On a slide or the poster the big number is **523**; out loud it is "over 500".
 - **How each capability was checked** (for any "what works" list; from FACTS §2):
-  web browser = automated tests 25 Sep · terminal = checked once 25 Sep · files + undo = checked once
-  25 Sep · memory, chat history, reminders = automated tests 20 Sep · voice in/out = by hand · web
-  search = by hand (page fetch checked once) · pictures = checked once with Gemini 19 Sep · battery
-  = checked once 25 Sep. Never write that everything not marked "by hand" passed automated tests.
+  web browser = automated tests 25 Sep (tool tests without the AI; the AI driving it last ran
+  20 Sep) · terminal = automated tests 25 Sep · files + undo = automated tests 25 Sep · memory, chat
+  history, reminders = automated tests, re-run 25 Sep · voice in/out = by hand (only the logic has
+  an offline test) · web search = by hand (result parsing tested offline; page fetch checked once
+  25 Sep) · pictures = checked once with Gemini 19 Sep · battery = checked once with Gemini 25 Sep ·
+  weather = automated tests against a pretend service. Chips: the first four are `WORKS · TESTED`,
+  voice and web search are `WORKS · BY HAND`. Never write that everything not marked "by hand"
+  passed automated tests.
