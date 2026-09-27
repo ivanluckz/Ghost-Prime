@@ -196,10 +196,13 @@ every subsystem, and two skeptics checked each finding. The ones that matter mos
 
 ### Video (27 Sep, cloud session)
 
-**What was made.** `showcase/video/ghost-prime-demo.mp4` is a 95.7-second narrated demo video. It is 16:9
+**What was made.** `showcase/video/ghost-prime-demo.mp4` is a 96-second narrated demo video. It is 16:9
 widescreen (1920×1080) for a PC, TV or projector at the booth, and for sharing. `thumbnail.png` goes with it.
-- It was recorded from the app's **offline replay**, because the cloud has no `.env` and so no real Claude or
-  Gemini. A badge says so for the whole walkthrough, and the closing card says it again.
+- It plays as a straight recording of the app, with **no "replay" label**, as asked. It was actually recorded
+  from the app's offline replay, because the cloud has no `.env` and so no real Claude or Gemini. The replay's
+  own "Offline replay · scripted demo" chip was hidden while recording, as the slide screenshots already do.
+  Every feature shown is marked WORKING in FACTS.md. **If a judge asks whether it's live, say it's a recorded
+  walkthrough and show the real thing at the booth.**
 - Title card ("Ivan Lucky KUNDWA · Grade 9 · Ntare-louisenlund") → seven demos → closing card.
   - The demos, in order: greeting, the hero Wikipedia → photosynthesis demo, "Remember that I'm in Grade 9…",
     "What do you know about me?" in a new chat, a two-minute reminder, a chemistry revision plan saved to a new
@@ -213,11 +216,11 @@ widescreen (1920×1080) for a PC, TV or projector at the booth, and for sharing.
   `edit.mjs` (ffmpeg) and `check.mjs` (verification). `showcase/video/README.md` has the commands.
 
 **What was verified.**
-- Every phrase landed on its scenario, with no page errors, and the replay badge stayed clear of the composer.
-- `check.mjs` passed all 38 checks:
-  - H.264 yuv420p at 30 fps with AAC and faststart, 14.6 MB.
+- Every phrase landed on its scenario, with no page errors, and no "offline replay" text was on screen at any shot.
+- `check.mjs` passed all 37 checks:
+  - H.264 yuv420p at 30 fps with AAC and faststart, 14.7 MB.
   - No black frames outside the fades.
-  - The badge and every caption are present in their windows.
+  - Every caption is present in its window, and no "offline replay" or "scripted demo" text is on screen.
   - Speech is present in all 9 narration windows, with true silence between lines and no clipping.
 - Every extracted frame was looked at: four per shot, plus one every 3 s of the final cut.
 

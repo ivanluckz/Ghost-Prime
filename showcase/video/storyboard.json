@@ -1,5 +1,5 @@
 {
-  "$comment": "Storyboard for the 90-120 s booth video. record.mjs types each demo shot's phrase into the offline replay (src/renderer/dev/showcase-scenarios.js) verbatim, with [YOUR CLASS] filled from `presenter` as DEMO.md says ('say your real class'); narrate.mjs speaks each narration line; edit.mjs assembles title card, footage, closing card, badge and captions. Claims follow showcase/FACTS.md. The look is a red variant of showcase/DESIGN.md, as the presenter asked.",
+  "$comment": "Storyboard for the 90-120 s booth video. record.mjs types each demo shot's phrase into the offline replay (src/renderer/dev/showcase-scenarios.js) verbatim, with [YOUR CLASS] filled from `presenter` as DEMO.md says ('say your real class'), and hides the replay's on-screen label, as the presenter asked; narrate.mjs speaks each narration line; edit.mjs assembles title card, footage, closing card and captions. Claims follow showcase/FACTS.md. The look is a red variant of showcase/DESIGN.md, as the presenter asked.",
   "title": "Ghost-Prime demo walkthrough",
   "event": "Rwanda Innovation Showcase 2026",
   "presenter": {
@@ -20,7 +20,7 @@
       1080
     ]
   },
-  "badge": "Demo walkthrough · offline replay",
+  "badge": null,
   "typing": {
     "msPerChar": 35,
     "jitterMs": 13,
@@ -147,11 +147,11 @@
       "id": "closing",
       "kind": "card",
       "seconds": 6,
-      "narration": "Recorded from the app's offline replay. Come and try it live at the booth.",
+      "narration": "That's Ghost-Prime. Come and try it live at the booth.",
       "caption": null,
       "card": {
         "wordmark": "GHOST-PRIME",
-        "line1": "Demo walkthrough recorded from the app's offline replay",
+        "line1": "Use a computer just by talking.",
         "line2": "Come and try it live at the booth",
         "eyebrow": "Rwanda Innovation Showcase 2026",
         "presenter": [
@@ -161,5 +161,6 @@
         ]
       }
     }
-  ]
+  ],
+  "hideReplayLabel": true
 }

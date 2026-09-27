@@ -1,10 +1,10 @@
 {
-  "madeAt": "2026-09-27T10:46:47.429Z",
+  "madeAt": "2026-09-27T10:53:51.002Z",
   "size": [
     1920,
     1080
   ],
-  "totalSeconds": 95.668,
+  "totalSeconds": 96.196,
   "layout": {
     "footage": {
       "x": 128,
@@ -17,12 +17,6 @@
       "y": 952,
       "w": 1664,
       "h": 128
-    },
-    "badge": {
-      "x": 1275,
-      "y": 990,
-      "w": 521,
-      "h": 53
     },
     "caption": {
       "x": 124,
@@ -37,160 +31,156 @@
   },
   "footage": {
     "start": 5.576,
-    "end": 89.668,
+    "end": 90.196,
     "source": "footage/replay.webm",
-    "sourceStart": 12.223,
-    "sourceEnd": 105.885,
+    "sourceStart": 13.238,
+    "sourceEnd": 107.345,
     "segments": [
       {
-        "start": 12.223,
-        "end": 20.232,
+        "start": 13.238,
+        "end": 21.145,
         "speed": 1,
         "outStart": 5.576,
-        "outEnd": 13.585
+        "outEnd": 13.483
       },
       {
-        "start": 20.232,
-        "end": 24.371,
+        "start": 21.145,
+        "end": 25.201,
         "speed": 1.5,
         "shot": "hero",
         "what": "typing",
-        "outStart": 13.585,
-        "outEnd": 16.344
+        "outStart": 13.483,
+        "outEnd": 16.187
       },
       {
-        "start": 24.371,
-        "end": 52.431,
+        "start": 25.201,
+        "end": 54.14,
         "speed": 1,
-        "outStart": 16.344,
-        "outEnd": 44.404
+        "outStart": 16.187,
+        "outEnd": 45.126
       },
       {
-        "start": 52.431,
-        "end": 61.231,
+        "start": 54.14,
+        "end": 62.861,
         "speed": 4,
         "shot": "remember→recall",
         "what": "idle",
-        "outStart": 44.404,
-        "outEnd": 46.604
+        "outStart": 45.126,
+        "outEnd": 47.306
       },
       {
-        "start": 61.231,
-        "end": 77.258,
+        "start": 62.861,
+        "end": 79.187,
         "speed": 1,
-        "outStart": 46.604,
-        "outEnd": 62.631
+        "outStart": 47.306,
+        "outEnd": 63.632
       },
       {
-        "start": 77.258,
-        "end": 82.03,
+        "start": 79.187,
+        "end": 83.971,
         "speed": 1.5,
         "shot": "study-plan",
         "what": "typing",
-        "outStart": 62.631,
-        "outEnd": 65.813
+        "outStart": 63.632,
+        "outEnd": 66.822
       },
       {
-        "start": 82.03,
-        "end": 105.885,
+        "start": 83.971,
+        "end": 107.345,
         "speed": 1,
-        "outStart": 65.813,
-        "outEnd": 89.668
+        "outStart": 66.822,
+        "outEnd": 90.196
       }
     ]
   },
   "closing": {
-    "start": 89.668,
-    "end": 95.668
+    "start": 90.196,
+    "end": 96.196
   },
-  "badge": {
-    "text": "Demo walkthrough · offline replay",
-    "start": 5.576,
-    "end": 89.668
-  },
+  "badge": null,
   "shots": [
     {
       "id": "hello",
       "caption": "Talk or type. It does the task.",
       "start": 6.576,
-      "end": 13.535,
+      "end": 13.433,
       "typingStart": 6.576,
-      "enter": 7.632,
-      "answerDone": 10.237,
-      "finish": 13.374,
+      "enter": 7.557,
+      "answerDone": 10.191,
+      "finish": 13.376,
       "narrationStart": 6.576,
       "narrationSeconds": 6.095
     },
     {
       "id": "hero",
       "caption": "Reads the web, explains it simply",
-      "start": 13.585,
-      "end": 36.369,
-      "typingStart": 13.585,
-      "enter": 16.344,
-      "answerDone": 31.29,
-      "finish": 36.298,
-      "narrationStart": 13.585,
+      "start": 13.483,
+      "end": 36.927,
+      "typingStart": 13.483,
+      "enter": 16.187,
+      "answerDone": 31.863,
+      "finish": 36.868,
+      "narrationStart": 13.483,
       "narrationSeconds": 10.416
     },
     {
       "id": "remember",
       "caption": "It remembers what you tell it",
-      "start": 36.419,
-      "end": 46.413,
-      "typingStart": 36.419,
-      "enter": 38.987,
-      "answerDone": 42.298,
-      "finish": 44.104,
-      "narrationStart": 36.419,
+      "start": 36.977,
+      "end": 47.081,
+      "typingStart": 36.977,
+      "enter": 39.547,
+      "answerDone": 43.023,
+      "finish": 44.826,
+      "narrationStart": 36.977,
       "narrationSeconds": 6.433
     },
     {
       "id": "recall",
       "caption": "A new chat. It still knows.",
-      "start": 46.463,
-      "end": 54.984,
-      "typingStart": 46.904,
-      "enter": 48.035,
-      "answerDone": 51.999,
-      "finish": 55.006,
-      "narrationStart": 46.904,
+      "start": 47.131,
+      "end": 55.985,
+      "typingStart": 47.606,
+      "enter": 48.725,
+      "answerDone": 52.895,
+      "finish": 55.9,
+      "narrationStart": 47.606,
       "narrationSeconds": 5.348
     },
     {
       "id": "reminder",
       "caption": "Reminders that speak up",
-      "start": 55.034,
-      "end": 62.581,
-      "typingStart": 55.034,
-      "enter": 56.824,
-      "answerDone": 60.11,
-      "finish": 62.471,
-      "narrationStart": 55.034,
+      "start": 56.035,
+      "end": 63.582,
+      "typingStart": 56.035,
+      "enter": 57.831,
+      "answerDone": 61.176,
+      "finish": 63.473,
+      "narrationStart": 56.035,
       "narrationSeconds": 6.735
     },
     {
       "id": "study-plan",
       "caption": "Makes files, with undo",
-      "start": 62.631,
-      "end": 76.048,
-      "typingStart": 62.631,
-      "enter": 65.813,
-      "answerDone": 72.59,
-      "finish": 76.095,
-      "narrationStart": 62.631,
+      "start": 63.632,
+      "end": 76.62,
+      "typingStart": 63.632,
+      "enter": 66.822,
+      "answerDone": 73.164,
+      "finish": 76.668,
+      "narrationStart": 63.632,
       "narrationSeconds": 8.248
     },
     {
       "id": "plan-mode",
       "caption": "PLAN mode: it only looks",
-      "start": 76.098,
-      "end": 89.668,
-      "typingStart": 77.63,
-      "enter": 78.771,
-      "answerDone": 83.337,
-      "finish": 89.268,
-      "narrationStart": 77.63,
+      "start": 76.67,
+      "end": 90.196,
+      "typingStart": 78.156,
+      "enter": 79.314,
+      "answerDone": 83.78,
+      "finish": 89.796,
+      "narrationStart": 78.156,
       "narrationSeconds": 10.936
     }
   ],
@@ -209,44 +199,44 @@
     },
     {
       "shot": "hero",
-      "start": 13.585,
+      "start": 13.483,
       "seconds": 10.416,
       "file": "voice/hero.wav"
     },
     {
       "shot": "remember",
-      "start": 36.419,
+      "start": 36.977,
       "seconds": 6.433,
       "file": "voice/remember.wav"
     },
     {
       "shot": "recall",
-      "start": 46.904,
+      "start": 47.606,
       "seconds": 5.348,
       "file": "voice/recall.wav"
     },
     {
       "shot": "reminder",
-      "start": 55.034,
+      "start": 56.035,
       "seconds": 6.735,
       "file": "voice/reminder.wav"
     },
     {
       "shot": "study-plan",
-      "start": 62.631,
+      "start": 63.632,
       "seconds": 8.248,
       "file": "voice/study-plan.wav"
     },
     {
       "shot": "plan-mode",
-      "start": 77.63,
+      "start": 78.156,
       "seconds": 10.936,
       "file": "voice/plan-mode.wav"
     },
     {
       "shot": "closing",
-      "start": 90.068,
-      "seconds": 4.77,
+      "start": 90.596,
+      "seconds": 3.934,
       "file": "voice/closing.wav"
     }
   ]

@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-09-27T10:38:13.359Z",
+  "generatedAt": "2026-09-27T10:51:51.282Z",
   "engine": {
     "name": "espeak-ng",
     "voice": "mb-en1",
@@ -100,13 +100,13 @@
     {
       "shot": "closing",
       "file": "voice/closing.wav",
-      "seconds": 4.77,
-      "text": "Recorded from the app's offline replay. Come and try it live at the booth.",
-      "spoken": "Recorded from the app's offline replay. Come and try it live at the booth.",
-      "words": 14,
+      "seconds": 3.934,
+      "text": "That's Ghost-Prime. Come and try it live at the booth.",
+      "spoken": "That's Ghost Prime. Come and try it live at the booth.",
+      "words": 11,
       "engine": "espeak-ng mb-en1",
-      "meanDb": -19.8,
-      "peakDb": -3
+      "meanDb": -20.2,
+      "peakDb": -2.9
     }
   ]
 }

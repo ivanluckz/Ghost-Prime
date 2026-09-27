@@ -9,10 +9,14 @@
 //   node showcase/video/record.mjs [--small]    (--small: normal layout instead of presenter mode)
 // It records at storyboard.json → viewport (1366x768, the school Chromebook's screen, 16:9).
 //
+// storyboard.json → hideReplayLabel: true hides the replay's own "Offline replay · scripted demo" chip for
+// the recording, the way showcase/app-shots/capture.mjs does for its stills (a style tag on the page; src/
+// is untouched). With it false, the chip stays and must never sit on the composer or the bar.
+//
 // Output (next to this file): footage/replay.webm, timeline.json (video-time seconds for each shot's
 // typing start, Enter, answer done and finish) and frames/*.png, one set per shot, to look at: fonts
-// loaded, nothing blank, the "Offline replay" badge clear of the composer. It fails if a phrase lands on
-// the wrong scenario, if the page throws, or if the badge sits on the composer.
+// loaded, nothing blank. It fails if a phrase lands on the wrong scenario, if the page throws, or if the
+// replay label is visible when it should be hidden (or covers the composer when it is shown).
 // GHOST_CHROMIUM=/path/to/chrome uses that binary (the cloud session used the pre-installed one).
 import { chromium } from '../../node_modules/playwright/index.mjs'
 import { REHEARSED } from '../../src/renderer/dev/showcase-scenarios.js'
@@ -96,10 +100,20 @@ if (!fonts.some((f) => /Inter/.test(f)) || !fonts.some((f) => /JetBrains/.test(f
 const modeText = await page.locator('.mode').innerText().catch(() => '')
 console.log('mode badge:', modeText.trim())
 if (!small && !/^AUTO$/i.test(modeText.trim())) fail(`presenter mode should start in AUTO, badge says "${modeText.trim()}"`)
-if (!(await page.locator('.replay-badge').count())) fail('the "Offline replay" badge is missing')
+if (!(await page.locator('.replay-badge').count())) fail('the replay did not load (no .replay-badge element)')
+const hideLabel = sb.hideReplayLabel === true
+if (hideLabel) {
+  await page.addStyleTag({ content: '.replay-badge{display:none!important}' })
+  await sleep(700) // the replay re-lays the thread out once its chip is gone
+}
 
-// The honesty badge must never sit on the composer or the bar (same check as verify-replay.mjs).
+// Hidden: no replay/scripted wording anywhere on screen. Shown: the chip never sits on the composer or bar.
 async function badgeClear(where) {
+  if (hideLabel) {
+    const seen = await page.evaluate(() => (document.body.innerText.match(/offline replay|scripted demo/i) || [])[0] || '')
+    if (seen) fail(`${where}: "${seen}" is visible on screen, but hideReplayLabel is on`)
+    return
+  }
   const hit = await page.evaluate(() => {
     const box = (s) => document.querySelector(s)?.getBoundingClientRect()
     const b = box('.replay-badge')

@@ -1,5 +1,5 @@
 {
-  "recordedAt": "2026-09-27T10:44:37.182Z",
+  "recordedAt": "2026-09-27T10:53:42.343Z",
   "base": "http://127.0.0.1:5199/?skipIntro=1&replay=1&showcase=1&speak=0",
   "layout": "presenter",
   "viewport": {
@@ -7,10 +7,10 @@
     "height": 768
   },
   "video": "footage/replay.webm",
-  "videoSeconds": 107.4,
+  "videoSeconds": 108.8,
   "calibration": {
-    "flashAtVideoSeconds": 10.8,
-    "offsetSeconds": 0.046
+    "flashAtVideoSeconds": 11.88,
+    "offsetSeconds": 0.173
   },
   "fonts": [
     "Inter Variable",
@@ -25,13 +25,13 @@
       "mode": "auto",
       "brain": "claude",
       "phrase": "Say hello to the judges.",
-      "typingStart": 13.223,
-      "enter": 14.279,
-      "answerDone": 16.884,
-      "finish": 20.021,
-      "typingSeconds": 1.06,
-      "answerSeconds": 2.6,
-      "holdSeconds": 3.13,
+      "typingStart": 14.238,
+      "enter": 15.219,
+      "answerDone": 17.853,
+      "finish": 21.038,
+      "typingSeconds": 0.98,
+      "answerSeconds": 2.63,
+      "holdSeconds": 3.17,
       "shotSeconds": 6.8
     },
     {
@@ -41,14 +41,14 @@
       "mode": "auto",
       "brain": "claude",
       "phrase": "Go to the Wikipedia website, search for photosynthesis, and explain it to me in three simple sentences.",
-      "typingStart": 20.232,
-      "enter": 24.371,
-      "answerDone": 39.317,
-      "finish": 44.325,
-      "typingSeconds": 4.14,
-      "answerSeconds": 14.95,
+      "typingStart": 21.145,
+      "enter": 25.201,
+      "answerDone": 40.877,
+      "finish": 45.882,
+      "typingSeconds": 4.06,
+      "answerSeconds": 15.68,
       "holdSeconds": 5,
-      "shotSeconds": 24.09
+      "shotSeconds": 24.74
     },
     {
       "id": "remember",
@@ -57,14 +57,14 @@
       "mode": "auto",
       "brain": "claude",
       "phrase": "Remember that I'm in Grade 9 and my favourite subject is chemistry.",
-      "typingStart": 44.446,
-      "enter": 47.014,
-      "answerDone": 50.325,
-      "finish": 52.131,
+      "typingStart": 45.991,
+      "enter": 48.561,
+      "answerDone": 52.037,
+      "finish": 53.84,
       "typingSeconds": 2.57,
-      "answerSeconds": 3.31,
+      "answerSeconds": 3.48,
       "holdSeconds": 1.8,
-      "shotSeconds": 7.68
+      "shotSeconds": 7.85
     },
     {
       "id": "recall",
@@ -73,16 +73,16 @@
       "mode": "auto",
       "brain": "claude",
       "phrase": "What do you know about me?",
-      "newChatAt": 52.134,
-      "newChatSeconds": 8.53,
-      "typingStart": 61.531,
-      "enter": 62.662,
-      "answerDone": 66.626,
-      "finish": 69.633,
-      "typingSeconds": 1.13,
-      "answerSeconds": 3.96,
+      "newChatAt": 53.842,
+      "newChatSeconds": 8.32,
+      "typingStart": 63.161,
+      "enter": 64.28,
+      "answerDone": 68.45,
+      "finish": 71.455,
+      "typingSeconds": 1.12,
+      "answerSeconds": 4.17,
       "holdSeconds": 3,
-      "shotSeconds": 8.1
+      "shotSeconds": 8.29
     },
     {
       "id": "reminder",
@@ -91,13 +91,13 @@
       "mode": "auto",
       "brain": "claude",
       "phrase": "Remind me in two minutes to drink some water.",
-      "typingStart": 69.661,
-      "enter": 71.451,
-      "answerDone": 74.737,
-      "finish": 77.098,
-      "typingSeconds": 1.79,
-      "answerSeconds": 3.29,
-      "holdSeconds": 2.36,
+      "typingStart": 71.59,
+      "enter": 73.386,
+      "answerDone": 76.731,
+      "finish": 79.028,
+      "typingSeconds": 1.8,
+      "answerSeconds": 3.35,
+      "holdSeconds": 2.29,
       "shotSeconds": 7.44
     },
     {
@@ -107,14 +107,14 @@
       "mode": "auto",
       "brain": "claude",
       "phrase": "Make me a three-day chemistry revision plan and save it in a new folder called Showcase, so I can undo it if I change my mind.",
-      "typingStart": 77.258,
-      "enter": 82.03,
-      "answerDone": 88.807,
-      "finish": 92.312,
-      "typingSeconds": 4.77,
-      "answerSeconds": 6.78,
+      "typingStart": 79.187,
+      "enter": 83.971,
+      "answerDone": 90.313,
+      "finish": 93.817,
+      "typingSeconds": 4.78,
+      "answerSeconds": 6.34,
       "holdSeconds": 3.5,
-      "shotSeconds": 15.05
+      "shotSeconds": 14.63
     },
     {
       "id": "plan-mode",
@@ -124,15 +124,15 @@
       "brain": "claude",
       "phrase": "Delete the Showcase folder.",
       "command": "/mode plan",
-      "commandStart": 92.315,
-      "commandEnter": 92.807,
-      "typingStart": 93.847,
-      "enter": 94.988,
-      "answerDone": 99.554,
-      "finish": 105.485,
-      "typingSeconds": 1.14,
-      "answerSeconds": 4.57,
-      "holdSeconds": 5.93,
+      "commandStart": 93.819,
+      "commandEnter": 94.273,
+      "typingStart": 95.305,
+      "enter": 96.463,
+      "answerDone": 100.929,
+      "finish": 106.945,
+      "typingSeconds": 1.16,
+      "answerSeconds": 4.47,
+      "holdSeconds": 6.01,
       "shotSeconds": 11.64
     }
   ]

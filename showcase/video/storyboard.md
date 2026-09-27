@@ -1,8 +1,10 @@
 # Ghost-Prime demo video: storyboard
 
 **A 90–120 s narrated video, 16:9 widescreen (1920×1080), for the booth screen or projector and to share.**
-It was recorded from the app's **offline replay**: the real React interface in a plain browser, playing
-scripted demos. The cloud session has no `.env`, so there was no real Claude or Gemini. Every phrase below is
+It plays as a straight recording of the app, with no "replay" label, as the presenter asked. It was recorded
+from the app's **offline replay**: the real React interface in a plain browser, playing scripted demos, with
+the replay's own label hidden. The cloud session has no `.env`, so there was no real Claude or Gemini. If
+someone asks whether it's live, say it's a recorded walkthrough and show the real thing at the booth. Every phrase below is
 typed **character for character** from `REHEARSED` in `src/renderer/dev/showcase-scenarios.js`. Anything
 else makes the replay answer "this is a replay". The one exception is `[YOUR CLASS]`, which is filled with the
 real class, as DEMO.md says ("say your real class"). Every word on screen and in the narration follows
@@ -28,7 +30,7 @@ Story: greeting → the hero web demo → remember me / what do you know about m
 | 5 | Reminder (Demo 4) | *Remind me in two minutes to drink some water.* | "Reminders, for homework and revision. Two minutes from now it speaks up, in the chat and out loud." | Reminders that speak up | 8 s |
 | 6 | Study plan, a file with undo (Demo 2) | *Make me a three-day chemistry revision plan and save it in a new folder called Showcase, so I can undo it if I change my mind.* | "Files too. It writes a three-day revision plan and saves it in a new folder. What it creates with its file tools can be undone." | Makes files, with undo | 12 s |
 | 7 | **Safety: PLAN mode** (Demo 7) | `/mode plan`, then *Delete the Showcase folder.* | "Safety for teachers. In plan mode it only looks: asked to delete that folder, it explains what it would do and changes nothing. An 'are you sure?' pop-up is next." | PLAN mode: it only looks | 14 s |
-| 8 | **Closing card** | — | "Recorded from the app's offline replay. Come and try it live at the booth." | — | 6 s |
+| 8 | **Closing card** | — | "That's Ghost-Prime. Come and try it live at the booth." | — | 6 s |
 
 The target total is 92 s. The recorded footage sets the real length; `plan.json` has the final times.
 
@@ -53,13 +55,13 @@ The target total is 92 s. The recorded footage sets the real length; `plan.json`
   `Glob` card looks inside the folder. The answer starts "I'm in PLAN mode, so I haven't changed anything".
   FACTS §5 marks PLAN read-only, from an automated test run offline. The narration ends with the honest
   line: an "are you sure?" pop-up is next, and it is not there yet.
-- **Closing card:** "Demo walkthrough recorded from the app's offline replay" and "Come and try it live
-  at the booth".
+- **Closing card:** the wordmark, the tagline *Use a computer just by talking.*, "Come and try it live at
+  the booth", and the presenter line.
 
 ## Overlays
 
-- **Badge:** "Demo walkthrough · offline replay", bottom right, under the footage, for the whole walkthrough.
-  The replay's own amber "Offline replay · scripted demo" chip is also visible inside the app throughout.
+- **No replay label.** There is no badge on the video, and the replay's own "Offline replay · scripted demo"
+  chip is hidden while recording (`storyboard.json` → `hideReplayLabel`).
 - **Captions:** each demo's caption is a lower third, bottom left. It sits in the band under the footage, so
   it never covers the app.
 - **Narration:** each line starts at its shot's typing-start time and never overlaps the next line. The

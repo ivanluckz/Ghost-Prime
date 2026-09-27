@@ -7,9 +7,9 @@
   Cards and overlays for the demo video (16:9 only), rendered to PNG by edit.mjs with Playwright:
     cards.html?view=title            1920x1080 title card
     cards.html?view=closing          1920x1080 closing card
-    cards.html?view=badge            the small "Demo walkthrough · offline replay" chip (transparent)
+    cards.html?view=badge&text=…     an optional small chip (transparent); the current cut has none
     cards.html?view=caption&text=…   one lower-third caption (transparent)
-    cards.html?view=thumb&img=…      1920x1080 thumbnail with an app frame
+    cards.html?view=thumb&img=…      1920x1080 thumbnail with an app frame (&chip=… adds a chip)
   Name, class and school come in as ?name=&class=&school= (edit.mjs passes storyboard.json → presenter).
   Look: a RED variant of showcase/DESIGN.md, as the presenter asked ("the theme red like the slides").
   Same system (dark ground, Archivo display, Inter body, JetBrains Mono labels, HUD brackets, one accent,
@@ -158,12 +158,12 @@ body.card { background: var(--ground); }
     html = '<section class="slide s-closing"><div class="frame"><div class="main">' +
       '<p class="eyebrow">' + eyebrow + '</p>' +
       '<div><h1 class="wordmark">' + wordmark + '</h1>' +
-      '<p class="display2 replay">' + esc(q.get('line1') || "Demo walkthrough recorded from the app's offline replay") + '</p>' +
+      '<p class="display2 replay">' + esc(q.get('line1') || 'Use a computer just by talking.') + '</p>' +
       '<p class="statement come">' + esc(q.get('line2') || 'Come and try it live at the booth') + '</p></div>' +
       '<p class="presenter">' + who + '</p>' +
       '</div>' + gem + '</div></section>';
   } else if (view === 'badge') {
-    html = '<div class="badge-wrap" id="el"><span class="badge">' + esc(q.get('text') || 'Demo walkthrough · offline replay') + '</span></div>';
+    html = '<div class="badge-wrap" id="el"><span class="badge">' + esc(q.get('text') || '') + '</span></div>';
   } else if (view === 'caption') {
     html = '<div class="cap" id="el"><span class="bar"></span><div class="text">' + esc(q.get('text')) + '</div></div>';
   } else if (view === 'thumb') {
@@ -173,7 +173,7 @@ body.card { background: var(--ground); }
       '<h1 class="wordmark">' + wordmark + '</h1>' +
       '<p class="statement">' + esc(q.get('statement') || 'Use a computer just by talking.') + '</p>' +
       '<p class="one">' + esc(q.get('one') || 'A voice assistant that does the task for you, built on a school Chromebook.') + '</p>' +
-      '<span class="chip">' + esc(q.get('chip') || 'Demo walkthrough · offline replay') + '</span>' +
+      (q.get('chip') ? '<span class="chip">' + esc(q.get('chip')) + '</span>' : '') +
       '</div><figure class="shot"><img src="' + esc(q.get('img') || '') + '" alt="The Ghost-Prime app mid demo"></figure></div></section>';
   }
   document.getElementById('root').innerHTML = html;

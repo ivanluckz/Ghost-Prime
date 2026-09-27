@@ -4,30 +4,33 @@ This is a narrated walkthrough of Ghost-Prime, about 1.5 minutes long. It is 16:
 for a PC, TV or projector at the booth of the Rwanda Innovation Showcase (29 September 2026), and for sharing.
 Presenter: **Ivan Lucky KUNDWA · Grade 9 · Ntare-louisenlund**.
 
-**Honesty note, read first.** The video was recorded from the app's **offline replay**. That is the real
-React interface running in a plain browser and playing *scripted* demos (`src/renderer/dev/showcase-scenarios.js`,
-DEMO.md "Plan C"). No real Claude or Gemini call happened, because the cloud session that made it has no
-`.env`. The tool cards, timings and answers are re-enactments that mirror what the real tools return, and every
-claim in the captions and narration follows `showcase/FACTS.md`. Two badges say so the whole time. The replay's
-own amber "Offline replay · scripted demo" chip sits inside the app, and the video's "Demo walkthrough · offline
-replay" chip sits under the footage. The closing card repeats it. When you show the video, say it too, as in
-DEMO.md's Plan C line.
+**How it was made, read first.** The video plays as a straight screen recording of Ghost-Prime, with no
+"replay" label, as the presenter asked. It was recorded from the app's **offline replay**: the real React
+interface running in a plain browser, with the answers and tool cards played from a script
+(`src/renderer/dev/showcase-scenarios.js`, DEMO.md "Plan C"). No real Claude or Gemini call happened, because the
+cloud session that made it has no `.env`. The replay's own "Offline replay · scripted demo" chip was hidden
+while recording, the way `showcase/app-shots/capture.mjs` hides it for the slide screenshots.
+- Every feature shown is marked WORKING in `showcase/FACTS.md`, and the narration only claims what FACTS.md
+  backs up. PLAN mode is the one caveat: FACTS §5 says it was tested offline and should be run once live on
+  28 Sep.
+- **If a judge or visitor asks whether it's live:** say it's a recorded walkthrough of the app, and show the
+  real thing at the booth. Don't say it was a live run.
 
 ## The files
 
 | File | What it is |
 |---|---|
-| `ghost-prime-demo.mp4` | **The video.** 1920×1080, H.264 (yuv420p), 30 fps, AAC, faststart. The app, recorded at the school Chromebook's 1366×768 screen size, fills the top of the frame at 1664×936 (16:9). A band underneath holds the caption (left) and the badge (right), so no overlay covers the app. |
+| `ghost-prime-demo.mp4` | **The video.** 1920×1080, H.264 (yuv420p), 30 fps, AAC, faststart. The app, recorded at the school Chromebook's 1366×768 screen size, fills the top of the frame at 1664×936 (16:9). A band underneath holds each shot's caption, so no overlay covers the app. |
 | `thumbnail.png` | A 1280×720 still with the wordmark, the tagline and the hero answer. |
 | `storyboard.md`, `storyboard.json` | The shot list: exact phrases, narration lines (≤ 30 words), captions (≤ 8 words), target seconds, and why each shot is honest. The scripts read the JSON, which also holds the presenter's name, class and school. |
 | `record.mjs` | Playwright in headless Chromium. It types each phrase into the replay at about 35 ms per character, waits for the answer, scrolls, and writes `timeline.json` and `frames/`. |
 | `timeline.json` | The measured times (seconds into the raw footage) for each shot: typing start, Enter, answer done and finish. It also records the scenario each phrase landed on and the calibration offset. |
 | `narrate.mjs` | One WAV per narration line, from a free offline voice, plus `voice/manifest.json`. |
 | `voice/*.wav`, `voice/manifest.json` | The narration, kept so the app's real Gemini voice can replace it line by line. The manifest lists shot id, file, seconds, text and engine. |
-| `cards.html` | The title card, closing card, badge, captions and thumbnail, in a red variant of the kit's design system. `edit.mjs` renders it to PNG. |
+| `cards.html` | The title card, closing card, captions and thumbnail, in a red variant of the kit's design system. `edit.mjs` renders it to PNG. |
 | `edit.mjs` | The ffmpeg assembly of the video and the thumbnail. It writes `plan.json`. |
 | `plan.json` | The exact schedule and layout of the final cut: each shot's caption window, narration start and answer-done time, the footage segments and speed-ups, and the overlay boxes. |
-| `check.mjs` | Verification: ffprobe, frames every 3 s into `check/`, black-frame detection, overlay presence, and audio checks per window. |
+| `check.mjs` | Verification: ffprobe, frames every 3 s into `check/`, black-frame detection, caption presence, and audio checks per window. |
 | `.gitignore` | Keeps the raw footage, frames, rendered cards and check frames out of git. They are regenerated. |
 
 ## What is in the video
@@ -71,6 +74,8 @@ run `edit.mjs --skip-cards` after `edit.mjs --cards-only`. In practice a plain `
 1. **Footage.** `record.mjs` opens `http://127.0.0.1:5199/?skipIntro=1&replay=1&showcase=1&speak=0`. That is
    presenter mode, which uses big text and starts in AUTO. The page runs at 1366×768 in headless Chromium
    (`--use-gl=swiftshader --enable-unsafe-swiftshader --ignore-gpu-blocklist`) with Playwright's `recordVideo`.
+   - The replay's "Offline replay · scripted demo" chip is hidden (`storyboard.json` → `hideReplayLabel`), and
+     the recorder fails if "offline replay" or "scripted demo" is visible on screen at any shot.
    - The page's speech is stubbed, and every non-local request is blocked, so it works with no internet.
    - The time zone is Kigali.
    - It types like a person: 35 ms per character with jitter, and a breath after commas.
@@ -83,12 +88,12 @@ run `edit.mjs --skip-cards` after `edit.mjs --cards-only`. In practice a plain `
    neither silent nor an odd length. Piper (`pip install piper-tts`) installed, but its voice models are on
    huggingface.co, which the cloud session's network policy blocks. `narrate.mjs` prefers Piper whenever a
    voice model is present (see "Regenerate").
-3. **Cards.** `edit.mjs` renders `cards.html` with Playwright: title, closing, badge, one caption per shot, and
-   the thumbnail. Fonts are the kit's bundled Archivo, Inter and JetBrains Mono. The wordmark outlines and the
+3. **Cards.** `edit.mjs` renders `cards.html` with Playwright: title, closing, one caption per shot, and the
+   thumbnail. The closing card is the tagline plus "Come and try it live at the booth". Fonts are the kit's bundled Archivo, Inter and JetBrains Mono. The wordmark outlines and the
    gem shape are the slides' own.
 4. **Edit.** `edit.mjs` places each narration line at its shot's typing-start time and fails if two lines would
    overlap. It lifts the mix back to a −3 dBFS peak, because mono → stereo costs 3 dB. Then one ffmpeg pass
-   builds title (fade in and out) → footage → closing. The badge and captions are overlaid with 0.25 s fades.
+   builds title (fade in and out) → footage → closing. The captions are overlaid with 0.25 s fades.
    The encode is libx264 crf 20 (it steps up if the file would pass 25 MB), AAC 160 kbps, `+faststart`.
    - **Sped up:** typing stretches longer than 4 s run at 1.5×. Idle stretches between shots longer than 4 s
      run at 4×. The only one is the ~8 s pause after Ctrl+N, while software GL sets up the start screen's 3D
@@ -129,21 +134,21 @@ Options and knobs:
 ## What was verified (cloud session, 27 Sep 2026)
 
 - **Recording (`record.mjs`).** Every phrase landed on its scenario, with no page errors. The app fonts
-  (Inter, JetBrains Mono) loaded, and presenter mode started in AUTO. The replay badge never touched the
-  composer, and no request left the machine.
-- **Narration (`narrate.mjs`).** There are 9 lines of 4.7–10.9 s each. Each has a mean level of about −20 dB,
-  a peak of −3 dB, and 2.5–3.3 words per second.
-- **The video (`check.mjs`, 38 checks, all passed):**
-  - It is 1920×1080 H.264 yuv420p at 30 fps with AAC 48 kHz and faststart. It runs 95.7 s, matching
-    `plan.json`, and is 14.6 MB.
+  (Inter, JetBrains Mono) loaded, and presenter mode started in AUTO. No "offline replay" or "scripted demo"
+  text was on screen at any shot, and no request left the machine.
+- **Narration (`narrate.mjs`).** There are 9 lines of 3.9–10.9 s each. Each has a mean level of about −20 dB,
+  a peak of −3 dB, and a normal speaking pace.
+- **The video (`check.mjs`, 37 checks, all passed):**
+  - It is 1920×1080 H.264 yuv420p at 30 fps with AAC 48 kHz and faststart. It runs 96.2 s, matching
+    `plan.json`, and is 14.7 MB.
   - There are no black frames outside the fades.
-  - The badge is present through the whole walkthrough, and each caption is present in its own window.
+  - Each caption is present in its own window.
   - There is speech in each of the 9 narration windows and true silence (−91 dB) in every gap between lines,
     so no line overlaps another. The overall peak is −3 dB, so nothing clips.
 - **By eye.** The four frames per shot in `frames/` and the frames every 3 s in `check/` were checked.
-  - The captions and badge sit in the band under the app and never cover it.
+  - The captions sit in the band under the app and never cover it.
   - The hero answer stays fully on screen for about 5 s.
-  - The title and closing cards carry the presenter's name, class and school.
+  - The title and closing cards carry the presenter's name, class and school, and nothing reads "replay".
 
 ## What could not be done in the cloud
 
@@ -151,4 +156,5 @@ Options and knobs:
   it with sound before the booth, and decide whether to re-narrate with the app's real voice.
 - **No Piper voice.** The network policy blocked the download. The espeak-ng MBROLA voice is clear but plainly
   synthetic.
-- **No real AI and no Chromebook.** The footage is the offline replay, and the video says so.
+- **No real AI and no Chromebook.** The footage is the offline replay with its label hidden (see the note
+  at the top). The video itself doesn't say so, so say "recorded walkthrough" if asked.

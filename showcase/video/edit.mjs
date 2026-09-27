@@ -1,7 +1,7 @@
 // Assemble the demo video with ffmpeg: title card → the replay footage → closing card, 16:9 (1920x1080,
-// a PC/projector presentation), with a small persistent "Demo walkthrough · offline replay" badge, each
-// shot's caption as a lower third, and the narration lines placed at each shot's typing-start time (never
-// overlapping). Also the thumbnail. Cards and overlays are rendered from cards.html (red variant of the
+// a PC/projector presentation), with each shot's caption as a lower third, an optional small persistent
+// badge (storyboard.json → badge; null for none), and the narration lines placed at each shot's
+// typing-start time (never overlapping). Also the thumbnail. Cards and overlays are rendered from cards.html (red variant of the
 // kit's DESIGN.md look).
 //
 //   node showcase/video/narrate.mjs && node showcase/video/record.mjs     (first)
@@ -13,7 +13,7 @@
 //         thumbnail.png (1280x720), plan.json (the exact schedule and layout used: shot windows,
 //         captions, narration starts, overlay boxes; check.mjs reads it), render/*.png (regenerated)
 // Layout: the 1366x768 app footage scaled to 1664x936 (16:9) at the top of the frame; under it a 120 px
-// band holds the caption (left) and the badge (right), so no overlay ever covers the app.
+// band holds the caption (left) and the badge, if any (right), so no overlay ever covers the app.
 // Rules from the brief: idle or typing stretches longer than 4 s may be sped up (storyboard.json → edit:
 // speedUpTypingOver / typingSpeed for typing, speedUpIdleOver / idleSpeed for idle stretches between
 // shots); the moments an answer streams are never touched. Narration peaks at -3 dBFS with short fades.
@@ -94,10 +94,10 @@ async function renderCards() {
   const cc = closingShot?.card || {}
   await shoot({ view: 'title', ...common, statement: tc.statement || 'Use a computer just by talking.' }, join(renderDir, 'title.png'))
   await shoot({ view: 'closing', ...common, line1: cc.line1, line2: cc.line2 }, join(renderDir, 'closing.png'))
-  await shoot({ view: 'badge', text: sb.badge }, join(renderDir, 'badge.png'), { viewport: { width: 900, height: 200 }, element: '#el' })
+  if (sb.badge) await shoot({ view: 'badge', text: sb.badge }, join(renderDir, 'badge.png'), { viewport: { width: 900, height: 200 }, element: '#el' })
   for (const s of demos) await shoot({ view: 'caption', text: s.caption }, join(renderDir, `caption-${s.id}.png`), { viewport: { width: 1200, height: 200 }, element: '#el' })
   const heroFrame = join(here, 'frames', `${String(demos.findIndex((s) => s.id === 'hero') + 1).padStart(2, '0')}-hero-answer.png`)
-  await shoot({ view: 'thumb', ...common, img: existsSync(heroFrame) ? pathToFileURL(heroFrame).href : '' }, join(renderDir, 'thumb.png'))
+  await shoot({ view: 'thumb', ...common, chip: sb.badge || '', img: existsSync(heroFrame) ? pathToFileURL(heroFrame).href : '' }, join(renderDir, 'thumb.png'))
   await browser.close()
   if (problems) throw new Error(`${problems} problem(s) rendering the cards`)
 }
@@ -184,11 +184,13 @@ const pngSize = (file) => {
   const [w, h] = must('ffprobe', ['-v', 'error', '-select_streams', 'v:0', '-show_entries', 'stream=width,height', '-of', 'csv=p=0', file]).stdout.trim().split(',').map(Number)
   return { w, h }
 }
-const badgeSize = pngSize(join(renderDir, 'badge.png'))
-layout.badge = { x: FX + FW - badgeSize.w + 4, y: BAND_Y + Math.round((H - BAND_Y - badgeSize.h) / 2), ...badgeSize }
+if (sb.badge) {
+  const badgeSize = pngSize(join(renderDir, 'badge.png'))
+  layout.badge = { x: FX + FW - badgeSize.w + 4, y: BAND_Y + Math.round((H - BAND_Y - badgeSize.h) / 2), ...badgeSize }
+}
 const capSize = pngSize(join(renderDir, `caption-${demos[0].id}.png`))
 layout.caption = { x: FX - 4, y: BAND_Y + Math.round((H - BAND_Y - capSize.h) / 2), ...capSize }
-if (layout.caption.x + capSize.w > layout.badge.x) console.log(`note: caption box reaches ${layout.caption.x + capSize.w}px, badge starts at ${layout.badge.x}px (captions are short, so the text itself stays clear)`)
+if (layout.badge && layout.caption.x + capSize.w > layout.badge.x) console.log(`note: caption box reaches ${layout.caption.x + capSize.w}px, badge starts at ${layout.badge.x}px (captions are short, so the text itself stays clear)`)
 
 const plan = {
   madeAt: new Date().toISOString(),
@@ -198,7 +200,7 @@ const plan = {
   title: { start: 0, end: fmt(titleSec) },
   footage: { start: fmt(footStart), end: fmt(footEnd), source: tl.video, sourceStart: fmt(srcStart), sourceEnd: fmt(srcEnd), segments: segs.map((s) => ({ ...s, start: fmt(s.start), end: fmt(s.end), outStart: fmt(footStart + mapT(s.start)), outEnd: fmt(footStart + mapT(s.end)) })) },
   closing: { start: fmt(footEnd), end: fmt(total) },
-  badge: { text: sb.badge, start: fmt(footStart), end: fmt(footEnd) },
+  badge: sb.badge ? { text: sb.badge, start: fmt(footStart), end: fmt(footEnd) } : null,
   shots,
   narration
 }
@@ -249,7 +251,7 @@ const outFile = join(here, 'ghost-prime-demo.mp4')
     f.push(`[${v}][${label}]overlay=x=${pos.x}:y=${pos.y}:format=auto:enable='between(t,${start.toFixed(3)},${end.toFixed(3)})'[${label}o]`)
     v = `${label}o`
   }
-  overlay(join(renderDir, 'badge.png'), layout.badge, footStart, footEnd, 'bd')
+  if (layout.badge) overlay(join(renderDir, 'badge.png'), layout.badge, footStart, footEnd, 'bd')
   shots.forEach((s, k) => overlay(join(renderDir, `caption-${s.id}.png`), layout.caption, s.start, s.end, `c${k}`))
   f.push(`[${v}]format=yuv420p[vout]`)
   inputs.push('-i', bed)

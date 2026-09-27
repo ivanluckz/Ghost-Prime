@@ -2,7 +2,7 @@
 //   1. ffprobe: 1920x1080 H.264 yuv420p 30 fps, AAC, duration <= 120 s, size <= 25 MB, faststart.
 //   2. Frames every 3 s into check/, plus a contact sheet, to look at by eye.
 //      Black-frame detection: nothing black except the fades between cards and footage.
-//   3. Overlays: the badge region is lit during the footage; each shot's caption region is lit in its window.
+//   3. Overlays: each shot's caption region is lit in its window (and the badge, if the storyboard has one).
 //   4. Audio: speech present in every narration window, silence between lines (no overlap, nothing stray),
 //      no clipping (peak <= -2.5 dBFS).
 //   node showcase/video/check.mjs
@@ -96,10 +96,12 @@ function checkVideo(name, { W, H, badgeRegion, captionRegion, frameEvery, tileCo
   const DARK = 24
   const LIT = 28
   const mid = (plan.footage.start + plan.footage.end) / 2
-  const badgeY = regionLuma(file, mid, badgeRegion)
-  ;(badgeY > LIT ? ok : bad)(`${name}: badge region luma ${badgeY?.toFixed(1)} mid-footage (lit is > ${LIT})`)
-  const badgeEnd = regionLuma(file, plan.footage.end - 0.6, badgeRegion)
-  ;(badgeEnd > LIT ? ok : bad)(`${name}: badge region luma ${badgeEnd?.toFixed(1)} at the end of the footage`)
+  if (badgeRegion) {
+    const badgeY = regionLuma(file, mid, badgeRegion)
+    ;(badgeY > LIT ? ok : bad)(`${name}: badge region luma ${badgeY?.toFixed(1)} mid-footage (lit is > ${LIT})`)
+    const badgeEnd = regionLuma(file, plan.footage.end - 0.6, badgeRegion)
+    ;(badgeEnd > LIT ? ok : bad)(`${name}: badge region luma ${badgeEnd?.toFixed(1)} at the end of the footage`)
+  } else ok(`${name}: no badge overlay (storyboard.json → badge is null)`)
   for (const s of plan.shots) {
     const t = (s.start + s.end) / 2
     const y = regionLuma(file, t, captionRegion)
@@ -130,7 +132,7 @@ function checkVideo(name, { W, H, badgeRegion, captionRegion, frameEvery, tileCo
 
 const L = plan.layout
 const box = (b, w = b.w) => [Math.min(w, b.w), b.h, b.x, b.y]
-checkVideo('ghost-prime-demo.mp4', { W: plan.size[0], H: plan.size[1], badgeRegion: box(L.badge), captionRegion: box(L.caption, 760), frameEvery: 3, tileCols: 6 })
+checkVideo('ghost-prime-demo.mp4', { W: plan.size[0], H: plan.size[1], badgeRegion: L.badge ? box(L.badge) : null, captionRegion: box(L.caption, 760), frameEvery: 3, tileCols: 6 })
 const thumb = join(here, 'thumbnail.png')
 if (existsSync(thumb)) {
   const r = sh('ffprobe', ['-v', 'error', '-select_streams', 'v:0', '-show_entries', 'stream=width,height', '-of', 'csv=p=0', thumb]).stdout.trim()
