@@ -1,0 +1,253 @@
+{
+  "madeAt": "2026-09-27T10:46:47.429Z",
+  "size": [
+    1920,
+    1080
+  ],
+  "totalSeconds": 95.668,
+  "layout": {
+    "footage": {
+      "x": 128,
+      "y": 16,
+      "w": 1664,
+      "h": 936
+    },
+    "band": {
+      "x": 128,
+      "y": 952,
+      "w": 1664,
+      "h": 128
+    },
+    "badge": {
+      "x": 1275,
+      "y": 990,
+      "w": 521,
+      "h": 53
+    },
+    "caption": {
+      "x": 124,
+      "y": 968,
+      "w": 1100,
+      "h": 96
+    }
+  },
+  "title": {
+    "start": 0,
+    "end": 5.576
+  },
+  "footage": {
+    "start": 5.576,
+    "end": 89.668,
+    "source": "footage/replay.webm",
+    "sourceStart": 12.223,
+    "sourceEnd": 105.885,
+    "segments": [
+      {
+        "start": 12.223,
+        "end": 20.232,
+        "speed": 1,
+        "outStart": 5.576,
+        "outEnd": 13.585
+      },
+      {
+        "start": 20.232,
+        "end": 24.371,
+        "speed": 1.5,
+        "shot": "hero",
+        "what": "typing",
+        "outStart": 13.585,
+        "outEnd": 16.344
+      },
+      {
+        "start": 24.371,
+        "end": 52.431,
+        "speed": 1,
+        "outStart": 16.344,
+        "outEnd": 44.404
+      },
+      {
+        "start": 52.431,
+        "end": 61.231,
+        "speed": 4,
+        "shot": "remember→recall",
+        "what": "idle",
+        "outStart": 44.404,
+        "outEnd": 46.604
+      },
+      {
+        "start": 61.231,
+        "end": 77.258,
+        "speed": 1,
+        "outStart": 46.604,
+        "outEnd": 62.631
+      },
+      {
+        "start": 77.258,
+        "end": 82.03,
+        "speed": 1.5,
+        "shot": "study-plan",
+        "what": "typing",
+        "outStart": 62.631,
+        "outEnd": 65.813
+      },
+      {
+        "start": 82.03,
+        "end": 105.885,
+        "speed": 1,
+        "outStart": 65.813,
+        "outEnd": 89.668
+      }
+    ]
+  },
+  "closing": {
+    "start": 89.668,
+    "end": 95.668
+  },
+  "badge": {
+    "text": "Demo walkthrough · offline replay",
+    "start": 5.576,
+    "end": 89.668
+  },
+  "shots": [
+    {
+      "id": "hello",
+      "caption": "Talk or type. It does the task.",
+      "start": 6.576,
+      "end": 13.535,
+      "typingStart": 6.576,
+      "enter": 7.632,
+      "answerDone": 10.237,
+      "finish": 13.374,
+      "narrationStart": 6.576,
+      "narrationSeconds": 6.095
+    },
+    {
+      "id": "hero",
+      "caption": "Reads the web, explains it simply",
+      "start": 13.585,
+      "end": 36.369,
+      "typingStart": 13.585,
+      "enter": 16.344,
+      "answerDone": 31.29,
+      "finish": 36.298,
+      "narrationStart": 13.585,
+      "narrationSeconds": 10.416
+    },
+    {
+      "id": "remember",
+      "caption": "It remembers what you tell it",
+      "start": 36.419,
+      "end": 46.413,
+      "typingStart": 36.419,
+      "enter": 38.987,
+      "answerDone": 42.298,
+      "finish": 44.104,
+      "narrationStart": 36.419,
+      "narrationSeconds": 6.433
+    },
+    {
+      "id": "recall",
+      "caption": "A new chat. It still knows.",
+      "start": 46.463,
+      "end": 54.984,
+      "typingStart": 46.904,
+      "enter": 48.035,
+      "answerDone": 51.999,
+      "finish": 55.006,
+      "narrationStart": 46.904,
+      "narrationSeconds": 5.348
+    },
+    {
+      "id": "reminder",
+      "caption": "Reminders that speak up",
+      "start": 55.034,
+      "end": 62.581,
+      "typingStart": 55.034,
+      "enter": 56.824,
+      "answerDone": 60.11,
+      "finish": 62.471,
+      "narrationStart": 55.034,
+      "narrationSeconds": 6.735
+    },
+    {
+      "id": "study-plan",
+      "caption": "Makes files, with undo",
+      "start": 62.631,
+      "end": 76.048,
+      "typingStart": 62.631,
+      "enter": 65.813,
+      "answerDone": 72.59,
+      "finish": 76.095,
+      "narrationStart": 62.631,
+      "narrationSeconds": 8.248
+    },
+    {
+      "id": "plan-mode",
+      "caption": "PLAN mode: it only looks",
+      "start": 76.098,
+      "end": 89.668,
+      "typingStart": 77.63,
+      "enter": 78.771,
+      "answerDone": 83.337,
+      "finish": 89.268,
+      "narrationStart": 77.63,
+      "narrationSeconds": 10.936
+    }
+  ],
+  "narration": [
+    {
+      "shot": "title",
+      "start": 0.4,
+      "seconds": 4.676,
+      "file": "voice/title.wav"
+    },
+    {
+      "shot": "hello",
+      "start": 6.576,
+      "seconds": 6.095,
+      "file": "voice/hello.wav"
+    },
+    {
+      "shot": "hero",
+      "start": 13.585,
+      "seconds": 10.416,
+      "file": "voice/hero.wav"
+    },
+    {
+      "shot": "remember",
+      "start": 36.419,
+      "seconds": 6.433,
+      "file": "voice/remember.wav"
+    },
+    {
+      "shot": "recall",
+      "start": 46.904,
+      "seconds": 5.348,
+      "file": "voice/recall.wav"
+    },
+    {
+      "shot": "reminder",
+      "start": 55.034,
+      "seconds": 6.735,
+      "file": "voice/reminder.wav"
+    },
+    {
+      "shot": "study-plan",
+      "start": 62.631,
+      "seconds": 8.248,
+      "file": "voice/study-plan.wav"
+    },
+    {
+      "shot": "plan-mode",
+      "start": 77.63,
+      "seconds": 10.936,
+      "file": "voice/plan-mode.wav"
+    },
+    {
+      "shot": "closing",
+      "start": 90.068,
+      "seconds": 4.77,
+      "file": "voice/closing.wav"
+    }
+  ]
+}

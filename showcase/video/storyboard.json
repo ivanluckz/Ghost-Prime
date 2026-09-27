@@ -1,0 +1,165 @@
+{
+  "$comment": "Storyboard for the 90-120 s booth video. record.mjs types each demo shot's phrase into the offline replay (src/renderer/dev/showcase-scenarios.js) verbatim, with [YOUR CLASS] filled from `presenter` as DEMO.md says ('say your real class'); narrate.mjs speaks each narration line; edit.mjs assembles title card, footage, closing card, badge and captions. Claims follow showcase/FACTS.md. The look is a red variant of showcase/DESIGN.md, as the presenter asked.",
+  "title": "Ghost-Prime demo walkthrough",
+  "event": "Rwanda Innovation Showcase 2026",
+  "presenter": {
+    "name": "Ivan Lucky KUNDWA",
+    "class": "Grade 9",
+    "school": "Ntare-louisenlund"
+  },
+  "replayUrl": "http://127.0.0.1:5199/?skipIntro=1&replay=1&showcase=1&speak=0",
+  "viewport": {
+    "width": 1366,
+    "height": 768
+  },
+  "output": {
+    "fps": 30,
+    "maxSeconds": 120,
+    "size": [
+      1920,
+      1080
+    ]
+  },
+  "badge": "Demo walkthrough · offline replay",
+  "typing": {
+    "msPerChar": 35,
+    "jitterMs": 13,
+    "pauseAfterCommaMs": 140,
+    "pauseAfterStopMs": 220
+  },
+  "holdAfterAnswerSeconds": 1.8,
+  "narrationGapSeconds": 0.7,
+  "edit": {
+    "$comment": "edit.mjs knobs. Typing stretches over speedUpTypingOver seconds run at typingSpeed; idle stretches between shots over speedUpIdleOver seconds (nothing on screen changes) run at idleSpeed; answers always stream at 1x. lead/tail: seconds of footage kept before the first and after the last shot.",
+    "speedUpTypingOver": 4,
+    "typingSpeed": 1.5,
+    "speedUpIdleOver": 4,
+    "idleSpeed": 4,
+    "lead": 1.0,
+    "tail": 0.4
+  },
+  "shots": [
+    {
+      "id": "title",
+      "kind": "card",
+      "seconds": 5,
+      "narration": "Ghost-Prime, by Ivan Lucky. Use a computer just by talking.",
+      "caption": null,
+      "card": {
+        "eyebrow": "Rwanda Innovation Showcase 2026",
+        "wordmark": "GHOST-PRIME",
+        "statement": "Use a computer just by talking.",
+        "presenter": [
+          "Ivan Lucky KUNDWA",
+          "Grade 9",
+          "Ntare-louisenlund"
+        ]
+      }
+    },
+    {
+      "id": "hello",
+      "kind": "demo",
+      "demo": 0,
+      "scenario": "hello",
+      "phrase": "Say hello to the judges.",
+      "narration": "Ghost-Prime is an AI assistant on a school Chromebook. You talk or type, and it does the task.",
+      "caption": "Talk or type. It does the task.",
+      "seconds": 8,
+      "why": "The answer streams in word by word with a CLAUDE tag. Inside 10 seconds the viewer knows what Ghost-Prime is."
+    },
+    {
+      "id": "hero",
+      "kind": "demo",
+      "demo": 5,
+      "scenario": "photosynthesis",
+      "phrase": "Go to the Wikipedia website, search for photosynthesis, and explain it to me in three simple sentences.",
+      "narration": "Now it reads the web for you. It opens Wikipedia, types the search itself, reads the article, and explains it in three simple sentences. Every step shows as a card.",
+      "caption": "Reads the web, explains it simply",
+      "seconds": 22,
+      "why": "The hero demo used across the whole kit (DEMO.md Demo 5). Tool cards: browser_navigate, browser_get_page (numbered elements), browser_fill, screenshot, browser_get_text, then the three-sentence answer.",
+      "holdAfterAnswerSeconds": 5.0
+    },
+    {
+      "id": "remember",
+      "kind": "demo",
+      "demo": 3,
+      "scenario": "memory-save",
+      "phrase": "Remember that I'm in [YOUR CLASS] and my favourite subject is chemistry.",
+      "narration": "It remembers you from one day to the next. Tell it something once; the memory is stored on the Chromebook.",
+      "caption": "It remembers what you tell it",
+      "seconds": 9,
+      "why": "memory_save card, then 'Got it, I'll remember…'. The rehearsed phrase with the real class filled in (DEMO.md: say your real class). FACTS: memory WORKING; DEMO.md: 'the memories are stored on this Chromebook'."
+    },
+    {
+      "id": "recall",
+      "kind": "demo",
+      "demo": 3,
+      "scenario": "memory-recall",
+      "before": {
+        "newChat": true
+      },
+      "phrase": "What do you know about me?",
+      "narration": "In a brand-new chat, it still knows: what you just said, and what it learned before.",
+      "caption": "A new chat. It still knows.",
+      "seconds": 8,
+      "why": "Ctrl+N first (DEMO.md: ask in a chat that never heard it). memory_recall card, then the list including the memory just saved.",
+      "holdAfterAnswerSeconds": 3.0
+    },
+    {
+      "id": "reminder",
+      "kind": "demo",
+      "demo": 4,
+      "scenario": "reminder",
+      "phrase": "Remind me in two minutes to drink some water.",
+      "narration": "Reminders, for homework and revision. Two minutes from now it speaks up, in the chat and out loud.",
+      "caption": "Reminders that speak up",
+      "seconds": 8,
+      "why": "reminder_set card with the time. FACTS: reminders WORKING (desktop notification and spoken alert). The firing itself is not in the video."
+    },
+    {
+      "id": "study-plan",
+      "kind": "demo",
+      "demo": 2,
+      "scenario": "revision-plan",
+      "phrase": "Make me a three-day chemistry revision plan and save it in a new folder called Showcase, so I can undo it if I change my mind.",
+      "narration": "Files too. It writes a three-day revision plan and saves it in a new folder. What it creates with its file tools can be undone.",
+      "caption": "Makes files, with undo",
+      "seconds": 12,
+      "why": "file_create card with ~/Showcase/chemistry-revision-plan.txt. Also the setup for the PLAN demo: the folder now exists. FACTS: files with undo WORKING.",
+      "holdAfterAnswerSeconds": 3.5
+    },
+    {
+      "id": "plan-mode",
+      "kind": "demo",
+      "demo": 7,
+      "scenario": "delete",
+      "before": {
+        "command": "/mode plan",
+        "expectMode": "plan"
+      },
+      "phrase": "Delete the Showcase folder.",
+      "narration": "Safety for teachers. In plan mode it only looks: asked to delete that folder, it explains what it would do and changes nothing. An 'are you sure?' pop-up is next.",
+      "caption": "PLAN mode: it only looks",
+      "seconds": 14,
+      "why": "/mode plan typed first (never Shift+Tab). A read-only Glob card, then 'I'm in PLAN mode, so I haven't changed anything…'. FACTS §5: PLAN is read-only, tested offline; no 'are you sure?' pop-up yet."
+    },
+    {
+      "id": "closing",
+      "kind": "card",
+      "seconds": 6,
+      "narration": "Recorded from the app's offline replay. Come and try it live at the booth.",
+      "caption": null,
+      "card": {
+        "wordmark": "GHOST-PRIME",
+        "line1": "Demo walkthrough recorded from the app's offline replay",
+        "line2": "Come and try it live at the booth",
+        "eyebrow": "Rwanda Innovation Showcase 2026",
+        "presenter": [
+          "Ivan Lucky KUNDWA",
+          "Grade 9",
+          "Ntare-louisenlund"
+        ]
+      }
+    }
+  ]
+}

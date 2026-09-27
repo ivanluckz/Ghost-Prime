@@ -194,6 +194,46 @@ every subsystem, and two skeptics checked each finding. The ones that matter mos
   `lol@penguin`). If you'd rather not show it, change `HOME`/`PROMPT` in
   `src/renderer/dev/showcase-scenarios.js`, then re-shoot with `node showcase/app-shots/capture.mjs`.
 
+### Video (27 Sep, cloud session)
+
+**What was made.** `showcase/video/ghost-prime-demo.mp4` is a 95.7-second narrated demo video. It is 16:9
+widescreen (1920×1080) for a PC, TV or projector at the booth, and for sharing. `thumbnail.png` goes with it.
+- It was recorded from the app's **offline replay**, because the cloud has no `.env` and so no real Claude or
+  Gemini. A badge says so for the whole walkthrough, and the closing card says it again.
+- Title card ("Ivan Lucky KUNDWA · Grade 9 · Ntare-louisenlund") → seven demos → closing card.
+  - The demos, in order: greeting, the hero Wikipedia → photosynthesis demo, "Remember that I'm in Grade 9…",
+    "What do you know about me?" in a new chat, a two-minute reminder, a chemistry revision plan saved to a new
+    folder, and `/mode plan` then "Delete the Showcase folder".
+  - Every phrase is typed character for character from the rehearsed list.
+  - Every caption and narration line follows FACTS.md. `storyboard.md` lists them, why each shot is honest, and
+    what was left out.
+- **The look is a red variant of DESIGN.md**, as asked. No red deck was found in the repo, Canva or Drive, so
+  red simply replaces cyan as the accent on the cards and overlays. The app footage keeps its own colours.
+- The pipeline can be re-run: `narrate.mjs` (offline voice), `record.mjs` (Playwright drives the replay),
+  `edit.mjs` (ffmpeg) and `check.mjs` (verification). `showcase/video/README.md` has the commands.
+
+**What was verified.**
+- Every phrase landed on its scenario, with no page errors, and the replay badge stayed clear of the composer.
+- `check.mjs` passed all 38 checks:
+  - H.264 yuv420p at 30 fps with AAC and faststart, 14.6 MB.
+  - No black frames outside the fades.
+  - The badge and every caption are present in their windows.
+  - Speech is present in all 9 narration windows, with true silence between lines and no clipping.
+- Every extracted frame was looked at: four per shot, plus one every 3 s of the final cut.
+
+**What you should check yourself.**
+1. **Watch it with sound.** The narration is a free offline voice (espeak-ng with the MBROLA British voice),
+   and it was checked by numbers, not by ear. Piper, a better free voice, installed, but its voice models are
+   on huggingface.co, which the cloud network blocks. One command in the README fetches one on the Chromebook.
+2. **Decide whether to re-narrate with the app's real Gemini voice.** `voice/manifest.json` lists each line
+   (shot, file, seconds, text). Record each line with the app's voice under the same file name, update
+   `seconds`, then re-run `record.mjs` and `edit.mjs`.
+3. **The red.** If you have a red slide deck, send it, or put its hex colours in `cards.html` (the `:root`
+   tokens and `wmGrad`) and re-run `edit.mjs`.
+4. **The name** appears on the video only. The slides, poster and pitch card still carry the `[YOUR NAME]`
+   placeholders, so fill those in as listed below.
+5. Play it once on the booth screen from 3 m away and check that the captions read.
+
 ### What you must do in person (before 29 Sep)
 1. **Rebuild the phone APK** (`android-connector`, see its README), then test it on the Galaxy A05.
    Test the Chrome extension too. Until then, show both only as "next".

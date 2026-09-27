@@ -1,0 +1,112 @@
+{
+  "generatedAt": "2026-09-27T10:38:13.359Z",
+  "engine": {
+    "name": "espeak-ng",
+    "voice": "mb-en1",
+    "wpm": 150,
+    "command": "espeak-ng -v mb-en1 -s 150 -w <out.wav> \"<text>\""
+  },
+  "format": "24 kHz mono 16-bit WAV, peak -3 dBFS, 0.25 s of room at the end",
+  "replace": "To use the real Ghost-Prime voice, save each line as the same file name (any sample rate; edit.mjs resamples), keep `text`, update `seconds` and `engine`, then run edit.mjs.",
+  "lines": [
+    {
+      "shot": "title",
+      "file": "voice/title.wav",
+      "seconds": 4.676,
+      "text": "Ghost-Prime, by Ivan Lucky. Use a computer just by talking.",
+      "spoken": "Ghost Prime, by Ivan Lucky. Use a computer just by talking.",
+      "words": 11,
+      "engine": "espeak-ng mb-en1",
+      "meanDb": -19.2,
+      "peakDb": -3
+    },
+    {
+      "shot": "hello",
+      "file": "voice/hello.wav",
+      "seconds": 6.095,
+      "text": "Ghost-Prime is an AI assistant on a school Chromebook. You talk or type, and it does the task.",
+      "spoken": "Ghost Prime is an AI assistant on a school Chromebook. You talk or type, and it does the task.",
+      "words": 19,
+      "engine": "espeak-ng mb-en1",
+      "meanDb": -19.8,
+      "peakDb": -3
+    },
+    {
+      "shot": "hero",
+      "file": "voice/hero.wav",
+      "seconds": 10.416,
+      "text": "Now it reads the web for you. It opens Wikipedia, types the search itself, reads the article, and explains it in three simple sentences. Every step shows as a card.",
+      "spoken": "Now it reads the web for you. It opens Wikipedia, types the search itself, reads the article, and explains it in three simple sentences. Every step shows as a card.",
+      "words": 30,
+      "engine": "espeak-ng mb-en1",
+      "meanDb": -23,
+      "peakDb": -3
+    },
+    {
+      "shot": "remember",
+      "file": "voice/remember.wav",
+      "seconds": 6.433,
+      "text": "It remembers you from one day to the next. Tell it something once; the memory is stored on the Chromebook.",
+      "spoken": "It remembers you from one day to the next. Tell it something once; the memory is stored on the Chromebook.",
+      "words": 20,
+      "engine": "espeak-ng mb-en1",
+      "meanDb": -18.7,
+      "peakDb": -2.9
+    },
+    {
+      "shot": "recall",
+      "file": "voice/recall.wav",
+      "seconds": 5.348,
+      "text": "In a brand-new chat, it still knows: what you just said, and what it learned before.",
+      "spoken": "In a brand-new chat, it still knows: what you just said, and what it learned before.",
+      "words": 16,
+      "engine": "espeak-ng mb-en1",
+      "meanDb": -22.2,
+      "peakDb": -3
+    },
+    {
+      "shot": "reminder",
+      "file": "voice/reminder.wav",
+      "seconds": 6.735,
+      "text": "Reminders, for homework and revision. Two minutes from now it speaks up, in the chat and out loud.",
+      "spoken": "Reminders, for homework and revision. Two minutes from now it speaks up, in the chat and out loud.",
+      "words": 18,
+      "engine": "espeak-ng mb-en1",
+      "meanDb": -22,
+      "peakDb": -3
+    },
+    {
+      "shot": "study-plan",
+      "file": "voice/study-plan.wav",
+      "seconds": 8.248,
+      "text": "Files too. It writes a three-day revision plan and saves it in a new folder. What it creates with its file tools can be undone.",
+      "spoken": "Files too. It writes a three-day revision plan and saves it in a new folder. What it creates with its file tools can be undone.",
+      "words": 25,
+      "engine": "espeak-ng mb-en1",
+      "meanDb": -22.1,
+      "peakDb": -3
+    },
+    {
+      "shot": "plan-mode",
+      "file": "voice/plan-mode.wav",
+      "seconds": 10.936,
+      "text": "Safety for teachers. In plan mode it only looks: asked to delete that folder, it explains what it would do and changes nothing. An 'are you sure?' pop-up is next.",
+      "spoken": "Safety for teachers. In plan mode it only looks: asked to delete that folder, it explains what it would do and changes nothing. An 'are you sure?' pop-up is next.",
+      "words": 30,
+      "engine": "espeak-ng mb-en1",
+      "meanDb": -22.6,
+      "peakDb": -3
+    },
+    {
+      "shot": "closing",
+      "file": "voice/closing.wav",
+      "seconds": 4.77,
+      "text": "Recorded from the app's offline replay. Come and try it live at the booth.",
+      "spoken": "Recorded from the app's offline replay. Come and try it live at the booth.",
+      "words": 14,
+      "engine": "espeak-ng mb-en1",
+      "meanDb": -19.8,
+      "peakDb": -3
+    }
+  ]
+}
