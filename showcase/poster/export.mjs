@@ -42,7 +42,8 @@ async function shoot(page, opts) {
   }
 }
 
-const browser = await chromium.launch({ args: ['--disable-gpu', '--disable-dev-shm-usage'] })
+// GHOST_CHROMIUM=/path/to/chrome uses that browser (e.g. /opt/pw-browsers/chromium when Playwright can't download its own).
+const browser = await chromium.launch({ executablePath: process.env.GHOST_CHROMIUM || undefined, args: ['--disable-gpu', '--disable-dev-shm-usage'] })
 let failures = 0
 try {
   for (const theme of themes) {
