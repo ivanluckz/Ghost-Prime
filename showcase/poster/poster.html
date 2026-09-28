@@ -19,8 +19,14 @@
   Print shop: Chromium embeds the variable fonts as Type 3 fonts. Ask the shop to preflight the PDF.
   If they reject it, give them the 300 dpi image instead:
     node showcase/poster/export.mjs light --print-png     (writes showcase/poster/print/)
-  The screenshot is ../app-shots/hero-working.png (relative, so it works from file://), cropped in CSS
-  to the chat column. Presenter mode hides the Activity panel, so the crop matches what visitors see.
+  Images (all relative, so they work from file://):
+  - ../app-shots/hero-working.png and ../app-shots/hero-answer.png, cropped in CSS to the chat column
+    (presenter mode hides the Activity panel, so the crops match what visitors see): "1 · It does the
+    steps" and "2 · It explains simply", stacked in the same 499 px the single screenshot used to take.
+  - img/ghost-art.png: the figure from the app's AI-generated intro video (assets/intro-keyframe.png,
+    Higgsfield; FACTS.md section 7), cropped and hue-shifted to red with
+    ffmpeg -i assets/intro-keyframe.png -vf "crop=600:510:380:30,hue=h=160:s=1.15" img/ghost-art.png
+    It sits in the free space right of the headline, credited under it.
   Layout spine: every band uses the body grid's two columns, 660 px | 48 px gap | the rest (x = 792).
 -->
 <style>
@@ -162,21 +168,41 @@ h1 {
   font-size: 128px; color: var(--ink);
 }
 h1 .accent { color: var(--accent); display: block; }
+/* The ghost art: in the free space right of the headline (line 1 ends at x 1158, line 2 at 1051, the
+   one-liner at 1256 from y 435), so it never touches text. */
+.hero { position: relative; }
+.art { position: absolute; right: 0; top: -6px; width: 313px; margin: 0; }
+.art .pic { width: 313px; height: 266px; border-radius: 14px; overflow: hidden; border: 2px solid var(--shot-edge); background: #000; }
+.art img { display: block; width: 100%; height: 100%; object-fit: cover; }
+.art figcaption { position: absolute; right: 0; top: calc(100% + 8px); white-space: nowrap;
+  font-size: 22px; line-height: 1.2; color: var(--ink-2); }
 .oneliner { font-size: 36px; line-height: 1.25; font-weight: 500; color: var(--ink); letter-spacing: -.005em; }
 
 /* ---------- 3. body: the spine, two rows so the section titles line up ---------- */
 .body { grid-template-rows: auto auto; row-gap: 24px; align-items: stretch; }
 .col { min-height: 0; }
 
-/* The real app screen, cropped to the chat column: hero-working.png is 2400 x 1500; the frame shows
-   x 0-1920 (the Activity panel, hidden in presenter mode, is cut off) and y 20-1480 (the empty margin). */
+/* Two real app screens, stacked in the space one used to take (656 x 499 px):
+   1. hero-working.png (2400 x 1500), crop x 0-1920 (the Activity panel is cut off), y 20-736: the bar,
+      the request and the first tool cards. 656 x 245 px.
+   2. hero-answer.png (2400 x 1500), crop x 60-2400, y 630-1470: the CLAUDE tag, the three-sentence answer
+      and the message box with the mic. 656 x 235.5 px. */
 .shot { display: flex; flex-direction: column; gap: 12px; }
-.shot .frame { position: relative; box-sizing: content-box; width: calc(var(--left) - 4px); aspect-ratio: 1920 / 1460;
+.shot .frames { display: flex; flex-direction: column; gap: 12px; }
+.shot .frame { position: relative; box-sizing: content-box; width: calc(var(--left) - 4px);
   border-radius: 12px; overflow: hidden; border: 2px solid var(--shot-edge); background: #05070F; }
-.shot img { position: absolute; display: block; left: 0; top: calc(-20 / 1460 * 100%); width: calc(2400 / 1920 * 100%); height: auto; }
-/* The mic button's centre is at (196, 1404) in hero-working.png: 10.2 % x, 94.8 % y of the crop.
+.shot .frame.working { aspect-ratio: 1920 / 716; }
+.shot .frame.answer { aspect-ratio: 2340 / 840; }
+.shot img { position: absolute; display: block; height: auto; }
+.shot .working img { left: 0; top: calc(-20 / 716 * 100%); width: calc(2400 / 1920 * 100%); }
+.shot .answer img { left: calc(-60 / 2340 * 100%); top: calc(-630 / 840 * 100%); width: calc(2400 / 2340 * 100%); }
+/* The step label on each screen: top right, over the window controls (frame 1) or empty space (frame 2),
+   clear of the AUTO badge. Solid red, like the mic note, so it can't be mistaken for app UI. */
+.step-tag { position: absolute; right: 10px; top: 10px; font-family: var(--sans); font-size: 22px; line-height: 1.2;
+  font-weight: 700; letter-spacing: -.005em; color: var(--note-ink); background: var(--note-bg); border-radius: 8px; padding: 5px 12px 6px; }
+/* The mic button's centre is at (200, 1404) in hero-answer.png: 6.0 % x, 92.1 % y of its crop.
    (Ctrl+Shift+G only brings the window up and focuses the chat box, so the note does not mention it.) */
-.callout { position: absolute; left: 10.2%; top: 94.8%; width: 44px; height: 44px; transform: translate(-50%, -50%);
+.callout { position: absolute; left: 6%; top: 92.1%; width: 44px; height: 44px; transform: translate(-50%, -50%);
   border-radius: 50%; border: 3px solid var(--note-bg); pointer-events: none; }
 /* The note sits in the message box, right of the mic, and ends before the app's Send button
    (Send starts at about 576 px into the frame). Solid red so it can't be mistaken for the app's cyan UI. */
@@ -347,6 +373,10 @@ h1 .accent { color: var(--accent); display: block; }
   <!-- 2. Tagline (DESIGN.md: "Use a computer just by talking.") + one-liner -->
   <section class="hero">
     <h1>Use a computer <span class="accent">just by talking.</span></h1>
+    <figure class="art">
+      <div class="pic"><img src="img/ghost-art.png" alt="Ghost-Prime's ghost: a glowing red figure made of particles, from the app's intro video"></div>
+      <figcaption>Art: AI-generated (Higgsfield)</figcaption>
+    </figure>
     <p class="oneliner">A voice assistant that does the task for you, built on a school Chromebook.</p>
   </section>
 
@@ -354,9 +384,16 @@ h1 .accent { color: var(--accent); display: block; }
        Row 2: how it works | what works, and what's next. -->
   <section class="body spine">
     <figure class="shot col">
-      <div class="frame">
-        <img src="../app-shots/hero-working.png" alt="Ghost-Prime in AUTO mode working on the photosynthesis request: browser_navigate, browser_get_page and browser_fill cards, with the mic button in the message box">
-        <div class="callout" aria-hidden="true"><span class="tag"><b>Mic button:</b> click, speak, click again</span></div>
+      <div class="frames">
+        <div class="frame working">
+          <img src="../app-shots/hero-working.png" alt="Ghost-Prime in AUTO mode, working on the request to go to Wikipedia, search for photosynthesis and explain it in three simple sentences: a browser_navigate card to wikipedia.org and a browser_get_page card">
+          <span class="step-tag">1 · It does the steps</span>
+        </div>
+        <div class="frame answer">
+          <img src="../app-shots/hero-answer.png" alt="Ghost-Prime's answer, tagged CLAUDE: photosynthesis in three simple sentences, and the message box with the mic button">
+          <span class="step-tag">2 · It explains simply</span>
+          <div class="callout" aria-hidden="true"><span class="tag"><b>Mic button:</b> click, speak, click again</span></div>
+        </div>
       </div>
       <figcaption class="caption">The Ghost-Prime app during the photosynthesis demo.</figcaption>
     </figure>

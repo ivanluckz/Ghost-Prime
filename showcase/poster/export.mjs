@@ -94,7 +94,7 @@ try {
         const r = el.getBoundingClientRect()
         if (!r.width || !r.height) continue
         if (el.closest('svg') && el.tagName !== 'svg') continue
-        if (el.closest('.frame') && el.tagName === 'IMG') continue // the screenshot is cropped by its frame on purpose
+        if ((el.closest('.frame') || el.closest('.art')) && el.tagName === 'IMG') continue // images are cropped by their frames on purpose
         // Bottom: content must stay inside the bottom padding (60 px, less a 2 px tolerance), so a longer
         // authorship sentence that would reach the corner brackets fails the export instead of printing.
         if (r.bottom > sheet.bottom - 58 || r.right > sheet.right - 10 || r.left < sheet.left + 10) {

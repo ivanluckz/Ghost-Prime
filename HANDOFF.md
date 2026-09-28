@@ -248,6 +248,10 @@ The dark PDFs are for a screen only: they have no bleed and a hairline white edg
   numbered steps and the screenshot callout are red. The status chips stay green and amber.
 - **Caption:** it now reads "The Ghost-Prime app during the photosynthesis demo." It no longer says
   "scripted sample", as asked for the video.
+- **Images (28 Sep):** three instead of one. The app column now stacks two screens, "1 · It does the
+  steps" (the tool cards) and "2 · It explains simply" (the three-sentence answer with the mic note). The
+  ghost figure from the app's intro video sits beside the headline, tinted red and credited
+  "Art: AI-generated (Higgsfield)" (FACTS §7). Source: `showcase/poster/img/ghost-art.png`.
 
 **A review before print.** Four reviewers looked at the poster (facts, paper legibility, the dark theme,
 print production), and a skeptic tried to refute each finding. Seven findings survived and all are fixed:
