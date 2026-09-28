@@ -8,7 +8,7 @@
   Ghost-Prime booth poster: Rwanda Innovation Showcase, 29 Sep 2026.
   A2 portrait (420 x 594 mm). Two themes on one page:
     poster.html              light (white paper, print-safe, the default)
-    poster.html?theme=dark   dark (for screens or a professional print shop)
+    poster.html?theme=dark   dark (for screens only: its PDFs have no bleed, so print the light one)
   Export PDFs and previews with: node showcase/poster/export.mjs (from the repo root)
   Every claim must match showcase/FACTS.md, and the words follow showcase/DESIGN.md. The look is DESIGN.md's
   red variant (28 Sep, the presenter's choice, matching the demo video): red is the one accent where
@@ -66,7 +66,7 @@
   --amber: #9A5B00;
   --deck: #FFFFFF;
   --wm-1: #E0561F; --wm-2: #C8102E; --wm-3: #8E0B3A;
-  --bracket: rgba(200, 16, 46, .55);
+  --bracket: #E17C8C; /* rgba(200,16,46,.55) on white, opaque: an alpha colour exports as a soft mask that Ghostscript drops */
   --gem-hi: #FFFFFF; --gem-edge: #C8102E;
   --shot-edge: #1A0B0E;
 }
@@ -81,7 +81,7 @@
   --amber: #FFB454;
   --deck: #160A0D;
   --wm-1: #FF8A5C; --wm-2: #FF3B47; --wm-3: #D0104A;
-  --bracket: rgba(255, 59, 71, .5);
+  --bracket: #842027; /* rgba(255,59,71,.5) on #0A0507, opaque (see the light theme) */
   --gem-hi: #FFE3E3; --gem-edge: #FF3B47;
   --shot-edge: #3A1A21;
 }
@@ -165,7 +165,7 @@ h1 .accent { color: var(--accent); display: block; }
 .oneliner { font-size: 36px; line-height: 1.25; font-weight: 500; color: var(--ink); letter-spacing: -.005em; }
 
 /* ---------- 3. body: the spine, two rows so the section titles line up ---------- */
-.body { grid-template-rows: auto auto; row-gap: 32px; align-items: stretch; }
+.body { grid-template-rows: auto auto; row-gap: 24px; align-items: stretch; }
 .col { min-height: 0; }
 
 /* The real app screen, cropped to the chat column: hero-working.png is 2400 x 1500; the frame shows
@@ -179,7 +179,7 @@ h1 .accent { color: var(--accent); display: block; }
 .callout { position: absolute; left: 10.2%; top: 94.8%; width: 44px; height: 44px; transform: translate(-50%, -50%);
   border-radius: 50%; border: 3px solid var(--note-bg); pointer-events: none; }
 /* The note sits in the message box, right of the mic, and ends before the app's Send button
-   (Send starts at about 576 px into the frame). Solid cyan so it can't be mistaken for app UI. */
+   (Send starts at about 576 px into the frame). Solid red so it can't be mistaken for the app's cyan UI. */
 .callout .tag { position: absolute; left: calc(100% + 12px); top: 50%; transform: translateY(-50%); white-space: nowrap;
   font-family: var(--sans); font-size: 22px; line-height: 1.2; font-weight: 600; letter-spacing: -.005em;
   color: var(--note-ink); background: var(--note-bg); border-radius: 8px; padding: 5px 12px 6px; }
@@ -187,7 +187,7 @@ h1 .accent { color: var(--accent); display: block; }
 .callout .tag::before { content: ''; position: absolute; right: 100%; top: 50%; width: 12px; height: 3px; margin-top: -1.5px; background: var(--note-bg); }
 .caption { font-size: 22px; line-height: 1.35; color: var(--ink-2); }
 
-/* try it with me: the one call to action. A cyan rule, no box, text flush on the spine. */
+/* try it with me: the one call to action. An accent rule, no box, text flush on the spine. */
 .try { border-top: 3px solid var(--accent); padding-top: 20px; display: flex; flex-direction: column; }
 .try .title::after { display: none; }
 .steps { list-style: none; margin: 20px 0 0; display: flex; flex-direction: column; gap: 14px; }
@@ -204,7 +204,7 @@ h1 .accent { color: var(--accent); display: block; }
 .notes b { color: var(--ink); font-weight: 700; }
 
 /* how it works: the numbered-ref motif, [1] [2] [3], echoing the [6] in the trace */
-.how { display: flex; flex-direction: column; gap: 22px; }
+.how { display: flex; flex-direction: column; gap: 18px; }
 .flow { list-style: none; display: flex; flex-direction: column; gap: 20px; }
 .flow > li { display: grid; grid-template-columns: 48px 1fr; column-gap: 14px; align-items: baseline; }
 .ref-n { font-family: var(--mono); font-size: 27px; font-weight: 800; color: var(--accent); letter-spacing: -.04em; line-height: 1.2; }
@@ -222,10 +222,10 @@ h1 .accent { color: var(--accent); display: block; }
 .trace svg { width: .95em; height: .95em; vertical-align: -.12em; margin-left: .35em; color: var(--ink-2); }
 
 /* what works, and what's next */
-.works { display: flex; flex-direction: column; gap: 22px; }
+.works { display: flex; flex-direction: column; gap: 18px; }
 .works .title::after { display: none; } /* the title fills the column; the list's first hairline follows */
 .wlist { list-style: none; }
-.wlist > li { padding: 11px 0 11px; border-top: 2px solid var(--line); }
+.wlist > li { padding: 8px 0 8px; border-top: 2px solid var(--line); }
 .wlist > li:last-child { padding-bottom: 0; }
 .wtop { display: flex; align-items: center; gap: 14px; }
 .wtop h3 { flex: 1; }
@@ -294,7 +294,7 @@ h1 .accent { color: var(--accent); display: block; }
 <body>
 <div class="toolbar" role="toolbar" aria-label="Poster view">
   <button type="button" data-set-theme="light">Light (print-safe)</button>
-  <button type="button" data-set-theme="dark">Dark (screen / print shop)</button>
+  <button type="button" data-set-theme="dark">Dark (screens)</button>
   <button type="button" onclick="window.print()">Print…</button>
 </div>
 
@@ -379,7 +379,7 @@ h1 .accent { color: var(--accent); display: block; }
       <!-- Privacy: FACTS.md section 5. Safety: DESIGN.md section 2 "Safety" (the showcase launch starts in AUTO). -->
       <div class="notes">
         <p><b>Privacy.</b> What you ask goes over the internet to Claude (Anthropic) and Google. Please don’t share anything private.</p>
-        <p><b>Safety.</b> It runs in AUTO: Claude’s automatic safety check decides each action. PLAN only looks. There is no “Are you sure?” pop-up yet.</p>
+        <p><b>Safety.</b> In PLAN mode it only looks and changes nothing. In AUTO it acts on its own, and there is no “Are you sure?” pop-up yet.</p>
       </div>
     </aside>
 
@@ -414,7 +414,7 @@ h1 .accent { color: var(--accent); display: block; }
       <ul class="wlist">
         <li>
           <div class="wtop"><h3>Uses websites for you</h3><span class="when">25 Sep</span><span class="chip">Works · Tested</span></div>
-          <p>In its own browser window: reads pages, clicks, fills forms.</p>
+          <p>Reads pages, clicks, fills forms. Tested with the AI on 20 Sep.</p>
         </li>
         <li>
           <div class="wtop"><h3>Files, with undo</h3><span class="when">25 Sep</span><span class="chip">Works · Tested</span></div>

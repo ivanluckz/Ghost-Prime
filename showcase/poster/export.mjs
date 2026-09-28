@@ -7,12 +7,13 @@
 // --detail     1:1 crops for checking small text: preview/poster-{theme}-detail-{part}.png, one per
 //              band (top, hero, shot, try, how, works, who, foot). Implies --png-only, so a detail
 //              pass never rewrites the print PDFs.
-// --print-png  A2 at 300 dpi (4961 x 7016 px): print/poster-{theme}-a2-300dpi.png. A fallback for a
+// --print-png  A2 at 300 dpi (4959 x 7016 px, tagged 300 dpi): print/poster-{theme}-a2-300dpi.png. A fallback for a
 //              print shop whose preflight rejects the PDF: Chromium embeds the variable fonts as Type 3
 //              fonts, which some shops flag. Big files: hand them over, don't commit them.
 // --out=DIR    write the PNGs from --detail / --print-png to DIR instead (relative to the current folder).
 import { chromium } from 'playwright'
-import { mkdirSync } from 'node:fs'
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { crc32 } from 'node:zlib'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 
@@ -43,6 +44,32 @@ async function shoot(page, opts) {
 }
 
 // GHOST_CHROMIUM=/path/to/chrome uses that browser (e.g. /opt/pw-browsers/chromium when Playwright can't download its own).
+// Write a pHYs chunk (pixels per metre) right after IHDR, so the PNG carries its print resolution.
+function tagDpi(file, dpi) {
+  const png = readFileSync(file)
+  const ppm = Math.round(dpi / 0.0254)
+  const data = Buffer.alloc(9)
+  data.writeUInt32BE(ppm, 0)
+  data.writeUInt32BE(ppm, 4)
+  data[8] = 1 // unit: metre
+  const type = Buffer.from('pHYs')
+  const chunk = Buffer.alloc(12 + 9)
+  chunk.writeUInt32BE(9, 0)
+  type.copy(chunk, 4)
+  data.copy(chunk, 8)
+  chunk.writeUInt32BE(crc32(Buffer.concat([type, data])) >>> 0, 17)
+  // Walk the chunks: skip if a pHYs is already there.
+  for (let at = 8; at + 8 <= png.length; ) {
+    const len = png.readUInt32BE(at)
+    const t = png.toString('latin1', at + 4, at + 8)
+    if (t === 'pHYs') return
+    if (t === 'IDAT' || t === 'IEND') break
+    at += 12 + len
+  }
+  const ihdrEnd = 8 + 8 + 13 + 4 // signature + IHDR length/type + data + crc
+  writeFileSync(file, Buffer.concat([png.subarray(0, ihdrEnd), chunk, png.subarray(ihdrEnd)]))
+}
+
 const browser = await chromium.launch({ executablePath: process.env.GHOST_CHROMIUM || undefined, args: ['--disable-gpu', '--disable-dev-shm-usage'] })
 let failures = 0
 try {
@@ -68,7 +95,9 @@ try {
         if (!r.width || !r.height) continue
         if (el.closest('svg') && el.tagName !== 'svg') continue
         if (el.closest('.frame') && el.tagName === 'IMG') continue // the screenshot is cropped by its frame on purpose
-        if (r.bottom > sheet.bottom - 10 || r.right > sheet.right - 10 || r.left < sheet.left + 10) {
+        // Bottom: content must stay inside the bottom padding (60 px, less a 2 px tolerance), so a longer
+        // authorship sentence that would reach the corner brackets fails the export instead of printing.
+        if (r.bottom > sheet.bottom - 58 || r.right > sheet.right - 10 || r.left < sheet.left + 10) {
           bad.push(`${el.tagName.toLowerCase()}.${el.className?.baseVal ?? el.className} b=${Math.round(r.bottom)} r=${Math.round(r.right)}`)
         }
       }
@@ -97,7 +126,8 @@ try {
     if (printPng) {
       const png = join(printDir, `poster-${theme}-a2-300dpi.png`)
       await shoot(page, { path: png, clip: { x: 0, y: 0, width: 420 * MM, height: 594 * MM } })
-      console.log('saved', png)
+      tagDpi(png, 300) // a PNG with no pHYs opens at 72 ppi (175 x 248 cm) in Photoshop and most RIPs
+      console.log('saved', png, '(300 dpi: print at 420 x 594 mm)')
     } else if (detail) {
       const parts = { top: '.top', hero: '.hero', shot: '.shot', try: '.try', how: '.how', works: '.works', who: '.who', foot: '.foot' }
       for (const [name, sel] of Object.entries(parts)) {

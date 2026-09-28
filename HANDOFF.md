@@ -237,6 +237,49 @@ widescreen (1920×1080) for a PC, TV or projector at the booth, and for sharing.
    placeholders, so fill those in as listed below.
 5. Play it once on the booth screen from 3 m away and check that the captions read.
 
+### Poster (28 Sep, cloud session): print this one
+
+**Print `showcase/poster/poster-light.pdf`** (A2, 420×594 mm) or `poster-light-a3.pdf` (A3) on white paper.
+The dark PDFs are for a screen only: they have no bleed and a hairline white edge, so a shop would reject them.
+
+**What changed.**
+- **Name:** the footer says "Ivan Lucky KUNDWA · Grade 9 · Ntare-louisenlund".
+- **Colour:** the look is the red variant used by the demo video. The wordmark, gem, headline accent,
+  numbered steps and the screenshot callout are red. The status chips stay green and amber.
+- **Caption:** it now reads "The Ghost-Prime app during the photosynthesis demo." It no longer says
+  "scripted sample", as asked for the video.
+
+**A review before print.** Four reviewers looked at the poster (facts, paper legibility, the dark theme,
+print production), and a skeptic tried to refute each finding. Seven findings survived and all are fixed:
+1. **Safety line (the important one).** The poster said "Claude's automatic safety check decides each
+   action" in AUTO. The code says otherwise: outside PLAN, `provider.js` pre-approves every Ghost-Prime tool
+   (`allowedTools`), so no automatic check judges browser, shell or file actions. The poster now says "In
+   PLAN mode it only looks and changes nothing. In AUTO it acts on its own, and there is no 'Are you sure?'
+   pop-up yet." FACTS.md §5, DESIGN.md §2, DEMO.md's honest lines and qa.md Q5 are corrected the same way.
+   **Don't say the old line tomorrow.** The slides, slide notes, pitch card and README still carry it,
+   untouched because only the poster is needed.
+2. **Browser row:** the 25 Sep tests ran without the AI, so the row now adds "Tested with the AI on 20 Sep."
+3. **Spacing:** the sheet was 10 px overfull. Tighter gaps give 36 px between bands, so one more line of
+   authorship text still fits. `export.mjs` now fails if anything reaches the bottom margin (tested: three
+   extra lines make it fail).
+4. **Dark theme labels:** the dark theme is now labelled "for screens" instead of "print shop".
+5. **Corner brackets:** they were semi-transparent, which Chromium exports as soft masks that Ghostscript
+   (common in print-shop software) silently drops. They are opaque now: 0 soft masks, and Ghostscript draws
+   them.
+6. **The 300 dpi PNG fallback** (`export.mjs light --print-png`) now carries its DPI, so it opens at A2 size
+   instead of 1.75 m wide.
+
+**Verified.** All four PDFs are 1 page at exact A2 or A3 size, and the fonts are embedded. The screenshot
+prints at 281 ppi on A2 and 397 on A3. Every text colour passes contrast on white: ink 19:1, accent 5.9:1,
+amber 5.4:1. The layout check is clean in both themes.
+
+**Before you print:** read the authorship sentence in the footer ("I designed it, decided what it should
+do, tested it, and used an AI coding assistant…") and make sure it says exactly what Ivan did. Edit it in
+`showcase/poster/poster.html`, then run
+`GHOST_CHROMIUM=/opt/pw-browsers/chromium node showcase/poster/export.mjs` (on the Chromebook, plain
+`node showcase/poster/export.mjs`). If a print shop rejects the PDF's fonts (Chromium embeds them as Type 3),
+give them the PNG from `node showcase/poster/export.mjs light --print-png` and say "print at 420 × 594 mm".
+
 ### What you must do in person (before 29 Sep)
 1. **Rebuild the phone APK** (`android-connector`, see its README), then test it on the Galaxy A05.
    Test the Chrome extension too. Until then, show both only as "next".

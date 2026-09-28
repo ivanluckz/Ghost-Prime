@@ -29,9 +29,9 @@ tested them the day before.
   pitch and the pitch card.)
 - **Phone:** "The phone part is built, but I haven't tested it on a real phone yet. It's second on my
   list, after testing it with real students and teachers."
-- **Safety:** "PLAN only looks. In AUTO, on the Claude brain, an automatic safety check decides each
-  action. FULL AUTO runs everything. The showcase launch starts in AUTO; plain Ghost-Prime starts in
-  FULL AUTO. There's no 'are you sure?' pop-up yet. That's next."
+- **Safety:** "PLAN only looks and changes nothing, so a teacher can make it read-only. In AUTO it acts
+  on its own, and there's no 'are you sure?' pop-up yet. That's next." (Corrected 28 Sep: don't say an
+  automatic safety check decides each action. The app pre-approves its own tools; FACTS §5.)
 - **Who it's for:** "It's for students who type slowly, people who find small text hard to read, people
   new to computers, and busy teachers. I haven't tested it with these groups yet. That's my next step,
   and my ask."

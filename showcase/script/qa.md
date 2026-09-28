@@ -87,9 +87,10 @@ smaller than it really was.
 
 ## 5. Is it safe? Could it do something dangerous?
 
-**Say:** **It shows every step, and I choose how much it's allowed to do.** PLAN only looks. In AUTO,
-on the Claude brain, an automatic safety check decides each action. FULL AUTO runs everything, so I
-don't use it in public. There's no "Are you sure?" pop-up yet. That's next.
+**Say:** **It shows every step, and I choose how much it's allowed to do.** PLAN only looks and
+changes nothing, so a teacher can make it read-only. In AUTO it acts on its own, and there's no
+"Are you sure?" pop-up yet. That's next. (Corrected 28 Sep: never say an automatic safety check
+decides each action; FACTS §5.)
 
 **If they push:** Today it started in AUTO. The normal app still starts in FULL AUTO, so I always
 check the badge before a demo. Changes it makes with its file tools can be undone (single files, not

@@ -113,9 +113,10 @@ Never use the old flight/Lisbon shots or anything showing FULL AUTO.
   Ctrl+Shift+G only brings the window up and puts the cursor in the chat box. Never "Hey Ghost".
 - **Phone / Chrome extension:** built, tested only on a simulated phone / a headless browser.
   "In progress." Never "it controls my phone".
-- **Safety:** PLAN only looks. AUTO: on the Claude brain an automatic safety check decides each
-  action. FULL AUTO runs everything. The showcase launch starts in AUTO; plain Ghost-Prime starts in
-  FULL AUTO. **There is no "Are you sure?" pop-up yet.**
+- **Safety:** PLAN only looks and changes nothing. In AUTO it acts on its own (corrected 28 Sep: the
+  app pre-approves its own tools, so no automatic check judges them; FACTS §5). FULL AUTO runs
+  everything. The showcase launch starts in AUTO; plain Ghost-Prime starts in FULL AUTO. **There is no
+  "Are you sure?" pop-up yet.** Never say "an automatic safety check decides each action".
 - **Impact:** "Who it's for", never "who it helps" as if proven. Always pair it with: "I haven't
   tested it with these groups yet. That's my next step, and my ask."
 - **Audience:** students who type slowly, people who find small text hard to read, people new to

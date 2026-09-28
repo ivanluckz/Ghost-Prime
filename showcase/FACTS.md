@@ -135,8 +135,12 @@ Status key:
   are checked per call, and the prompt says PLAN is on. Tested offline with the SDK stubbed
   (`smoke-plan-mode`, 29 checks). **Not yet run against live Claude:** do Demo 7 once the day before.
   Reading the battery in PLAN mode now works on the Gemini brain too (it was wrongly skipped).
-- **AUTO**: on the Claude brain, the SDK's automatic permission classifier decides for each action.
-  On the Gemini brain, AUTO runs tools **without asking**, exactly like FULL.
+- **AUTO**: ⚠ **Corrected 28 Sep: there is no automatic check on Ghost-Prime's own actions.** Outside
+  PLAN, the Claude brain passes every one of its tools in `allowedTools` (`src/main/agent/provider.js`,
+  the `query()` options), which pre-approves them, so the SDK's automatic permission classifier never
+  judges browser, shell, file or reminder actions. In practice AUTO acts like FULL AUTO on both brains.
+  (This file used to say the classifier "decides for each action"; no test ever backed that, and the
+  code says otherwise.) Never say "an automatic safety check decides each action".
 - **FULL AUTO** runs everything with no checks.
 - ⚠ **The desktop app starts in FULL AUTO by default** (`Main.jsx`). Discord defaults to AUTO.
   **Exception (added 25 Sep, overnight):** launched with `bin/ghost-showcase` (`GHOST_SHOWCASE=1`) it
