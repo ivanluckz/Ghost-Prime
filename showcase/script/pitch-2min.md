@@ -173,7 +173,7 @@ the backups in the table further down. They are the same demo.
 
 ---
 
-## Rehearse and time it (27–28 September)
+## Rehearse and time it (27–28 October)
 
 Nobody has timed this pitch yet. The times in this script are **estimates** from word counts and from
 DEMO.md. Do two full run-throughs **on the showcase Chromebook, over your phone hotspot**, with a

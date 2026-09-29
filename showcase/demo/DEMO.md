@@ -1,6 +1,6 @@
 # Ghost-Prime: live demo runbook
 
-**Rwanda Innovation Showcase, 29 September 2026** · Presenter: **[YOUR NAME]**, **[YOUR CLASS]**, **[SCHOOL]**
+**Rwanda Innovation Showcase, 29 October 2026** · Presenter: **Ivan Lucky KUNDWA**, **Grade 9**, **Ntare Louisenlund School**
 
 This runbook is built so the demo cannot embarrass you. It has three plans:
 
@@ -44,7 +44,7 @@ tested them the day before.
 
 ---
 
-## 1. The day before (28 September)
+## 1. The day before (28 October)
 
 ### Power and kit
 - [ ] Charge the Chromebook to 100%. Pack the charger and an extension lead or power strip.
@@ -307,7 +307,7 @@ This is the one demo used everywhere: the 2-minute pitch, the slides, the poster
 
 ## 4. Bonus demos (only if tested the day before)
 
-These are **BUILT, NOT TESTED ON A REAL DEVICE** in FACTS.md. If they didn't work end to end on 28 Sep,
+These are **BUILT, NOT TESTED ON A REAL DEVICE** in FACTS.md. If they didn't work end to end on 28 Oct,
 don't show them live. Say they're next, and show the simulator screenshots labelled "simulated" if
 the slides have them. If they did work, update FACTS.md first, with what you tested.
 
@@ -330,7 +330,7 @@ the slides have them. If they did work, update FACTS.md first, with what you tes
 - The school has blocked developer-mode extensions on this Chromebook, so this almost certainly can't be
   shown. The launcher always uses Ghost-Prime's own tested browser (`browser=playwright`), even if the
   extension is connected.
-- Only if you got it working end to end on 28 Sep (and updated FACTS.md): start with
+- Only if you got it working end to end on 28 Oct (and updated FACTS.md): start with
   `GHOST_BROWSER_BACKEND=extension bin/ghost-showcase --restart` for this one demo. Straight afterwards,
   go back with plain `bin/ghost-showcase --restart` and check that it says `browser=playwright` again.
 

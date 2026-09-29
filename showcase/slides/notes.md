@@ -87,7 +87,7 @@ The steps on the slide (with box number 6) come from the rehearsed sample. Live,
 ### Check before you present
 
 - Follow `showcase/demo/DEMO.md` section 1 (the day before) and section 2 (at the booth). In short: start with `bin/ghost-showcase --restart` and check that the line it prints says `browser=playwright`. Check the badge says **AUTO**. Then type `/voice on`, `/site strict`, `/site allow wikipedia.org`, `/site allow example.com` and `/site list`, and press Ctrl+N. Leave `.env` alone: the launcher sets the browser for you.
-- Run Demo 7 (PLAN mode) live once on 28 September. What happens decides what you say on slide 8.
+- Run Demo 7 (PLAN mode) live once on 28 October. What happens decides what you say on slide 8.
 - Voice in and voice out are only checked by hand. Try both on the showcase Chromebook, over the showcase Wi-Fi or hotspot, before the 29th. Keep offline voice ready as a backup: `GHOST_VOICE_PROVIDER=local bin/ghost-showcase --restart`.
 - Presenter mode (big text, AUTO badge) hasn't been tried on the Chromebook itself yet. Try it on the real projector before the 29th.
 - On the real projector, check from the back of the room that the thin lines between list rows (slides 2, 7, 9, 10, 11 and 12) and the edge of the step strip on slide 4 still show. If they disappear, change `--line: #1E2742;` near the top of `slides.html` to `--line: #33406A;` and re-run `node showcase/slides/render.mjs`. The words read fine either way.

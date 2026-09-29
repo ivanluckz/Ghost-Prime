@@ -5,7 +5,7 @@ something as **WORKING**, present it as "in progress" or "next", or leave it out
 claim is missing, test it first and then add it here with the evidence. Do not stretch a claim to
 fill a gap.
 
-- Event: Rwanda Innovation Showcase, **29 September 2026** (school event).
+- Event: Rwanda Innovation Showcase, **29 October 2026** (school event; moved from 29 September).
 - Presenter: **[YOUR NAME]**, **[YOUR CLASS]**, **[SCHOOL]**. Use these placeholders exactly. Never
   invent a name, class or school.
 - Pitch angle: accessibility & education. "A free-to-run voice assistant that lets anyone use a

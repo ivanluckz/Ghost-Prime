@@ -94,6 +94,12 @@ Never use the old flight/Lisbon shots or anything showing FULL AUTO.
 | `plan-mode.png` | Demo 7: PLAN mode explains and changes nothing |
 | `app-full.png` | The whole app at normal size: history, chat, Activity, AUTO |
 
+The **poster** has its own two shots, `showcase/poster/img/app-steps.png` and `app-answer.png`
+(re-shoot with `node showcase/poster/shots.mjs` while `npm run design` runs). Same setup, but shot in
+a 1040 px window and cut to the chat column, so the app's text prints about 14 px tall on the A2
+sheet instead of 10 px. They sit inside the poster's "How it works" as steps [3] and [4]; the real
+tool cards in the first one take the place of the typed trace.
+
 ## 2. Words (use these exactly)
 
 - **Hero phrase** (identical in the slides, the pitch, DEMO.md, the replay, the pitch card):
@@ -122,8 +128,9 @@ Never use the old flight/Lisbon shots or anything showing FULL AUTO.
 - **Audience:** students who type slowly, people who find small text hard to read, people new to
   computers, busy teachers. **Not** "young children" (the AI services are 18+; FACTS/qa.md Q16).
 - **Authorship:** "I designed it, decided what it should do, tested it, and used an AI coding
-  assistant (Claude Code) to write much of the code." Keep `[YOUR NAME]`, `[YOUR CLASS]`, `[SCHOOL]`
-  as literal placeholders.
+  assistant (Claude Code) to write much of the code." The poster, the slides, DEMO.md and the video
+  carry the presenter's details: Ivan Lucky KUNDWA · Grade 9 · Ntare Louisenlund School. The pitch
+  card and the spoken scripts keep `[YOUR NAME]`, `[YOUR CLASS]`, `[SCHOOL]` to fill in by hand.
 - **Credit** wherever battery / weather / volume / brightness / YouTube tools appear: "MARK LIII
   JARVIS by FatihMakes (CC BY-NC 4.0)".
 - **Numbers** (FACTS §6, counted 25 Sep and the night of 25–26 Sep): 64 tools (Claude brain) ·

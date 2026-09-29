@@ -1,7 +1,7 @@
 # Ghost-Prime demo video
 
 This is a narrated walkthrough of Ghost-Prime, about 1.5 minutes long. It is 16:9 widescreen (1920×1080)
-for a PC, TV or projector at the booth of the Rwanda Innovation Showcase (29 September 2026), and for sharing.
+for a PC, TV or projector at the booth of the Rwanda Innovation Showcase (29 October 2026; the video itself shows no date), and for sharing.
 Presenter: **Ivan Lucky KUNDWA · Grade 9 · Ntare-louisenlund**.
 
 **How it was made, read first.** The video plays as a straight screen recording of Ghost-Prime, with no
