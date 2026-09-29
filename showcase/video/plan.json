@@ -109,7 +109,7 @@
       "answerDone": 10.191,
       "finish": 13.376,
       "narrationStart": 6.576,
-      "narrationSeconds": 6.095
+      "narrationSeconds": 6.366
     },
     {
       "id": "hero",
@@ -121,7 +121,7 @@
       "answerDone": 31.863,
       "finish": 36.868,
       "narrationStart": 13.483,
-      "narrationSeconds": 10.416
+      "narrationSeconds": 11.111
     },
     {
       "id": "remember",
@@ -133,7 +133,7 @@
       "answerDone": 43.023,
       "finish": 44.826,
       "narrationStart": 36.977,
-      "narrationSeconds": 6.433
+      "narrationSeconds": 6.121
     },
     {
       "id": "recall",
@@ -145,7 +145,7 @@
       "answerDone": 52.895,
       "finish": 55.9,
       "narrationStart": 47.606,
-      "narrationSeconds": 5.348
+      "narrationSeconds": 5.042
     },
     {
       "id": "reminder",
@@ -157,7 +157,7 @@
       "answerDone": 61.176,
       "finish": 63.473,
       "narrationStart": 56.035,
-      "narrationSeconds": 6.735
+      "narrationSeconds": 6.476
     },
     {
       "id": "study-plan",
@@ -169,7 +169,7 @@
       "answerDone": 73.164,
       "finish": 76.668,
       "narrationStart": 63.632,
-      "narrationSeconds": 8.248
+      "narrationSeconds": 8.191
     },
     {
       "id": "plan-mode",
@@ -181,63 +181,69 @@
       "answerDone": 83.78,
       "finish": 89.796,
       "narrationStart": 78.156,
-      "narrationSeconds": 10.936
+      "narrationSeconds": 10.442
     }
   ],
   "narration": [
     {
       "shot": "title",
       "start": 0.4,
-      "seconds": 4.676,
+      "seconds": 4.389,
       "file": "voice/title.wav"
     },
     {
       "shot": "hello",
       "start": 6.576,
-      "seconds": 6.095,
+      "seconds": 6.366,
       "file": "voice/hello.wav"
     },
     {
       "shot": "hero",
       "start": 13.483,
-      "seconds": 10.416,
+      "seconds": 11.111,
       "file": "voice/hero.wav"
     },
     {
       "shot": "remember",
       "start": 36.977,
-      "seconds": 6.433,
+      "seconds": 6.121,
       "file": "voice/remember.wav"
     },
     {
       "shot": "recall",
       "start": 47.606,
-      "seconds": 5.348,
+      "seconds": 5.042,
       "file": "voice/recall.wav"
     },
     {
       "shot": "reminder",
       "start": 56.035,
-      "seconds": 6.735,
+      "seconds": 6.476,
       "file": "voice/reminder.wav"
     },
     {
       "shot": "study-plan",
       "start": 63.632,
-      "seconds": 8.248,
+      "seconds": 8.191,
       "file": "voice/study-plan.wav"
     },
     {
       "shot": "plan-mode",
       "start": 78.156,
-      "seconds": 10.936,
+      "seconds": 10.442,
       "file": "voice/plan-mode.wav"
     },
     {
       "shot": "closing",
       "start": 90.596,
-      "seconds": 3.934,
+      "seconds": 3.782,
       "file": "voice/closing.wav"
     }
-  ]
+  ],
+  "voice": {
+    "engine": "gemini",
+    "voice": "Kore",
+    "model": "gemini-2.5-flash-preview-tts",
+    "revoicedAt": "2026-09-29T09:17:02.334Z"
+  }
 }

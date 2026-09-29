@@ -25,8 +25,9 @@ while recording, the way `showcase/app-shots/capture.mjs` hides it for the slide
 | `storyboard.md`, `storyboard.json` | The shot list: exact phrases, narration lines (≤ 30 words), captions (≤ 8 words), target seconds, and why each shot is honest. The scripts read the JSON, which also holds the presenter's name, class and school. |
 | `record.mjs` | Playwright in headless Chromium. It types each phrase into the replay at about 35 ms per character, waits for the answer, scrolls, and writes `timeline.json` and `frames/`. |
 | `timeline.json` | The measured times (seconds into the raw footage) for each shot: typing start, Enter, answer done and finish. It also records the scenario each phrase landed on and the calibration offset. |
-| `narrate.mjs` | One WAV per narration line, from a free offline voice, plus `voice/manifest.json`. |
-| `voice/*.wav`, `voice/manifest.json` | The narration, kept so the app's real Gemini voice can replace it line by line. The manifest lists shot id, file, seconds, text and engine. |
+| `narrate.mjs` | One WAV per narration line, plus `voice/manifest.json`. With `NARRATE_ENGINE=gemini` it uses Ghost-Prime's own Gemini voice; otherwise a free offline voice. |
+| `revoice.mjs` | Puts new narration on the finished video without re-recording it: the picture is copied as it is, only the sound changes. |
+| `voice/*.wav`, `voice/manifest.json` | The narration. The manifest lists shot id, file, seconds, text and engine. |
 | `cards.html` | The title card, closing card, captions and thumbnail, in a red variant of the kit's design system. `edit.mjs` renders it to PNG. |
 | `edit.mjs` | The ffmpeg assembly of the video and the thumbnail. It writes `plan.json`. |
 | `plan.json` | The exact schedule and layout of the final cut: each shot's caption window, narration start and answer-done time, the footage segments and speed-ups, and the overlay boxes. |
@@ -83,8 +84,11 @@ run `edit.mjs --skip-cards` after `edit.mjs --cards-only`. In practice a plain `
      line or for reading the answer. It then scrolls the thread to the bottom.
    - A 300 ms white flash before the first shot pins wall-clock times to video time.
    - It extracts four frames per shot into `frames/` to look at.
-2. **Narration.** `narrate.mjs` speaks each line with espeak-ng and the MBROLA British voice `mb-en1` at
-   150 wpm. It trims each file to a −3 dBFS peak with short fades and 0.25 s of room, then checks the file is
+2. **Narration.** The video now has Ghost-Prime's own voice (Gemini speech model, voice Kore, free tier), made
+   on the Chromebook on 29 Sep 2026 with `NARRATE_ENGINE=gemini node showcase/video/narrate.mjs` and put on the
+   finished video with `revoice.mjs`. Every line kept its start time and fitted its slot at normal speed. The
+   words of each line were checked with the app's offline Whisper transcriber. The first cut, from the cloud,
+   used espeak-ng and the MBROLA British voice `mb-en1` at 150 wpm. It trims each file to a −3 dBFS peak with short fades and 0.25 s of room, then checks the file is
    neither silent nor an odd length. Piper (`pip install piper-tts`) installed, but its voice models are on
    huggingface.co, which the cloud session's network policy blocks. `narrate.mjs` prefers Piper whenever a
    voice model is present (see "Regenerate").
@@ -123,9 +127,12 @@ Options and knobs:
   `PIPER_VOICE=/path/to/en_GB-*.onnx`. Then re-run `narrate.mjs`, `record.mjs` and `edit.mjs`; narrate picks
   Piper automatically. `NARRATE_VOICE=en-gb` forces espeak-ng's plain British voice, and `NARRATE_WPM=150` sets
   the pace.
-- **The app's real voice:** record each line of `voice/manifest.json` with Ghost-Prime's Gemini voice. Save it
-  under the same file name (any sample rate works; `edit.mjs` resamples) and update `seconds` in the manifest.
-  Then run `record.mjs` again, so each shot is held long enough for the new line, and then `edit.mjs`.
+- **The app's real voice (done):** `NARRATE_ENGINE=gemini node showcase/video/narrate.mjs`, then
+  `node showcase/video/revoice.mjs`, then `node showcase/video/check.mjs`. It needs the internet and
+  `GEMINI_API_KEY` in `.env`. It is one request per line and the free tier allows only a few a day, so the
+  answers are kept in `voice/*.raw.wav` (not in git) and only changed lines are asked for again.
+  `NARRATE_VOICE=Puck` picks another Gemini voice; `NARRATE_STYLE="…"` changes how it is told to speak.
+  If a changed line no longer fits before the next one, shorten it, or run `record.mjs` and `edit.mjs` again.
 - **Name, class, school:** edit `presenter` in `storyboard.json`. The class also goes into the memory demo.
 - **Timing:** `storyboard.json` → `edit` sets `speedUpTypingOver` and `typingSpeed`, `speedUpIdleOver` and
   `idleSpeed`, and `lead` and `tail`. A shot's `holdAfterAnswerSeconds` sets how long its finished answer
@@ -152,9 +159,9 @@ Options and knobs:
 
 ## What could not be done in the cloud
 
-- **No listening.** The narration was checked by numbers (duration, level, words per second), not by ear. Watch
-  it with sound before the booth, and decide whether to re-narrate with the app's real voice.
-- **No Piper voice.** The network policy blocked the download. The espeak-ng MBROLA voice is clear but plainly
-  synthetic.
+- **No listening.** The narration was checked by numbers (duration, level, words per second) and by
+  transcribing it, not by ear. Watch it with sound before the booth.
+- **No Piper voice.** The network policy blocked the download, so the first cut used espeak-ng. It was
+  replaced by the Gemini voice on 29 Sep (see step 2).
 - **No real AI and no Chromebook.** The footage is the offline replay with its label hidden (see the note
   at the top). The video itself doesn't say so, so say "recorded walkthrough" if asked.
