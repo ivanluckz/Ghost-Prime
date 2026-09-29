@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Ghost-Prime Booth Poster</title>
 <!--
-  Ghost-Prime booth poster: Rwanda Innovation Showcase, 29 Sep 2026.
+  Ghost-Prime booth poster: Rwanda Innovation Showcase, 29 Oct 2026 (moved from 29 Sep).
   A2 portrait (420 x 594 mm). Two themes on one page:
     poster.html              light (white paper, print-safe, the default)
     poster.html?theme=dark   dark (for screens only: its PDFs have no bleed, so print the light one)
@@ -13,21 +13,22 @@
   Every claim must match showcase/FACTS.md, and the words follow showcase/DESIGN.md. The look is DESIGN.md's
   red variant (28 Sep, the presenter's choice, matching the demo video): red is the one accent where
   DESIGN.md has cyan; status colours (mint, amber) are unchanged.
-  Presenter: Ivan Lucky KUNDWA, Grade 9, Ntare-louisenlund.
+  Presenter: Ivan Lucky KUNDWA, Grade 9, Ntare Louisenlund School.
   Before printing, also check the authorship sentence in the footer says exactly what you did
   (FACTS.md section 7). Do not overstate or understate it.
   Print shop: Chromium embeds the variable fonts as Type 3 fonts. Ask the shop to preflight the PDF.
   If they reject it, give them the 300 dpi image instead:
     node showcase/poster/export.mjs light --print-png     (writes showcase/poster/print/)
   Images (all relative, so they work from file://):
-  - ../app-shots/hero-working.png and ../app-shots/hero-answer.png, cropped in CSS to the chat column
-    (presenter mode hides the Activity panel, so the crops match what visitors see): "1 · It does the
-    steps" and "2 · It explains simply", stacked in the same 499 px the single screenshot used to take.
+  - img/app-steps.png and img/app-answer.png: the real app playing the hero demo, shot for the poster by
+    showcase/poster/shots.mjs in a narrow window so the app's own text is readable on paper. They are
+    steps [3] and [4] of "How it works".
   - img/ghost-art.png: the figure from the app's AI-generated intro video (assets/intro-keyframe.png,
     Higgsfield; FACTS.md section 7), cropped and hue-shifted to red with
     ffmpeg -i assets/intro-keyframe.png -vf "crop=600:510:380:30,hue=h=160:s=1.15" img/ghost-art.png
-    It sits in the free space right of the headline, credited under it.
-  Layout spine: every band uses the body grid's two columns, 660 px | 48 px gap | the rest (x = 792).
+    It has its own column right of the headline, credited under it.
+  Layout spine: every band uses the same two columns, 660 px | 48 px gap | the rest (x = 792).
+  The body's two columns are independent stacks: their section titles do not have to line up.
 -->
 <style>
 @font-face {
@@ -161,51 +162,44 @@ p { text-wrap: pretty; }
 .event { color: var(--ink-2); }
 
 /* ---------- 2. hero ---------- */
-.hero { display: flex; flex-direction: column; gap: 18px; }
+/* Headline and one-liner on the left; the ghost art in its own column on the right, as tall as the text
+   beside it, with its credit underneath. Two columns, so the credit can never run into the one-liner. */
+.hero { display: grid; grid-template-columns: minmax(0, 1fr) var(--art); column-gap: 28px; align-items: stretch; --art: 313px; }
+.hero-text { display: flex; flex-direction: column; gap: 18px; min-width: 0; }
 h1 {
   font-family: var(--display); font-stretch: 112%; font-weight: 760;
   letter-spacing: -0.02em; line-height: 1.02; text-wrap: balance;
-  font-size: 128px; color: var(--ink);
+  font-size: 128px; color: var(--ink); white-space: nowrap;
 }
 h1 .accent { color: var(--accent); display: block; }
-/* The ghost art: in the free space right of the headline (line 1 ends at x 1158, line 2 at 1051, the
-   one-liner at 1256 from y 435), so it never touches text. */
-.hero { position: relative; }
-.art { position: absolute; right: 0; top: -6px; width: 313px; margin: 0; }
-.art .pic { width: 313px; height: 266px; border-radius: 14px; overflow: hidden; border: 2px solid var(--shot-edge); background: #000; }
-.art img { display: block; width: 100%; height: 100%; object-fit: cover; }
-.art figcaption { position: absolute; right: 0; top: calc(100% + 8px); white-space: nowrap;
-  font-size: 22px; line-height: 1.2; color: var(--ink-2); }
-.oneliner { font-size: 36px; line-height: 1.25; font-weight: 500; color: var(--ink); letter-spacing: -.005em; }
+.art { margin: 0; display: flex; flex-direction: column; gap: 8px; min-height: 0; }
+.art .pic { position: relative; flex: 1; min-height: 0; border-radius: 14px; overflow: hidden; border: 2px solid var(--shot-edge); background: #000; }
+.art img { position: absolute; inset: 0; display: block; width: 100%; height: 100%; object-fit: cover; }
+.art figcaption { text-align: right; white-space: nowrap; font-size: 22px; line-height: 1.2; color: var(--ink-2); }
+.oneliner { font-size: 32px; line-height: 1.25; font-weight: 500; color: var(--ink); letter-spacing: -.005em; text-wrap: balance; }
 
-/* ---------- 3. body: the spine, two rows so the section titles line up ---------- */
-.body { grid-template-rows: auto auto; row-gap: 24px; align-items: stretch; }
+/* ---------- 3. body: two columns on the spine ---------- */
+/* Left: how it works, with the two app screens as its last two steps. Right: the visitor's call to
+   action, then what works. Each column spreads its own sections, so both end on the same line. */
+.body { align-items: stretch; }
+.stack { display: flex; flex-direction: column; justify-content: space-between; gap: 24px; min-width: 0; }
 .col { min-height: 0; }
 
-/* Two real app screens, stacked in the space one used to take (656 x 499 px):
-   1. hero-working.png (2400 x 1500), crop x 0-1920 (the Activity panel is cut off), y 20-736: the bar,
-      the request and the first tool cards. 656 x 245 px.
-   2. hero-answer.png (2400 x 1500), crop x 60-2400, y 630-1470: the CLAUDE tag, the three-sentence answer
-      and the message box with the mic. 656 x 235.5 px. */
-.shot { display: flex; flex-direction: column; gap: 12px; }
-.shot .frames { display: flex; flex-direction: column; gap: 12px; }
-.shot .frame { position: relative; box-sizing: content-box; width: calc(var(--left) - 4px);
+/* Two real app screens (shots.mjs prints these numbers), hung to the column edge like the step numbers.
+   A 951 px wide cut shown 656 px wide: the app's 20 px text prints about 14 px tall (3.7 mm on A2).
+   1. img/app-steps.png (951 x 433): the bar in AUTO, the request, the first three tool cards.
+   2. img/app-answer.png (951 x 534): the CLAUDE tag, the answer, the message box with the mic. */
+.frame { position: relative; box-sizing: content-box; width: calc(var(--left) - 4px); margin: 12px 0 0 -62px;
   border-radius: 12px; overflow: hidden; border: 2px solid var(--shot-edge); background: #05070F; }
-.shot .frame.working { aspect-ratio: 1920 / 716; }
-.shot .frame.answer { aspect-ratio: 2340 / 840; }
-.shot img { position: absolute; display: block; height: auto; }
-.shot .working img { left: 0; top: calc(-20 / 716 * 100%); width: calc(2400 / 1920 * 100%); }
-.shot .answer img { left: calc(-60 / 2340 * 100%); top: calc(-630 / 840 * 100%); width: calc(2400 / 2340 * 100%); }
-/* The step label on each screen: top right, over the window controls (frame 1) or empty space (frame 2),
-   clear of the AUTO badge. Solid red, like the mic note, so it can't be mistaken for app UI. */
-.step-tag { position: absolute; right: 10px; top: 10px; font-family: var(--sans); font-size: 22px; line-height: 1.2;
-  font-weight: 700; letter-spacing: -.005em; color: var(--note-ink); background: var(--note-bg); border-radius: 8px; padding: 5px 12px 6px; }
-/* The mic button's centre is at (200, 1404) in hero-answer.png: 6.0 % x, 92.1 % y of its crop.
+.frame.doing { aspect-ratio: 951 / 433; }
+.frame.answered { aspect-ratio: 951 / 534; }
+.frame img { display: block; width: 100%; height: 100%; }
+/* The mic button's centre in app-answer.png, and its size (6.1 % of the width).
    (Ctrl+Shift+G only brings the window up and focuses the chat box, so the note does not mention it.) */
-.callout { position: absolute; left: 6%; top: 92.1%; width: 44px; height: 44px; transform: translate(-50%, -50%);
+.callout { position: absolute; left: 4.76%; top: 90.33%; width: 48px; height: 48px; transform: translate(-50%, -50%);
   border-radius: 50%; border: 3px solid var(--note-bg); pointer-events: none; }
 /* The note sits in the message box, right of the mic, and ends before the app's Send button
-   (Send starts at about 576 px into the frame). Solid red so it can't be mistaken for the app's cyan UI. */
+   (Send starts at 85.8 % of the frame). Solid red so it can't be mistaken for the app's cyan UI. */
 .callout .tag { position: absolute; left: calc(100% + 12px); top: 50%; transform: translateY(-50%); white-space: nowrap;
   font-family: var(--sans); font-size: 22px; line-height: 1.2; font-weight: 600; letter-spacing: -.005em;
   color: var(--note-ink); background: var(--note-bg); border-radius: 8px; padding: 5px 12px 6px; }
@@ -216,36 +210,29 @@ h1 .accent { color: var(--accent); display: block; }
 /* try it with me: the one call to action. An accent rule, no box, text flush on the spine. */
 .try { border-top: 3px solid var(--accent); padding-top: 20px; display: flex; flex-direction: column; }
 .try .title::after { display: none; }
-.steps { list-style: none; margin: 20px 0 0; display: flex; flex-direction: column; gap: 14px; }
+.steps { list-style: none; margin: 20px 0 0; display: flex; flex-direction: column; gap: 16px; }
 .steps > li { display: grid; grid-template-columns: 42px 1fr; column-gap: 16px; align-items: start; }
 /* numbered circles: only here, for the visitor's real sequence */
 .step-n { width: 42px; height: 42px; border-radius: 50%; border: 2.5px solid var(--accent); color: var(--accent);
   font-family: var(--mono); font-weight: 700; font-size: 22px; display: grid; place-items: center; line-height: 1; }
-.steps p { font-size: 26px; line-height: 1.3; font-weight: 500; padding-top: 4px; }
-.steps .phrase { margin-top: 8px; padding-top: 0; font-size: 32px; line-height: 1.25; font-weight: 600; color: var(--accent);
+.steps p { font-size: 28px; line-height: 1.3; font-weight: 500; padding-top: 2px; }
+.steps .phrase { margin-top: 8px; padding-top: 0; font-size: 36px; line-height: 1.25; font-weight: 600; color: var(--accent);
   letter-spacing: -.01em; text-wrap: balance; text-indent: -.4em; } /* the opening quote hangs, so the words line up */
 .ex { color: var(--accent); font-weight: 600; }
-.notes { margin-top: auto; padding-top: 14px; border-top: 2px solid var(--line); display: flex; flex-direction: column; gap: 8px; }
+.notes { margin-top: 22px; padding-top: 14px; border-top: 2px solid var(--line); display: flex; flex-direction: column; gap: 8px; }
 .notes p { font-size: 22px; line-height: 1.4; color: var(--ink-2); }
 .notes b { color: var(--ink); font-weight: 700; }
 
-/* how it works: the numbered-ref motif, [1] [2] [3], echoing the [6] in the trace */
-.how { display: flex; flex-direction: column; gap: 18px; }
-.flow { list-style: none; display: flex; flex-direction: column; gap: 20px; }
-.flow > li { display: grid; grid-template-columns: 48px 1fr; column-gap: 14px; align-items: baseline; }
+/* how it works: the numbered-ref motif, [1] to [4], echoing the [6] the app clicks by */
+.how { display: flex; flex-direction: column; gap: 16px; }
+.flow { list-style: none; display: flex; flex-direction: column; gap: 16px; }
+.flow > li { display: grid; grid-template-columns: 48px minmax(0, 1fr); column-gap: 14px; align-items: baseline; }
 .ref-n { font-family: var(--mono); font-size: 27px; font-weight: 800; color: var(--accent); letter-spacing: -.04em; line-height: 1.2; }
 .flow h3 { font-size: 27px; line-height: 1.2; font-weight: 700; letter-spacing: -.01em; }
 .flow p { font-size: 22px; line-height: 1.38; color: var(--ink-2); margin-top: 5px; }
 .tagword { font-family: var(--mono); font-size: 1em; font-weight: 700; letter-spacing: .04em; color: var(--ink); }
-
-/* a real tool trace, hung to the column edge */
-.trace { margin: 14px 0 0 -62px; background: var(--deck); border: 2px solid var(--line); border-radius: 12px;
-  padding: 12px 20px 10px; font-family: var(--mono); font-size: 22px; line-height: 1.45; letter-spacing: -.01em; font-variant-numeric: tabular-nums; }
-.trace .tr { display: grid; grid-template-columns: 9.9em 1fr; white-space: nowrap; }
-.trace .tool { color: var(--ink); font-weight: 600; }
-.trace .arg { color: var(--ink-2); }
-.trace .ref { color: var(--accent); font-weight: 800; }
-.trace svg { width: .95em; height: .95em; vertical-align: -.12em; margin-left: .35em; color: var(--ink-2); }
+.sample { font-family: var(--mono); font-size: 1em; font-weight: 600; letter-spacing: -.01em; color: var(--ink); white-space: nowrap; }
+.sample .ref { color: var(--accent); font-weight: 800; }
 
 /* what works, and what's next */
 .works { display: flex; flex-direction: column; gap: 18px; }
@@ -367,37 +354,56 @@ h1 .accent { color: var(--accent); display: block; }
       <svg class="gem" viewBox="0 0 200 300" aria-hidden="true"><use href="#gem"/></svg>
       <svg class="wordmark" viewBox="0 0 457 42" role="img" aria-label="Ghost-Prime"><title>GHOST-PRIME</title><path fill="url(#wmGrad)" d="M19.85 35.5Q11.09 35.5 6.7 31.81Q2.31 28.11 2.31 20.57Q2.31 15.63 4.59 12.31Q6.88 8.98 11.2 7.3Q15.53 5.62 21.59 5.62Q25.34 5.62 28.55 6.29Q31.76 6.97 34.16 8.31Q36.56 9.66 37.89 11.7Q39.22 13.74 39.22 16.47H30.91Q30.91 15.3 30.18 14.43Q29.46 13.56 28.2 13.02Q26.94 12.48 25.34 12.22Q23.73 11.96 21.95 11.96Q19.43 11.96 17.41 12.46Q15.4 12.96 13.98 13.98Q12.56 15.01 11.82 16.52Q11.08 18.04 11.08 20.05V21.06Q11.08 23.9 12.27 25.69Q13.45 27.48 15.73 28.32Q18 29.17 21.25 29.17Q24.21 29.17 26.38 28.63Q28.54 28.1 29.71 27.07Q30.88 26.03 30.88 24.61V24.37H20.78V18.87H39.26V35H34.27L33.46 31.54Q31.84 32.89 29.75 33.78Q27.67 34.67 25.19 35.09Q22.71 35.5 19.85 35.5ZM51.93 35V6.12H60.49V16.87H77.82V6.12H86.37V35H77.82V23.75H60.49V35ZM117.05 35.5Q111.24 35.5 106.98 33.73Q102.72 31.95 100.42 28.61Q98.11 25.27 98.11 20.57Q98.11 15.83 100.42 12.49Q102.72 9.15 106.98 7.38Q111.24 5.62 117.05 5.62Q122.93 5.62 127.17 7.38Q131.41 9.15 133.71 12.49Q136.02 15.83 136.02 20.57Q136.02 25.27 133.71 28.61Q131.41 31.95 127.17 33.73Q122.93 35.5 117.05 35.5ZM117.07 29.17Q119.33 29.17 121.19 28.61Q123.06 28.06 124.41 27Q125.77 25.95 126.5 24.43Q127.23 22.91 127.23 21.01V20.03Q127.23 18.14 126.5 16.63Q125.77 15.13 124.41 14.09Q123.06 13.05 121.19 12.5Q119.33 11.96 117.07 11.96Q114.8 11.96 112.94 12.5Q111.08 13.05 109.72 14.09Q108.37 15.13 107.64 16.63Q106.92 18.14 106.92 20.03V21.01Q106.92 22.91 107.64 24.43Q108.37 25.95 109.72 27Q111.08 28.06 112.94 28.61Q114.8 29.17 117.07 29.17ZM163.19 35.5Q159.67 35.5 156.61 35.08Q153.54 34.66 151.24 33.61Q148.94 32.56 147.64 30.67Q146.34 28.79 146.34 25.89Q146.34 25.81 146.34 25.67Q146.34 25.54 146.38 25.41H154.76Q154.72 25.57 154.71 25.76Q154.7 25.94 154.7 26.15Q154.7 27.43 155.67 28.17Q156.65 28.9 158.43 29.2Q160.21 29.5 162.57 29.5Q163.56 29.5 164.59 29.44Q165.62 29.38 166.59 29.23Q167.55 29.08 168.31 28.79Q169.08 28.5 169.54 28.05Q169.99 27.6 169.99 26.96Q169.99 26.05 169.03 25.52Q168.06 24.99 166.42 24.68Q164.77 24.36 162.73 24.11Q160.69 23.86 158.5 23.52Q156.31 23.17 154.26 22.56Q152.22 21.95 150.58 20.94Q148.93 19.93 147.97 18.34Q147 16.75 147 14.46Q147 12.17 148.16 10.5Q149.32 8.83 151.42 7.75Q153.51 6.67 156.37 6.14Q159.22 5.62 162.58 5.62Q166.01 5.62 168.8 6.15Q171.6 6.68 173.6 7.75Q175.6 8.82 176.68 10.44Q177.76 12.07 177.76 14.25V14.84H169.47V14.49Q169.47 13.62 168.71 12.94Q167.95 12.26 166.5 11.85Q165.06 11.44 162.99 11.44Q160.51 11.44 158.92 11.75Q157.32 12.06 156.57 12.6Q155.81 13.13 155.81 13.77Q155.81 14.62 156.77 15.12Q157.74 15.62 159.38 15.9Q161.03 16.19 163.07 16.44Q165.12 16.69 167.31 17.03Q169.5 17.38 171.54 17.95Q173.58 18.53 175.23 19.53Q176.87 20.53 177.84 22.05Q178.8 23.58 178.8 25.81Q178.8 29.28 176.79 31.42Q174.78 33.56 171.25 34.53Q167.73 35.5 163.19 35.5ZM200.06 35V13.01H187.55V6.12H221.12V13.01H208.61V35ZM230.12 26.68V20.26H243.39V26.68ZM254.92 35V6.12H277.21Q280.04 6.12 282.18 7.38Q284.31 8.63 285.5 10.84Q286.69 13.05 286.69 15.94Q286.69 18.85 285.48 21.09Q284.27 23.34 282.12 24.58Q279.96 25.82 277.13 25.82H263.47V35ZM263.47 19.48H274.75Q276.65 19.48 277.63 18.57Q278.61 17.66 278.61 15.98Q278.61 14.84 278.16 14.06Q277.72 13.28 276.86 12.87Q276.01 12.46 274.75 12.46H263.47ZM296.96 35V6.12H321Q324.15 6.12 326.22 7.42Q328.29 8.72 329.32 10.83Q330.36 12.95 330.36 15.45Q330.36 18.19 329.06 20.44Q327.76 22.69 325.14 23.99L331.05 35H321.4L316.61 25.39H305.51V35ZM305.51 19.08H318.2Q319.75 19.08 320.67 18.15Q321.59 17.22 321.59 15.69Q321.59 14.65 321.17 13.93Q320.76 13.21 320 12.83Q319.25 12.46 318.2 12.46H305.51ZM341.99 35V6.12H350.54V35ZM363.53 35V6.12H376.91L381.86 18.64Q382.18 19.43 382.58 20.6Q382.99 21.78 383.4 23.01Q383.81 24.24 384.11 25.2H384.41Q384.69 24.32 385.1 23.15Q385.5 21.98 385.92 20.78Q386.35 19.57 386.68 18.68L391.63 6.12H404.64V35H396.09V20.1Q396.09 19.2 396.11 18.11Q396.13 17.03 396.18 15.97Q396.22 14.92 396.24 14.15H395.9Q395.64 14.96 395.27 16.06Q394.9 17.16 394.53 18.24Q394.16 19.31 393.85 20.1L387.8 35H379.96L373.89 20.1Q373.47 18.99 373.06 17.85Q372.66 16.72 372.35 15.74Q372.05 14.77 371.84 14.15H371.5Q371.54 14.75 371.56 15.72Q371.58 16.7 371.6 17.83Q371.63 18.97 371.63 20.1V35ZM417.63 35V6.12H447.73V12.46H426.2V17.31H445.05V23.44H426.2V28.66H448.07V35Z"/></svg>
     </div>
-    <div class="event label">Rwanda Innovation Showcase · 29 Sep 2026</div>
+    <div class="event label">Rwanda Innovation Showcase · 29 Oct 2026</div>
   </header>
 
   <!-- 2. Tagline (DESIGN.md: "Use a computer just by talking.") + one-liner -->
   <section class="hero">
-    <h1>Use a computer <span class="accent">just by talking.</span></h1>
+    <div class="hero-text">
+      <h1>Use a computer <span class="accent">just by talking.</span></h1>
+      <p class="oneliner">A voice assistant that does the task for you, built on a school Chromebook.</p>
+    </div>
     <figure class="art">
       <div class="pic"><img src="img/ghost-art.png" alt="Ghost-Prime's ghost: a glowing red figure made of particles, from the app's intro video"></div>
       <figcaption>Art: AI-generated (Higgsfield)</figcaption>
     </figure>
-    <p class="oneliner">A voice assistant that does the task for you, built on a school Chromebook.</p>
   </section>
 
-  <!-- 3. Body on the spine. Row 1: the real app screen | the visitor call to action.
-       Row 2: how it works | what works, and what's next. -->
+  <!-- 3. Body on the spine, two columns. Left: how it works, illustrated with the two real app screens.
+       Right: the visitor call to action, then what works and what's next. -->
   <section class="body spine">
-    <figure class="shot col">
-      <div class="frames">
-        <div class="frame working">
-          <img src="../app-shots/hero-working.png" alt="Ghost-Prime in AUTO mode, working on the request to go to Wikipedia, search for photosynthesis and explain it in three simple sentences: a browser_navigate card to wikipedia.org and a browser_get_page card">
-          <span class="step-tag">1 · It does the steps</span>
-        </div>
-        <div class="frame answer">
-          <img src="../app-shots/hero-answer.png" alt="Ghost-Prime's answer, tagged CLAUDE: photosynthesis in three simple sentences, and the message box with the mic button">
-          <span class="step-tag">2 · It explains simply</span>
-          <div class="callout" aria-hidden="true"><span class="tag"><b>Mic button:</b> click, speak, click again</span></div>
-        </div>
-      </div>
-      <figcaption class="caption">The Ghost-Prime app during the photosynthesis demo.</figcaption>
-    </figure>
+    <div class="stack">
+    <div class="how col">
+      <h2 class="title">How it works</h2>
+      <ol class="flow">
+        <li><span class="ref-n">[1]</span><div>
+          <h3>You ask, by voice or by typing.</h3>
+          <p>Google turns your voice into text, unless offline voice is on.</p>
+        </div></li>
+        <li><span class="ref-n">[2]</span><div>
+          <h3>Claude plans the steps.</h3>
+          <p>Claude does the thinking in today’s demo, so every answer shows a <span class="tagword">CLAUDE</span> tag.</p>
+        </div></li>
+        <li><span class="ref-n">[3]</span><div>
+          <h3>The app does each step where you can see it.</h3>
+          <p>It reads the page as a numbered list: <span class="sample"><span class="ref">[6]</span> Search</span>.</p>
+          <div class="frame doing">
+            <img src="img/app-steps.png" alt="Ghost-Prime in AUTO mode, working on the request to go to Wikipedia, search for photosynthesis and explain it in three simple sentences. Three tool cards: browser_navigate to wikipedia.org, browser_get_page, and browser_fill with ref 6 and the value photosynthesis">
+          </div>
+        </div></li>
+        <li><span class="ref-n">[4]</span><div>
+          <h3>It explains simply.</h3>
+          <div class="frame answered">
+            <img src="img/app-answer.png" alt="Ghost-Prime's answer, tagged CLAUDE: photosynthesis in three simple sentences, and the message box with the mic button">
+            <div class="callout" aria-hidden="true"><span class="tag"><b>Mic button:</b> click, speak, click again</span></div>
+          </div>
+        </div></li>
+      </ol>
+      <p class="caption">The Ghost-Prime app during the photosynthesis demo.</p>
+    </div>
+    </div>
 
+    <div class="stack">
     <aside class="try col" aria-label="Try it with me">
       <h2 class="title">Try it with me</h2>
       <!-- I (the presenter) say or type every request: privacy + the free-tier daily limit
@@ -419,30 +425,6 @@ h1 .accent { color: var(--accent); display: block; }
         <p><b>Safety.</b> In PLAN mode it only looks and changes nothing. In AUTO it acts on its own, and there is no “Are you sure?” pop-up yet.</p>
       </div>
     </aside>
-
-    <div class="how col">
-      <h2 class="title">How it works</h2>
-      <ol class="flow">
-        <li><span class="ref-n">[1]</span><div>
-          <h3>You ask, by voice or by typing.</h3>
-          <p>Google turns your voice into text, unless offline voice is on.</p>
-        </div></li>
-        <li><span class="ref-n">[2]</span><div>
-          <h3>Claude plans the steps.</h3>
-          <p>Claude does the thinking in today’s demo, so every answer shows a <span class="tagword">CLAUDE</span> tag. Normally a router can also send quick questions to Google’s free Gemini.</p>
-        </div></li>
-        <li><span class="ref-n">[3]</span><div>
-          <h3>The app does each step where you can see it.</h3>
-          <p>It reads the page as a numbered list, then types and clicks:</p>
-          <div class="trace" role="img" aria-label="Tool trace: browser_navigate wikipedia.org; browser_get_page [6] Search Wikipedia (search); browser_fill [6] photosynthesis, Enter; browser_get_text Photosynthesis - Wikipedia">
-            <div class="tr"><span class="tool">browser_navigate</span><span class="arg">wikipedia.org</span></div>
-            <div class="tr"><span class="tool">browser_get_page</span><span class="arg"><span class="ref">[6]</span> Search Wikipedia (search)</span></div>
-            <div class="tr"><span class="tool">browser_fill</span><span class="arg"><span class="ref">[6]</span> "photosynthesis"<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 5v7a3 3 0 0 1-3 3H5"/><path d="M9 11l-4 4 4 4"/></svg></span></div>
-            <div class="tr"><span class="tool">browser_get_text</span><span class="arg">Photosynthesis - Wikipedia</span></div>
-          </div>
-        </div></li>
-      </ol>
-    </div>
 
     <div class="works col">
       <h2 class="title">What works, and what’s next</h2>
@@ -471,6 +453,7 @@ h1 .accent { color: var(--accent); display: block; }
         </li>
       </ul>
     </div>
+    </div>
   </section>
 
   <!-- 4. Who it's for (never "who it helps": no user study yet; no young children) -->
@@ -494,7 +477,7 @@ h1 .accent { color: var(--accent); display: block; }
   <footer class="foot spine">
     <div>
       <div class="who-made">Ivan Lucky KUNDWA</div>
-      <div class="affil">Grade 9<span class="sep">·</span>Ntare-louisenlund</div>
+      <div class="affil">Grade 9<span class="sep">·</span>Ntare Louisenlund School</div>
       <div class="credits">
         <!-- Authorship: change this so it says what you really did (FACTS.md section 7). -->
         <p>I designed it, decided what it should do, tested it, and used an AI coding assistant (Claude Code) to write much of the code.</p>

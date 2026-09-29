@@ -5,7 +5,7 @@
 //   poster-light.pdf  poster-light-a3.pdf  poster-dark.pdf  poster-dark-a3.pdf
 //   preview/poster-light.png  preview/poster-dark.png   (the whole sheet at 0.6x)
 // --detail     1:1 crops for checking small text: preview/poster-{theme}-detail-{part}.png, one per
-//              band (top, hero, shot, try, how, works, who, foot). Implies --png-only, so a detail
+//              band (top, hero, how, try, works, who, foot). Implies --png-only, so a detail
 //              pass never rewrites the print PDFs.
 // --print-png  A2 at 300 dpi (4959 x 7016 px, tagged 300 dpi): print/poster-{theme}-a2-300dpi.png. A fallback for a
 //              print shop whose preflight rejects the PDF: Chromium embeds the variable fonts as Type 3
@@ -112,11 +112,25 @@ try {
         if (last > end + 0.5) bad.push(`COLUMN overflows by ${Math.round(last - end)}px`)
         else bad.push(`(ok) column spare ${Math.round(end - last)}px`)
       }
+      // Two pieces of text must never sit on top of each other (the first poster printed the art credit
+      // over the one-liner: neither overflowed anything, so nothing above caught it).
+      const texts = [...document.querySelectorAll('.poster :is(h1, h2, h3, p, figcaption, .label, .chip, .when, .num, .what, .who-made, .affil)')].filter((e) => !e.closest('.frame'))
+      for (let i = 0; i < texts.length; i++) for (let j = i + 1; j < texts.length; j++) {
+        if (texts[i].contains(texts[j]) || texts[j].contains(texts[i])) continue
+        const a = texts[i].getBoundingClientRect(), b = texts[j].getBoundingClientRect()
+        const ox = Math.min(a.right, b.right) - Math.max(a.left, b.left), oy = Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top)
+        if (ox > 1 && oy > 1) bad.push(`TEXT OVERLAP "${texts[i].textContent.trim().slice(0, 24)}" and "${texts[j].textContent.trim().slice(0, 24)}"`)
+      }
+      // The two columns of the body must not run into each other (a picture wider than its column would).
+      for (const el of document.querySelectorAll('.body .stack:first-child *')) {
+        const edge = document.querySelector('.body .stack:last-child').getBoundingClientRect().left
+        if (el.getBoundingClientRect().right > edge - 8) { bad.push(`COLUMN CLASH ${el.tagName.toLowerCase()}.${el.className}`); break }
+      }
       // The band gaps: justify-content spreads the spare height between the five bands.
       const gaps = kids.slice(1).map((k, i) => Math.round(k.getBoundingClientRect().top - kids[i].getBoundingClientRect().bottom))
       bad.push(`(ok) band gaps ${gaps.join('/')}px`)
       const fonts = [...document.fonts].map((f) => `${f.family}:${f.status}`)
-      return { bad: bad.slice(0, 14), sheetH: sheet.height, fonts }
+      return { bad: bad.slice(0, 16), sheetH: sheet.height, fonts }
     })
     console.log(theme, 'fonts', overflow.fonts.join(' '))
     const real = overflow.bad.filter((x) => !x.startsWith('(ok)'))
@@ -129,7 +143,7 @@ try {
       tagDpi(png, 300) // a PNG with no pHYs opens at 72 ppi (175 x 248 cm) in Photoshop and most RIPs
       console.log('saved', png, '(300 dpi: print at 420 x 594 mm)')
     } else if (detail) {
-      const parts = { top: '.top', hero: '.hero', shot: '.shot', try: '.try', how: '.how', works: '.works', who: '.who', foot: '.foot' }
+      const parts = { top: '.top', hero: '.hero', how: '.how', try: '.try', works: '.works', who: '.who', foot: '.foot' }
       for (const [name, sel] of Object.entries(parts)) {
         const box = await page.locator(sel).first().boundingBox()
         if (!box) { failures++; console.log('DETAIL: no element for', sel); continue }
